@@ -1,0 +1,48 @@
+import SwiftUI
+
+@main
+struct SwiftTraderApp: App {
+    @FocusedValue(\.workspace) var workspace
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+        .defaultSize(width: 1200, height: 700)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Tab") {
+                    workspace?.addTab()
+                }
+                .keyboardShortcut("t")
+
+                Button("Close Tab") {
+                    if let ws = workspace, let id = ws.selectedTabID {
+                        if ws.tabs.count > 1 {
+                            ws.closeTab(id)
+                        } else {
+                            NSApp.keyWindow?.close()
+                        }
+                    }
+                }
+                .keyboardShortcut("w")
+            }
+
+            CommandMenu("Panels") {
+                Button(workspace?.showBottomPanel == true ? "Hide Bottom Panel" : "Show Bottom Panel") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        workspace?.showBottomPanel.toggle()
+                    }
+                }
+                .keyboardShortcut("y", modifiers: [.command, .shift])
+
+                Button(workspace?.showRightPanel == true ? "Hide Right Panel" : "Show Right Panel") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        workspace?.showRightPanel.toggle()
+                    }
+                }
+                .keyboardShortcut("0", modifiers: [.command, .option])
+            }
+        }
+    }
+}

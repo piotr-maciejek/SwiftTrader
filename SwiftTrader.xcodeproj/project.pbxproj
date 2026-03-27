@@ -1,0 +1,326 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A1000001 /* SwiftTraderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001; };
+		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002; };
+		A1000003 /* CandleBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003; };
+		A1000004 /* ForexAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004; };
+		A1000005 /* ForexWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005; };
+		A1000006 /* ChartViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000006; };
+		A1000007 /* ChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000007; };
+		A1000008 /* ChartTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000008; };
+		A1000009 /* ScrollWheelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000A; };
+		A100000A /* MarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000B; };
+		A100000B /* WorkspaceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000C; };
+		A100000C /* WindowAccessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000D; };
+		A100000D /* BottomPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000E; };
+		A100000E /* RightPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000F; };
+		A100000F /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010; };
+		A1000010 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011; };
+		A1000011 /* Position.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012; };
+		A1000012 /* TradingAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000013; };
+		A1000013 /* TradingWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014; };
+		A1000014 /* TradingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000015; };
+		A1000015 /* TradingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000016; };
+		A1000016 /* OrderEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000017; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A2000001 /* SwiftTraderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftTraderApp.swift; sourceTree = "<group>"; };
+		A2000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A2000003 /* CandleBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleBar.swift; sourceTree = "<group>"; };
+		A2000004 /* ForexAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForexAPIService.swift; sourceTree = "<group>"; };
+		A2000005 /* ForexWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForexWebSocketService.swift; sourceTree = "<group>"; };
+		A2000006 /* ChartViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartViewModel.swift; sourceTree = "<group>"; };
+		A2000007 /* ChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartView.swift; sourceTree = "<group>"; };
+		A2000008 /* ChartTransform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartTransform.swift; sourceTree = "<group>"; };
+		A2000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A200000A /* ScrollWheelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollWheelView.swift; sourceTree = "<group>"; };
+		A200000B /* MarketDataCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketDataCoordinator.swift; sourceTree = "<group>"; };
+		A200000C /* WorkspaceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceViewModel.swift; sourceTree = "<group>"; };
+		A200000D /* WindowAccessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowAccessor.swift; sourceTree = "<group>"; };
+		A200000E /* BottomPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomPanel.swift; sourceTree = "<group>"; };
+		A200000F /* RightPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RightPanel.swift; sourceTree = "<group>"; };
+		A2000010 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		A2000011 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A2000012 /* Position.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Position.swift; sourceTree = "<group>"; };
+		A2000013 /* TradingAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingAPIService.swift; sourceTree = "<group>"; };
+		A2000014 /* TradingWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingWebSocketService.swift; sourceTree = "<group>"; };
+		A2000015 /* TradingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingCoordinator.swift; sourceTree = "<group>"; };
+		A2000016 /* TradingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingViewModel.swift; sourceTree = "<group>"; };
+		A2000017 /* OrderEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrderEntryView.swift; sourceTree = "<group>"; };
+		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		A4000001 = {
+			isa = PBXGroup;
+			children = (
+				A4000002 /* SwiftTrader */,
+				A4000006 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A4000002 /* SwiftTrader */ = {
+			isa = PBXGroup;
+			children = (
+				A2000001 /* SwiftTraderApp.swift */,
+				A2000002 /* ContentView.swift */,
+				A2000009 /* Info.plist */,
+				A4000003 /* Models */,
+				A4000004 /* Services */,
+				A4000005 /* ViewModels */,
+				A4000007 /* Views */,
+			);
+			path = SwiftTrader;
+			sourceTree = "<group>";
+		};
+		A4000003 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A2000003 /* CandleBar.swift */,
+				A2000010 /* AppSettings.swift */,
+				A2000012 /* Position.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A4000004 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A2000004 /* ForexAPIService.swift */,
+				A2000005 /* ForexWebSocketService.swift */,
+				A200000B /* MarketDataCoordinator.swift */,
+				A2000013 /* TradingAPIService.swift */,
+				A2000014 /* TradingWebSocketService.swift */,
+				A2000015 /* TradingCoordinator.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		A4000005 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				A2000006 /* ChartViewModel.swift */,
+				A200000C /* WorkspaceViewModel.swift */,
+				A2000016 /* TradingViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		A4000006 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A3000001 /* SwiftTrader.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A4000007 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A2000007 /* ChartView.swift */,
+				A2000008 /* ChartTransform.swift */,
+				A200000A /* ScrollWheelView.swift */,
+				A200000D /* WindowAccessor.swift */,
+				A200000E /* BottomPanel.swift */,
+				A200000F /* RightPanel.swift */,
+				A2000011 /* SettingsView.swift */,
+				A2000017 /* OrderEntryView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A5000001 /* SwiftTrader */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A7000003 /* Build configuration list for PBXNativeTarget "SwiftTrader" */;
+			buildPhases = (
+				A6000001 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SwiftTrader;
+			productName = SwiftTrader;
+			productReference = A3000001 /* SwiftTrader.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A8000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = A7000001 /* Build configuration list for PBXProject "SwiftTrader" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A4000001;
+			productRefGroup = A4000006 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A5000001 /* SwiftTrader */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A6000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000001 /* SwiftTraderApp.swift in Sources */,
+				A1000002 /* ContentView.swift in Sources */,
+				A1000003 /* CandleBar.swift in Sources */,
+				A1000004 /* ForexAPIService.swift in Sources */,
+				A1000005 /* ForexWebSocketService.swift in Sources */,
+				A1000006 /* ChartViewModel.swift in Sources */,
+				A1000007 /* ChartView.swift in Sources */,
+				A1000008 /* ChartTransform.swift in Sources */,
+				A1000009 /* ScrollWheelView.swift in Sources */,
+				A100000A /* MarketDataCoordinator.swift in Sources */,
+				A100000B /* WorkspaceViewModel.swift in Sources */,
+				A100000C /* WindowAccessor.swift in Sources */,
+				A100000D /* BottomPanel.swift in Sources */,
+				A100000E /* RightPanel.swift in Sources */,
+				A100000F /* AppSettings.swift in Sources */,
+				A1000010 /* SettingsView.swift in Sources */,
+				A1000011 /* Position.swift in Sources */,
+				A1000012 /* TradingAPIService.swift in Sources */,
+				A1000013 /* TradingWebSocketService.swift in Sources */,
+				A1000014 /* TradingCoordinator.swift in Sources */,
+				A1000015 /* TradingViewModel.swift in Sources */,
+				A1000016 /* OrderEntryView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A9000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A9000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A9000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SwiftTrader/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSMainStoryboardFile = "";
+				INFOPLIST_KEY_NSPrincipalClass = "";
+				MARKETING_VERSION = 0.1.0;
+				CURRENT_PROJECT_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.trading.SwiftTrader;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A9000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SwiftTrader/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSMainStoryboardFile = "";
+				INFOPLIST_KEY_NSPrincipalClass = "";
+				MARKETING_VERSION = 0.1.0;
+				CURRENT_PROJECT_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.trading.SwiftTrader;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A7000001 /* Build configuration list for PBXProject "SwiftTrader" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A9000001 /* Debug */,
+				A9000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A7000003 /* Build configuration list for PBXNativeTarget "SwiftTrader" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A9000003 /* Debug */,
+				A9000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = A8000001 /* Project object */;
+}
