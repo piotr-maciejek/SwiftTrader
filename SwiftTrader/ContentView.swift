@@ -190,6 +190,11 @@ struct ContentView: View {
                 Text("Live")
                     .font(.caption)
                     .foregroundColor(.secondary)
+            } else if !vm.bars.isEmpty {
+                Circle().fill(.yellow).frame(width: 8, height: 8)
+                Text("Market Closed")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             } else {
                 Circle().fill(.red).frame(width: 8, height: 8)
                 Text("Disconnected")

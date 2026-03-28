@@ -33,6 +33,7 @@ final class ChartViewModel {
     private var coordinator: MarketDataCoordinator
     private var wsTask: Task<Void, Never>?
     private var hasStarted = false
+    private var isLoadingEarlier = false
 
     init(coordinator: MarketDataCoordinator = MarketDataCoordinator()) {
         self.coordinator = coordinator
@@ -40,7 +41,7 @@ final class ChartViewModel {
 
     func reconnect(port: Int) {
         stop()
-        coordinator = MarketDataCoordinator(port: port)
+        coordinator = MarketDataCoordinator(port: port, cache: coordinator.cache)
         hasStarted = false
         bars = []
         transform = ChartTransform()
@@ -80,9 +81,17 @@ final class ChartViewModel {
 
     private func reloadChart() {
         wsTask?.cancel()
-        bars = []
-        transform = ChartTransform()
+        isLoadingEarlier = false
+        let key = CandleCache.CacheKey(instrument: currentInstrument, period: currentPeriod)
         Task {
+            let cached = await coordinator.cache.getBars(for: key)
+            if !cached.isEmpty {
+                bars = cached
+                scrollToEnd()
+            } else {
+                bars = []
+                transform = ChartTransform()
+            }
             await loadHistory()
             connectWebSocket()
         }
@@ -92,6 +101,15 @@ final class ChartViewModel {
     private func loadHistoryWithRetry() async {
         let instrument = currentInstrument
         let period = currentPeriod
+
+        // Show cached bars immediately while waiting for server
+        let key = CandleCache.CacheKey(instrument: instrument, period: period)
+        let cached = await coordinator.cache.getBars(for: key)
+        if !cached.isEmpty && bars.isEmpty {
+            bars = cached
+            scrollToEnd()
+        }
+
         while !Task.isCancelled {
             guard instrument == currentInstrument, period == currentPeriod else { return }
             do {
@@ -119,7 +137,9 @@ final class ChartViewModel {
             error = nil
             scrollToEnd()
         } catch {
-            self.error = "Failed to load history: \(error.localizedDescription)"
+            if bars.isEmpty {
+                self.error = "Failed to load history: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -160,6 +180,7 @@ final class ChartViewModel {
                 bars.append(bar)
                 if autoScroll { advanceByOneCandle() }
             }
+            Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod) }
         }
     }
 
@@ -180,11 +201,43 @@ final class ChartViewModel {
     }
 
     /// Called by the interaction view when the user drags. Disables autoscroll
-    /// if the user scrolled away from the right edge.
+    /// if the user scrolled away from the right edge, and triggers loading
+    /// earlier bars when scrolling near the left edge.
     func onUserScroll() {
         let totalWidth = CGFloat(bars.count) * transform.candleSlotWidth
         let rightEdge = transform.xOffset + chartWidth
         let atEnd = rightEdge >= totalWidth - transform.candleSlotWidth * 2
         autoScroll = atEnd
+
+        // Scroll-back: load earlier bars when near the left edge
+        let startIndex = Int(floor(transform.xOffset / transform.candleSlotWidth))
+        if startIndex < 50 && !isLoadingEarlier && !bars.isEmpty {
+            Task { await loadEarlierBars() }
+        }
+    }
+
+    private func loadEarlierBars() async {
+        isLoadingEarlier = true
+        let instrument = currentInstrument
+        let period = currentPeriod
+        let oldCount = bars.count
+
+        do {
+            let allBars = try await coordinator.fetchEarlierCandles(
+                instrument: instrument, period: period, count: 1000
+            )
+            guard instrument == currentInstrument, period == currentPeriod else {
+                isLoadingEarlier = false
+                return
+            }
+            let addedCount = allBars.count - oldCount
+            if addedCount > 0 {
+                bars = allBars
+                // Shift scroll offset so the same candles stay in view
+                transform.xOffset += CGFloat(addedCount) * transform.candleSlotWidth
+            }
+        } catch {}
+
+        isLoadingEarlier = false
     }
 }

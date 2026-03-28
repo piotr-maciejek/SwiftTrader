@@ -214,21 +214,41 @@ struct ChartView: View {
     private func drawTimeAxis(context: inout GraphicsContext, chartWidth: CGFloat, chartHeight: CGFloat, visibleRange: Range<Int>) {
         guard !visibleRange.isEmpty else { return }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm"
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "dd MMM yy"
+        let calendar = Calendar.current
 
         // Show a time label roughly every 80px
         let step = max(1, Int(80 / transform.candleSlotWidth))
 
+        var lastDay: Int?
         for i in stride(from: visibleRange.lowerBound, to: visibleRange.upperBound, by: step) {
             let x = xForBar(index: i)
             guard x > 0 && x < chartWidth else { continue }
 
-            let text = Text(formatter.string(from: bars[i].date))
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundColor(axisTextColor)
-            let resolved = context.resolve(text)
-            context.draw(resolved, at: CGPoint(x: x, y: chartHeight + 6), anchor: .top)
+            let date = bars[i].date
+            let day = calendar.component(.day, from: date)
+            let dayChanged = lastDay != nil && day != lastDay
+            lastDay = day
+
+            if dayChanged {
+                // Show date on top, time below
+                let dateLine = Text(dateFormatter.string(from: date))
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundColor(axisTextColor)
+                let timeLine = Text(timeFormatter.string(from: date))
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundColor(axisTextColor)
+                context.draw(context.resolve(dateLine), at: CGPoint(x: x, y: chartHeight + 3), anchor: .top)
+                context.draw(context.resolve(timeLine), at: CGPoint(x: x, y: chartHeight + 14), anchor: .top)
+            } else {
+                let text = Text(timeFormatter.string(from: date))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(axisTextColor)
+                context.draw(context.resolve(text), at: CGPoint(x: x, y: chartHeight + 6), anchor: .top)
+            }
         }
     }
 

@@ -29,6 +29,7 @@
 		A1000014 /* TradingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000015; };
 		A1000015 /* TradingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000016; };
 		A1000016 /* OrderEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000017; };
+		A1000017 /* CandleCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000018; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -55,6 +56,7 @@
 		A2000015 /* TradingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingCoordinator.swift; sourceTree = "<group>"; };
 		A2000016 /* TradingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingViewModel.swift; sourceTree = "<group>"; };
 		A2000017 /* OrderEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrderEntryView.swift; sourceTree = "<group>"; };
+		A2000018 /* CandleCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCache.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -100,6 +102,7 @@
 				A2000013 /* TradingAPIService.swift */,
 				A2000014 /* TradingWebSocketService.swift */,
 				A2000015 /* TradingCoordinator.swift */,
+				A2000018 /* CandleCache.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -210,6 +213,7 @@
 				A1000014 /* TradingCoordinator.swift in Sources */,
 				A1000015 /* TradingViewModel.swift in Sources */,
 				A1000016 /* OrderEntryView.swift in Sources */,
+				A1000017 /* CandleCache.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -7,13 +7,17 @@ actor ForexAPIService {
         self.baseURL = baseURL
     }
 
-    func fetchHistory(instrument: String = "EURUSD", period: String = "ONE_MIN", count: Int = 200) async throws -> [CandleBar] {
+    func fetchHistory(instrument: String = "EURUSD", period: String = "ONE_MIN", count: Int = 200, before: Int64? = nil) async throws -> [CandleBar] {
         var components = URLComponents(url: baseURL.appendingPathComponent("/api/v1/history"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "instrument", value: instrument),
             URLQueryItem(name: "period", value: period),
             URLQueryItem(name: "count", value: String(count)),
         ]
+        if let before {
+            queryItems.append(URLQueryItem(name: "before", value: String(before)))
+        }
+        components.queryItems = queryItems
 
         let (data, response) = try await URLSession.shared.data(from: components.url!)
 

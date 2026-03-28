@@ -10,6 +10,7 @@ final class WorkspaceViewModel {
 
     let settings = AppSettings.shared
     let trading: TradingViewModel
+    private let candleCache = CandleCache()
     var tabs: [Tab] = []
     var selectedTabID: UUID?
     var showBottomPanel = false
@@ -27,7 +28,7 @@ final class WorkspaceViewModel {
     }
 
     func addTab() {
-        let vm = ChartViewModel(coordinator: MarketDataCoordinator(port: settings.port))
+        let vm = ChartViewModel(coordinator: MarketDataCoordinator(port: settings.port, cache: candleCache))
         if let current = selectedTab?.viewModel {
             vm.currentInstrument = current.currentInstrument
             vm.currentPeriod = current.currentPeriod
