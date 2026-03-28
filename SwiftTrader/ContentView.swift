@@ -16,7 +16,12 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     if let tab = workspace.selectedTab {
-                        chartContent(for: tab)
+                        switch tab.content {
+                        case .chart(let vm):
+                            chartContent(vm: vm, tabID: tab.id)
+                        case .correlation(let vm):
+                            correlationContent(vm: vm)
+                        }
                     }
 
                     if workspace.showBottomPanel {
@@ -84,8 +89,13 @@ struct ContentView: View {
     private func tabButton(for tab: WorkspaceViewModel.Tab) -> some View {
         let isSelected = tab.id == workspace.selectedTabID
 
+        let label: String = switch tab.content {
+        case .chart(let vm): formatInstrument(vm.currentInstrument)
+        case .correlation(let vm): "\(vm.currency) ⊞"
+        }
+
         return HStack(spacing: 4) {
-            Text(formatInstrument(tab.viewModel.currentInstrument))
+            Text(label)
                 .font(.system(size: 11))
                 .lineLimit(1)
 
@@ -144,12 +154,10 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Per-tab chart content
+    // MARK: - Chart tab content
 
     @ViewBuilder
-    private func chartContent(for tab: WorkspaceViewModel.Tab) -> some View {
-        let vm = tab.viewModel
-
+    private func chartContent(vm: ChartViewModel, tabID: UUID) -> some View {
         // Header
         HStack {
             Picker("", selection: Binding(
@@ -173,6 +181,17 @@ struct ContentView: View {
             }
             .pickerStyle(.menu)
             .fixedSize()
+
+            // Correlation screen buttons
+            ForEach(CurrencyCorrelation.currencies(from: vm.currentInstrument), id: \.self) { currency in
+                Button("\(currency) \u{229e}") {
+                    workspace.addCorrelationTab(currency: currency)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .help("\(currency) Correlation")
+            }
 
             if let last = vm.bars.last {
                 Text(String(format: "%.5f", last.close))
@@ -228,7 +247,37 @@ struct ContentView: View {
                 }
             }
         }
-        .id(tab.id)
+        .id(tabID)
+    }
+
+    // MARK: - Correlation tab content
+
+    @ViewBuilder
+    private func correlationContent(vm: CorrelationViewModel) -> some View {
+        // Header: currency label + period picker only
+        HStack {
+            Text("\(vm.currency) Correlation")
+                .font(.system(size: 13, weight: .semibold))
+
+            Picker("", selection: Binding(
+                get: { vm.currentPeriod },
+                set: { vm.switchPeriod($0) }
+            )) {
+                ForEach(ChartViewModel.availablePeriods, id: \.value) { period in
+                    Text(period.label).tag(period.value)
+                }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+
+        Divider()
+
+        CorrelationView(viewModel: vm)
     }
 
     // MARK: - Trading controls
@@ -313,11 +362,4 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Helpers
-
-    private func formatInstrument(_ instrument: String) -> String {
-        guard instrument.count == 6 else { return instrument }
-        let idx = instrument.index(instrument.startIndex, offsetBy: 3)
-        return "\(instrument[..<idx])/\(instrument[idx...])"
-    }
 }

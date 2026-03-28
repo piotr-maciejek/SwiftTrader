@@ -32,6 +32,7 @@ final class ChartViewModel {
 
     private var coordinator: MarketDataCoordinator
     private var wsTask: Task<Void, Never>?
+    private var reloadTask: Task<Void, Never>?
     private var hasStarted = false
     private var isLoadingEarlier = false
 
@@ -79,11 +80,17 @@ final class ChartViewModel {
         reloadChart()
     }
 
+    func reloadCurrentChart() {
+        reloadChart()
+    }
+
     private func reloadChart() {
+        reloadTask?.cancel()
         wsTask?.cancel()
         isLoadingEarlier = false
         let key = CandleCache.CacheKey(instrument: currentInstrument, period: currentPeriod)
-        Task {
+        connectWebSocket()
+        reloadTask = Task {
             let cached = await coordinator.cache.getBars(for: key)
             if !cached.isEmpty {
                 bars = cached
@@ -92,8 +99,7 @@ final class ChartViewModel {
                 bars = []
                 transform = ChartTransform()
             }
-            await loadHistory()
-            connectWebSocket()
+            await loadHistoryWithRetry()
         }
     }
 
@@ -105,6 +111,7 @@ final class ChartViewModel {
         // Show cached bars immediately while waiting for server
         let key = CandleCache.CacheKey(instrument: instrument, period: period)
         let cached = await coordinator.cache.getBars(for: key)
+        if Task.isCancelled { return }
         if !cached.isEmpty && bars.isEmpty {
             bars = cached
             scrollToEnd()
@@ -114,6 +121,7 @@ final class ChartViewModel {
             guard instrument == currentInstrument, period == currentPeriod else { return }
             do {
                 let history = try await coordinator.fetchCandles(instrument: instrument, period: period, count: 1000)
+                if Task.isCancelled { return }
                 guard instrument == currentInstrument, period == currentPeriod else { return }
                 if !history.isEmpty {
                     bars = history
@@ -121,6 +129,8 @@ final class ChartViewModel {
                     scrollToEnd()
                     return
                 }
+            } catch is CancellationError {
+                return
             } catch {}
             try? await Task.sleep(for: .seconds(3))
         }
@@ -195,6 +205,8 @@ final class ChartViewModel {
     }
 
     func stop() {
+        reloadTask?.cancel()
+        reloadTask = nil
         wsTask?.cancel()
         wsTask = nil
         isConnected = false

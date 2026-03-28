@@ -75,11 +75,6 @@ struct OrderEntryView: View {
         return currentPrice + offset
     }
 
-    private func formatInstrument(_ instrument: String) -> String {
-        guard instrument.count == 6 else { return instrument }
-        let idx = instrument.index(instrument.startIndex, offsetBy: 3)
-        return "\(instrument[..<idx])/\(instrument[idx...])"
-    }
 }
 
 private struct LabeledField: View {

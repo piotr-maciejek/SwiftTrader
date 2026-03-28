@@ -30,6 +30,9 @@
 		A1000015 /* TradingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000016; };
 		A1000016 /* OrderEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000017; };
 		A1000017 /* CandleCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000018; };
+		A1000018 /* CurrencyCorrelation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000019; };
+		A1000019 /* CorrelationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001A; };
+		A100001A /* CorrelationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001B; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +60,9 @@
 		A2000016 /* TradingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingViewModel.swift; sourceTree = "<group>"; };
 		A2000017 /* OrderEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrderEntryView.swift; sourceTree = "<group>"; };
 		A2000018 /* CandleCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCache.swift; sourceTree = "<group>"; };
+		A2000019 /* CurrencyCorrelation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrencyCorrelation.swift; sourceTree = "<group>"; };
+		A200001A /* CorrelationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrelationViewModel.swift; sourceTree = "<group>"; };
+		A200001B /* CorrelationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrelationView.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -89,6 +95,7 @@
 				A2000003 /* CandleBar.swift */,
 				A2000010 /* AppSettings.swift */,
 				A2000012 /* Position.swift */,
+				A2000019 /* CurrencyCorrelation.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -113,6 +120,7 @@
 				A2000006 /* ChartViewModel.swift */,
 				A200000C /* WorkspaceViewModel.swift */,
 				A2000016 /* TradingViewModel.swift */,
+				A200001A /* CorrelationViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -136,6 +144,7 @@
 				A200000F /* RightPanel.swift */,
 				A2000011 /* SettingsView.swift */,
 				A2000017 /* OrderEntryView.swift */,
+				A200001B /* CorrelationView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -214,6 +223,9 @@
 				A1000015 /* TradingViewModel.swift in Sources */,
 				A1000016 /* OrderEntryView.swift in Sources */,
 				A1000017 /* CandleCache.swift in Sources */,
+				A1000018 /* CurrencyCorrelation.swift in Sources */,
+				A1000019 /* CorrelationViewModel.swift in Sources */,
+				A100001A /* CorrelationView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
