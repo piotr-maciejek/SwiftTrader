@@ -59,6 +59,18 @@ struct ContentView: View {
             }
             .buttonStyle(.borderless)
             .help("New Tab (⌘T)")
+            .dropDestination(for: String.self) { items, _ in
+                guard let draggedIDString = items.first,
+                      let draggedID = UUID(uuidString: draggedIDString),
+                      let index = workspace.tabs.firstIndex(where: { $0.id == draggedID }),
+                      index != workspace.tabs.count - 1
+                else { return false }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    let tab = workspace.tabs.remove(at: index)
+                    workspace.tabs.append(tab)
+                }
+                return true
+            }
 
             Spacer()
 
@@ -89,9 +101,12 @@ struct ContentView: View {
     private func tabButton(for tab: WorkspaceViewModel.Tab) -> some View {
         let isSelected = tab.id == workspace.selectedTabID
 
+        let periodLabel = { (p: String) in
+            ChartViewModel.availablePeriods.first { $0.value == p }?.label ?? p
+        }
         let label: String = switch tab.content {
-        case .chart(let vm): formatInstrument(vm.currentInstrument)
-        case .correlation(let vm): "\(vm.currency) ⊞"
+        case .chart(let vm): "\(formatInstrument(vm.currentInstrument)) \(periodLabel(vm.currentPeriod))"
+        case .correlation(let vm): "\(vm.currency) ⊞ \(periodLabel(vm.currentPeriod))"
         }
 
         return HStack(spacing: 4) {
@@ -118,6 +133,16 @@ struct ContentView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture { workspace.selectTab(tab.id) }
+        .draggable(tab.id.uuidString)
+        .dropDestination(for: String.self) { items, _ in
+            guard let draggedIDString = items.first,
+                  let draggedID = UUID(uuidString: draggedIDString)
+            else { return false }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                workspace.moveTab(id: draggedID, beforeID: tab.id)
+            }
+            return true
+        }
     }
 
     // MARK: - Panel toggles

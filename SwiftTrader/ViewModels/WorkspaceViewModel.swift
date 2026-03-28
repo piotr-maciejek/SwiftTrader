@@ -108,6 +108,16 @@ final class WorkspaceViewModel {
     func selectTab(_ id: UUID) {
         selectedTabID = id
     }
+
+    func moveTab(id: UUID, beforeID: UUID) {
+        guard id != beforeID,
+              let _ = tabs.firstIndex(where: { $0.id == id }),
+              let _ = tabs.firstIndex(where: { $0.id == beforeID })
+        else { return }
+        let tab = tabs.remove(at: tabs.firstIndex(where: { $0.id == id })!)
+        let insertIndex = tabs.firstIndex(where: { $0.id == beforeID }) ?? tabs.endIndex
+        tabs.insert(tab, at: insertIndex)
+    }
 }
 
 // MARK: - FocusedValue support for menu commands
