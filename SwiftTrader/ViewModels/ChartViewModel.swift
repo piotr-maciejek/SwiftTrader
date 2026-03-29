@@ -13,6 +13,7 @@ final class ChartViewModel {
     var currentPeriod = "FIFTEEN_MINS"
     var availableInstruments: [String] = ["EURUSD"]
     var showSessions = true
+    var showVolume = true
 
     static let availablePeriods: [(value: String, label: String)] = [
         ("ONE_SEC", "1s"),

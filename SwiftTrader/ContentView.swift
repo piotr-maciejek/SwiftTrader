@@ -228,6 +228,14 @@ struct ContentView: View {
             .buttonStyle(.borderless)
             .help("Market Sessions")
 
+            Button(action: { vm.showVolume.toggle() }) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showVolume ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Volume")
+
             Divider().frame(height: 16)
 
             // Trading controls
@@ -266,7 +274,8 @@ struct ContentView: View {
             ),
             onChartWidthChanged: { vm.chartWidth = $0 },
             onUserDrag: { vm.onUserScroll() },
-            showSessions: vm.showSessions
+            showSessions: vm.showSessions,
+            showVolume: vm.showVolume
         )
         .overlay {
             if vm.bars.isEmpty {
@@ -309,6 +318,14 @@ struct ContentView: View {
             }
             .buttonStyle(.borderless)
             .help("Market Sessions")
+
+            Button(action: { vm.showVolume.toggle() }) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showVolume ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Volume")
 
             Spacer()
         }

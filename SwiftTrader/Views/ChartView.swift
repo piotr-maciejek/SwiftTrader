@@ -6,6 +6,7 @@ struct ChartView: View {
     var onChartWidthChanged: ((CGFloat) -> Void)?
     var onUserDrag: (() -> Void)?
     var showSessions: Bool = true
+    var showVolume: Bool = true
     @State private var crosshair: CrosshairState? = nil
 
     // Layout constants
@@ -23,7 +24,9 @@ struct ChartView: View {
     var body: some View {
         GeometryReader { geo in
             let chartWidth = geo.size.width - priceAxisWidth
-            let chartHeight = geo.size.height - timeAxisHeight
+            let totalHeight = geo.size.height - timeAxisHeight
+            let volumeHeight: CGFloat = showVolume ? totalHeight * 0.2 : 0
+            let chartHeight = totalHeight - volumeHeight
 
             ZStack(alignment: .topLeading) {
                 // Main chart canvas
@@ -32,7 +35,7 @@ struct ChartView: View {
                     let priceRange = priceRange(for: visibleRange)
 
                     // Clip chart content so candles/grid don't bleed into the price axis
-                    let chartClip = Path(CGRect(x: 0, y: 0, width: chartWidth, height: chartHeight))
+                    let chartClip = Path(CGRect(x: 0, y: 0, width: chartWidth, height: chartHeight + volumeHeight))
                     var chartContext = context
                     chartContext.clip(to: chartClip)
 
@@ -42,8 +45,11 @@ struct ChartView: View {
                     }
                     drawCandles(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange, priceRange: priceRange)
                     drawCurrentPriceLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    if showVolume {
+                        drawVolumeBars(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, volumeHeight: volumeHeight, visibleRange: visibleRange)
+                    }
                     if let ch = crosshair, !bars.isEmpty {
-                        drawCrosshairLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, crosshair: ch)
+                        drawCrosshairLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, volumeHeight: volumeHeight, crosshair: ch)
                     }
 
                     // Price axis and time axis drawn unclipped so they render in their reserved areas
@@ -63,7 +69,7 @@ struct ChartView: View {
                         onUserDrag: onUserDrag,
                         crosshair: $crosshair
                     )
-                    .frame(width: chartWidth, height: chartHeight)
+                    .frame(width: chartWidth, height: chartHeight + volumeHeight)
                 }
                 .onAppear {
                     onChartWidthChanged?(chartWidth)
@@ -332,6 +338,7 @@ struct ChartView: View {
         context: inout GraphicsContext,
         chartWidth: CGFloat,
         chartHeight: CGFloat,
+        volumeHeight: CGFloat = 0,
         crosshair: CrosshairState
     ) {
         let color = Color.white.opacity(0.6)
@@ -339,13 +346,13 @@ struct ChartView: View {
         let clampedY = min(max(crosshair.mouseY, 0), chartHeight)
         let snappedX = xForBar(index: crosshair.barIndex)
 
-        // Vertical line (snapped to candle center)
+        // Vertical line (snapped to candle center, extends through volume area)
         var vPath = Path()
         vPath.move(to: CGPoint(x: snappedX, y: 0))
-        vPath.addLine(to: CGPoint(x: snappedX, y: chartHeight))
+        vPath.addLine(to: CGPoint(x: snappedX, y: chartHeight + volumeHeight))
         context.stroke(vPath, with: .color(color), style: style)
 
-        // Horizontal line (follows mouse)
+        // Horizontal line (follows mouse, candle area only)
         var hPath = Path()
         hPath.move(to: CGPoint(x: 0, y: clampedY))
         hPath.addLine(to: CGPoint(x: chartWidth, y: clampedY))
@@ -395,6 +402,49 @@ struct ChartView: View {
         )
         context.fill(Path(roundedRect: timePill, cornerRadius: 3), with: .color(pillColor))
         context.draw(resolvedTime, at: CGPoint(x: snappedX, y: chartHeight + 4 + timeSize.height / 2), anchor: .center)
+    }
+
+    // MARK: - Volume
+
+    private func drawVolumeBars(
+        context: inout GraphicsContext,
+        chartWidth: CGFloat,
+        chartHeight: CGFloat,
+        volumeHeight: CGFloat,
+        visibleRange: Range<Int>
+    ) {
+        guard !visibleRange.isEmpty, volumeHeight > 0 else { return }
+
+        // Separator line between candle area and volume pane
+        var sepPath = Path()
+        sepPath.move(to: CGPoint(x: 0, y: chartHeight))
+        sepPath.addLine(to: CGPoint(x: chartWidth, y: chartHeight))
+        context.stroke(sepPath, with: .color(gridColor), lineWidth: 0.5)
+
+        // Find max volume for scaling
+        var maxVol = 0.0
+        for i in visibleRange {
+            maxVol = max(maxVol, bars[i].volume)
+        }
+        guard maxVol > 0 else { return }
+
+        let bodyWidth = transform.candleBodyWidth
+        let volumeBottom = chartHeight + volumeHeight
+
+        for i in visibleRange {
+            let bar = bars[i]
+            let centerX = xForBar(index: i)
+            let barHeight = CGFloat(bar.volume / maxVol) * (volumeHeight - 2) // 2px top padding
+            let color = bar.isBullish ? bullishColor.opacity(0.4) : bearishColor.opacity(0.4)
+
+            let rect = CGRect(
+                x: centerX - bodyWidth / 2,
+                y: volumeBottom - barHeight,
+                width: bodyWidth,
+                height: barHeight
+            )
+            context.fill(Path(rect), with: .color(color))
+        }
     }
 
     // MARK: - Helpers

@@ -14,6 +14,13 @@ final class CorrelationViewModel {
             }
         }
     }
+    var showVolume = true {
+        didSet {
+            for vm in chartViewModels {
+                vm.showVolume = showVolume
+            }
+        }
+    }
 
     init(currency: String, period: String, port: Int, cache: CandleCache) {
         self.currency = currency
