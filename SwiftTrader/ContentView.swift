@@ -207,6 +207,8 @@ struct ContentView: View {
             .pickerStyle(.menu)
             .fixedSize()
 
+            Divider().frame(height: 16)
+
             // Correlation screen buttons
             ForEach(CurrencyCorrelation.currencies(from: vm.currentInstrument), id: \.self) { currency in
                 Button("\(currency) \u{229e}") {
@@ -226,11 +228,7 @@ struct ContentView: View {
             .buttonStyle(.borderless)
             .help("Market Sessions")
 
-            if let last = vm.bars.last {
-                Text(String(format: "%.5f", last.close))
-                    .font(.system(.title2, design: .monospaced))
-                    .foregroundColor(last.close >= last.open ? .green : .red)
-            }
+            Divider().frame(height: 16)
 
             // Trading controls
             tradingControls(vm: vm)
