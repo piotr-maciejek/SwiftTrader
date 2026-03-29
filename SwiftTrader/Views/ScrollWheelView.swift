@@ -70,10 +70,14 @@ struct ChartInteractionView: NSViewRepresentable {
             trackingAreas.forEach { removeTrackingArea($0) }
             let area = NSTrackingArea(
                 rect: bounds,
-                options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
+                options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .cursorUpdate],
                 owner: self, userInfo: nil
             )
             addTrackingArea(area)
+        }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .crosshair)
         }
 
         override func scrollWheel(with event: NSEvent) {
@@ -118,12 +122,9 @@ struct ChartInteractionView: NSViewRepresentable {
             coord.crosshair.wrappedValue = CrosshairState(barIndex: barIndex, mouseY: flippedY)
         }
 
-        override func mouseEntered(with event: NSEvent) {
-            NSCursor.crosshair.push()
-        }
+        override func mouseEntered(with event: NSEvent) {}
 
         override func mouseExited(with event: NSEvent) {
-            NSCursor.pop()
             coordinator?.crosshair.wrappedValue = nil
         }
     }
