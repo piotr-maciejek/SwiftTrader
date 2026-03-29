@@ -11,7 +11,7 @@ enum CurrencyCorrelation {
     /// Correlation pairs for each currency.
     static let pairs: [String: [String]] = [
         "EUR": ["EURUSD", "EURJPY", "EURGBP", "EURCHF", "EURAUD", "EURCAD"],
-        "USD": ["USDJPY", "GBPUSD", "AUDUSD", "USDCAD", "USDCHF", "EURUSD"],
+        "USD": ["EURUSD", "USDJPY", "GBPUSD", "AUDUSD", "USDCAD", "USDCHF"],
     ]
 
     /// Extract currency codes from an instrument that have correlation mappings.
@@ -20,5 +20,11 @@ enum CurrencyCorrelation {
         let base = String(instrument.prefix(3))
         let quote = String(instrument.suffix(3))
         return [base, quote].filter { pairs[$0] != nil }
+    }
+
+    /// Returns true if the currency is in the quote position (inverse correlation).
+    static func isInverse(currency: String, instrument: String) -> Bool {
+        guard instrument.count == 6 else { return false }
+        return String(instrument.suffix(3)) == currency
     }
 }

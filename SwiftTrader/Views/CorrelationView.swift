@@ -15,7 +15,11 @@ struct CorrelationView: View {
                         if index < viewModel.chartViewModels.count {
                             correlationCell(
                                 vm: viewModel.chartViewModels[index],
-                                instrument: viewModel.instruments[index]
+                                instrument: viewModel.instruments[index],
+                                inverse: CurrencyCorrelation.isInverse(
+                                    currency: viewModel.currency,
+                                    instrument: viewModel.instruments[index]
+                                )
                             )
                         }
                     }
@@ -25,7 +29,7 @@ struct CorrelationView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private func correlationCell(vm: ChartViewModel, instrument: String) -> some View {
+    private func correlationCell(vm: ChartViewModel, instrument: String, inverse: Bool = false) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
                 Text(formatInstrument(instrument))
@@ -64,7 +68,10 @@ struct CorrelationView: View {
                 }
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(inverse
+            ? Color(red: 0.15, green: 0.15, blue: 0.25)
+            : Color(nsColor: .controlBackgroundColor)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.primary.opacity(0.12)))
     }
