@@ -35,7 +35,19 @@
 		A100001A /* CorrelationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001B; };
 		A100001B /* MarketSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001C; };
 		A100001C /* SessionCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001D; };
+		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001; };
+		B1000002 /* CandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B4000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A8000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A5000001;
+			remoteInfo = SwiftTrader;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		A2000001 /* SwiftTraderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftTraderApp.swift; sourceTree = "<group>"; };
@@ -68,6 +80,9 @@
 		A200001C /* MarketSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketSession.swift; sourceTree = "<group>"; };
 		A200001D /* SessionCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculator.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
+		B2000002 /* CandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCacheTests.swift; sourceTree = "<group>"; };
+		B3000001 /* SwiftTraderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SwiftTraderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -75,6 +90,7 @@
 			isa = PBXGroup;
 			children = (
 				A4000002 /* SwiftTrader */,
+				B4000002 /* SwiftTraderTests */,
 				A4000006 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -135,6 +151,7 @@
 			isa = PBXGroup;
 			children = (
 				A3000001 /* SwiftTrader.app */,
+				B3000001 /* SwiftTraderTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -155,6 +172,15 @@
 			path = Views;
 			sourceTree = "<group>";
 		};
+		B4000002 /* SwiftTraderTests */ = {
+			isa = PBXGroup;
+			children = (
+				B2000001 /* SessionCalculatorTests.swift */,
+				B2000002 /* CandleCacheTests.swift */,
+			);
+			path = SwiftTraderTests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -172,6 +198,22 @@
 			productName = SwiftTrader;
 			productReference = A3000001 /* SwiftTrader.app */;
 			productType = "com.apple.product-type.application";
+		};
+		B5000001 /* SwiftTraderTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B7000001 /* Build configuration list for PBXNativeTarget "SwiftTraderTests" */;
+			buildPhases = (
+				B6000001 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B4000003 /* PBXTargetDependency */,
+			);
+			name = SwiftTraderTests;
+			productName = SwiftTraderTests;
+			productReference = B3000001 /* SwiftTraderTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -197,6 +239,7 @@
 			projectRoot = "";
 			targets = (
 				A5000001 /* SwiftTrader */,
+				B5000001 /* SwiftTraderTests */,
 			);
 		};
 /* End PBXProject section */
@@ -237,7 +280,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B6000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B1000001 /* SessionCalculatorTests.swift in Sources */,
+				B1000002 /* CandleCacheTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B4000003 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A5000001 /* SwiftTrader */;
+			targetProxy = B4000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A9000001 /* Debug */ = {
@@ -322,6 +382,36 @@
 			};
 			name = Release;
 		};
+		B9000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.trading.SwiftTraderTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SwiftTrader.app/Contents/MacOS/SwiftTrader";
+			};
+			name = Debug;
+		};
+		B9000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.trading.SwiftTraderTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SwiftTrader.app/Contents/MacOS/SwiftTrader";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -339,6 +429,15 @@
 			buildConfigurations = (
 				A9000003 /* Debug */,
 				A9000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B7000001 /* Build configuration list for PBXNativeTarget "SwiftTraderTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B9000001 /* Debug */,
+				B9000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
