@@ -33,6 +33,8 @@
 		A1000018 /* CurrencyCorrelation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000019; };
 		A1000019 /* CorrelationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001A; };
 		A100001A /* CorrelationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001B; };
+		A100001B /* MarketSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001C; };
+		A100001C /* SessionCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001D; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -63,6 +65,8 @@
 		A2000019 /* CurrencyCorrelation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrencyCorrelation.swift; sourceTree = "<group>"; };
 		A200001A /* CorrelationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrelationViewModel.swift; sourceTree = "<group>"; };
 		A200001B /* CorrelationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrelationView.swift; sourceTree = "<group>"; };
+		A200001C /* MarketSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketSession.swift; sourceTree = "<group>"; };
+		A200001D /* SessionCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculator.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -96,6 +100,8 @@
 				A2000010 /* AppSettings.swift */,
 				A2000012 /* Position.swift */,
 				A2000019 /* CurrencyCorrelation.swift */,
+				A200001C /* MarketSession.swift */,
+				A200001D /* SessionCalculator.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -226,6 +232,8 @@
 				A1000018 /* CurrencyCorrelation.swift in Sources */,
 				A1000019 /* CorrelationViewModel.swift in Sources */,
 				A100001A /* CorrelationView.swift in Sources */,
+				A100001B /* MarketSession.swift in Sources */,
+				A100001C /* SessionCalculator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

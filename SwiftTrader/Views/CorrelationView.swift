@@ -53,7 +53,8 @@ struct CorrelationView: View {
                     set: { vm.transform = $0 }
                 ),
                 onChartWidthChanged: { vm.chartWidth = $0 },
-                onUserDrag: { vm.onUserScroll() }
+                onUserDrag: { vm.onUserScroll() },
+                showSessions: vm.showSessions
             )
             .overlay {
                 if vm.bars.isEmpty {

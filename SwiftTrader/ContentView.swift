@@ -218,6 +218,14 @@ struct ContentView: View {
                 .help("\(currency) Correlation")
             }
 
+            Button(action: { vm.showSessions.toggle() }) {
+                Image(systemName: "clock.arrow.2.circlepath")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showSessions ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Market Sessions")
+
             if let last = vm.bars.last {
                 Text(String(format: "%.5f", last.close))
                     .font(.system(.title2, design: .monospaced))
@@ -259,7 +267,8 @@ struct ContentView: View {
                 set: { vm.transform = $0 }
             ),
             onChartWidthChanged: { vm.chartWidth = $0 },
-            onUserDrag: { vm.onUserScroll() }
+            onUserDrag: { vm.onUserScroll() },
+            showSessions: vm.showSessions
         )
         .overlay {
             if vm.bars.isEmpty {
@@ -294,6 +303,14 @@ struct ContentView: View {
             }
             .pickerStyle(.menu)
             .fixedSize()
+
+            Button(action: { vm.showSessions.toggle() }) {
+                Image(systemName: "clock.arrow.2.circlepath")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showSessions ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Market Sessions")
 
             Spacer()
         }

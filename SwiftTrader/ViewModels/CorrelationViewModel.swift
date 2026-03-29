@@ -7,6 +7,13 @@ final class CorrelationViewModel {
     let instruments: [String]
     let chartViewModels: [ChartViewModel]
     var currentPeriod: String
+    var showSessions = true {
+        didSet {
+            for vm in chartViewModels {
+                vm.showSessions = showSessions
+            }
+        }
+    }
 
     init(currency: String, period: String, port: Int, cache: CandleCache) {
         self.currency = currency

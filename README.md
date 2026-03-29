@@ -16,6 +16,8 @@ SwiftTrader is calibrated for **price action trading**. Clean charts, no indicat
 - **Multiple tabs** -- each with independent instrument and timeframe
 - **Market orders** -- manual mode (popover with SL/TP fields) or one-click mode (automatic SL/TP from previous candle at 1:3 R:R)
 - **Positions panel** -- open positions with live P&L and close button
+- **Currency correlation screens** -- click a currency button (e.g. "EUR", "USD") in the chart header to open a 6-chart grid showing all pairs containing that currency, with synchronized timeframes
+- **Market session overlays** -- Tokyo, London, and New York sessions drawn as colored rectangles on the chart, with dashed lines marking actual stock exchange open/close times. Forex session hours match TradingView conventions; DST-aware via IANA timezone database. Togglable via the clock icon in the chart header
 - **Auto-reconnect** -- handles server restarts gracefully
 
 ## Running

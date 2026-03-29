@@ -5,6 +5,7 @@ struct ChartView: View {
     @Binding var transform: ChartTransform
     var onChartWidthChanged: ((CGFloat) -> Void)?
     var onUserDrag: (() -> Void)?
+    var showSessions: Bool = true
 
     // Layout constants
     private let priceAxisWidth: CGFloat = 70
@@ -35,6 +36,9 @@ struct ChartView: View {
                     chartContext.clip(to: chartClip)
 
                     drawGrid(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    if showSessions {
+                        drawSessionOverlays(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange, priceRange: priceRange)
+                    }
                     drawCandles(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange, priceRange: priceRange)
                     drawCurrentPriceLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
 
@@ -249,6 +253,57 @@ struct ChartView: View {
                     .foregroundColor(axisTextColor)
                 context.draw(context.resolve(text), at: CGPoint(x: x, y: chartHeight + 6), anchor: .top)
             }
+        }
+    }
+
+    private func drawSessionOverlays(
+        context: inout GraphicsContext,
+        chartWidth: CGFloat,
+        chartHeight: CGFloat,
+        visibleRange: Range<Int>,
+        priceRange: (min: Double, max: Double)
+    ) {
+        let sessionRects = SessionCalculator.sessions(for: bars, visibleRange: visibleRange)
+        let dashStyle = StrokeStyle(lineWidth: 0.5, dash: [3, 2])
+
+        for rect in sessionRects {
+            let leftX = xForBar(index: rect.startBarIndex) - transform.candleSlotWidth / 2
+            let rightX = xForBar(index: rect.endBarIndex) + transform.candleSlotWidth / 2
+            let topY = yForPrice(rect.highPrice, chartHeight: chartHeight, priceRange: priceRange)
+            let bottomY = yForPrice(rect.lowPrice, chartHeight: chartHeight, priceRange: priceRange)
+
+            guard rightX > 0 && leftX < chartWidth else { continue }
+
+            let sessionPath = Path(CGRect(
+                x: leftX, y: topY,
+                width: rightX - leftX, height: bottomY - topY
+            ))
+            context.fill(sessionPath, with: .color(rect.session.color))
+            context.stroke(sessionPath, with: .color(rect.session.color.opacity(3.0)), lineWidth: 0.5)
+
+            // Exchange open/close dashed lines
+            let lineColor = rect.session.color.opacity(4.0)
+            if let openIdx = rect.exchangeOpenBarIndex {
+                let x = xForBar(index: openIdx)
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: topY))
+                path.addLine(to: CGPoint(x: x, y: bottomY))
+                context.stroke(path, with: .color(lineColor), style: dashStyle)
+            }
+            if let closeIdx = rect.exchangeCloseBarIndex {
+                let x = xForBar(index: closeIdx)
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: topY))
+                path.addLine(to: CGPoint(x: x, y: bottomY))
+                context.stroke(path, with: .color(lineColor), style: dashStyle)
+            }
+
+            let label = Text(rect.session.name)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(rect.session.color.opacity(10.0))
+            let resolved = context.resolve(label)
+            let labelX = max(leftX + 4, 4)
+            context.draw(resolved, at: CGPoint(x: labelX, y: topY + 2), anchor: .topLeading)
         }
     }
 

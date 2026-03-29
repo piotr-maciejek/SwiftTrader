@@ -10,8 +10,9 @@ final class ChartViewModel {
     var error: String?
     var autoScroll = true
     var currentInstrument = "EURUSD"
-    var currentPeriod = "ONE_MIN"
+    var currentPeriod = "FIFTEEN_MINS"
     var availableInstruments: [String] = ["EURUSD"]
+    var showSessions = true
 
     static let availablePeriods: [(value: String, label: String)] = [
         ("ONE_SEC", "1s"),
