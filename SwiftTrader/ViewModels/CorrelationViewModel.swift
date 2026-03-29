@@ -21,6 +21,20 @@ final class CorrelationViewModel {
             }
         }
     }
+    var showEMA = true {
+        didSet {
+            for vm in chartViewModels {
+                vm.showEMA = showEMA
+            }
+        }
+    }
+    var emaConfigs: [EMALine] = EMALine.defaults {
+        didSet {
+            for vm in chartViewModels {
+                vm.emaConfigs = emaConfigs
+            }
+        }
+    }
 
     init(currency: String, period: String, port: Int, cache: CandleCache) {
         self.currency = currency

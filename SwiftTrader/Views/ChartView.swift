@@ -7,6 +7,8 @@ struct ChartView: View {
     var onUserDrag: (() -> Void)?
     var showSessions: Bool = true
     var showVolume: Bool = true
+    var showEMA: Bool = true
+    var emaConfigs: [EMALine] = []
     @State private var crosshair: CrosshairState? = nil
 
     // Layout constants
@@ -45,6 +47,9 @@ struct ChartView: View {
                     }
                     drawCandles(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange, priceRange: priceRange)
                     drawCurrentPriceLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    if showEMA && !emaConfigs.isEmpty {
+                        drawEMALines(context: &chartContext, chartHeight: chartHeight, priceRange: priceRange, visibleRange: visibleRange)
+                    }
                     if showVolume {
                         drawVolumeBars(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, volumeHeight: volumeHeight, visibleRange: visibleRange)
                     }
@@ -402,6 +407,43 @@ struct ChartView: View {
         )
         context.fill(Path(roundedRect: timePill, cornerRadius: 3), with: .color(pillColor))
         context.draw(resolvedTime, at: CGPoint(x: snappedX, y: chartHeight + 4 + timeSize.height / 2), anchor: .center)
+    }
+
+    // MARK: - EMA
+
+    private func computeEMA(period: Int) -> [Double] {
+        guard !bars.isEmpty else { return [] }
+        let k = 2.0 / Double(period + 1)
+        var ema = [Double](repeating: 0, count: bars.count)
+        ema[0] = bars[0].close
+        for i in 1..<bars.count {
+            ema[i] = bars[i].close * k + ema[i - 1] * (1 - k)
+        }
+        return ema
+    }
+
+    private func drawEMALines(
+        context: inout GraphicsContext,
+        chartHeight: CGFloat,
+        priceRange: (min: Double, max: Double),
+        visibleRange: Range<Int>
+    ) {
+        for config in emaConfigs {
+            let values = computeEMA(period: config.period)
+            guard values.count > 1 else { continue }
+
+            var path = Path()
+            let start = visibleRange.lowerBound
+            let end = visibleRange.upperBound
+
+            for i in start..<end {
+                let x = xForBar(index: i)
+                let y = yForPrice(values[i], chartHeight: chartHeight, priceRange: priceRange)
+                if i == start { path.move(to: CGPoint(x: x, y: y)) }
+                else { path.addLine(to: CGPoint(x: x, y: y)) }
+            }
+            context.stroke(path, with: .color(config.color), lineWidth: 1.5)
+        }
     }
 
     // MARK: - Volume

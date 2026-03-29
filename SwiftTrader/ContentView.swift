@@ -4,6 +4,8 @@ struct ContentView: View {
     @State private var workspace = WorkspaceViewModel()
     @State private var showBuyPopover = false
     @State private var showSellPopover = false
+    @State private var showEMAPopover = false
+    @State private var showCorrelationEMAPopover = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -236,6 +238,20 @@ struct ContentView: View {
             .buttonStyle(.borderless)
             .help("Volume")
 
+            Button(action: { showEMAPopover.toggle() }) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showEMA ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("EMA")
+            .popover(isPresented: $showEMAPopover) {
+                EMAPopover(
+                    showEMA: Binding(get: { vm.showEMA }, set: { vm.showEMA = $0 }),
+                    emaConfigs: Binding(get: { vm.emaConfigs }, set: { vm.emaConfigs = $0 })
+                )
+            }
+
             Divider().frame(height: 16)
 
             // Trading controls
@@ -275,7 +291,9 @@ struct ContentView: View {
             onChartWidthChanged: { vm.chartWidth = $0 },
             onUserDrag: { vm.onUserScroll() },
             showSessions: vm.showSessions,
-            showVolume: vm.showVolume
+            showVolume: vm.showVolume,
+            showEMA: vm.showEMA,
+            emaConfigs: vm.emaConfigs
         )
         .overlay {
             if vm.bars.isEmpty {
@@ -326,6 +344,20 @@ struct ContentView: View {
             }
             .buttonStyle(.borderless)
             .help("Volume")
+
+            Button(action: { showCorrelationEMAPopover.toggle() }) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showEMA ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("EMA")
+            .popover(isPresented: $showCorrelationEMAPopover) {
+                EMAPopover(
+                    showEMA: Binding(get: { vm.showEMA }, set: { vm.showEMA = $0 }),
+                    emaConfigs: Binding(get: { vm.emaConfigs }, set: { vm.emaConfigs = $0 })
+                )
+            }
 
             Spacer()
         }

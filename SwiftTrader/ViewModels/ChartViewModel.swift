@@ -14,6 +14,8 @@ final class ChartViewModel {
     var availableInstruments: [String] = ["EURUSD"]
     var showSessions = true
     var showVolume = true
+    var showEMA = true
+    var emaConfigs: [EMALine] = EMALine.defaults
 
     static let availablePeriods: [(value: String, label: String)] = [
         ("ONE_SEC", "1s"),

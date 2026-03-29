@@ -35,6 +35,8 @@
 		A100001A /* CorrelationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001B; };
 		A100001B /* MarketSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001C; };
 		A100001C /* SessionCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001D; };
+		A100001D /* EMAConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001E; };
+		A100001E /* EMAPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001F; };
 		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001; };
 		B1000002 /* CandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002; };
 /* End PBXBuildFile section */
@@ -79,6 +81,8 @@
 		A200001B /* CorrelationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrelationView.swift; sourceTree = "<group>"; };
 		A200001C /* MarketSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketSession.swift; sourceTree = "<group>"; };
 		A200001D /* SessionCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculator.swift; sourceTree = "<group>"; };
+		A200001E /* EMAConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMAConfig.swift; sourceTree = "<group>"; };
+		A200001F /* EMAPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EMAPopover.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
 		B2000002 /* CandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCacheTests.swift; sourceTree = "<group>"; };
@@ -118,6 +122,7 @@
 				A2000019 /* CurrencyCorrelation.swift */,
 				A200001C /* MarketSession.swift */,
 				A200001D /* SessionCalculator.swift */,
+				A200001E /* EMAConfig.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -168,6 +173,7 @@
 				A2000011 /* SettingsView.swift */,
 				A2000017 /* OrderEntryView.swift */,
 				A200001B /* CorrelationView.swift */,
+				A200001F /* EMAPopover.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -277,6 +283,8 @@
 				A100001A /* CorrelationView.swift in Sources */,
 				A100001B /* MarketSession.swift in Sources */,
 				A100001C /* SessionCalculator.swift in Sources */,
+				A100001D /* EMAConfig.swift in Sources */,
+				A100001E /* EMAPopover.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
