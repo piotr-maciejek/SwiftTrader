@@ -6,6 +6,7 @@ struct ChartView: View {
     var onChartWidthChanged: ((CGFloat) -> Void)?
     var onUserDrag: (() -> Void)?
     var showSessions: Bool = true
+    @State private var crosshair: CrosshairState? = nil
 
     // Layout constants
     private let priceAxisWidth: CGFloat = 70
@@ -41,11 +42,17 @@ struct ChartView: View {
                     }
                     drawCandles(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange, priceRange: priceRange)
                     drawCurrentPriceLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    if let ch = crosshair, !bars.isEmpty {
+                        drawCrosshairLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, crosshair: ch)
+                    }
 
                     // Price axis and time axis drawn unclipped so they render in their reserved areas
                     drawPriceAxis(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawCurrentPriceLabel(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawTimeAxis(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange)
+                    if let ch = crosshair, !bars.isEmpty {
+                        drawCrosshairLabels(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, crosshair: ch)
+                    }
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
                 .overlay(alignment: .topLeading) {
@@ -53,7 +60,8 @@ struct ChartView: View {
                         transform: $transform,
                         barCount: bars.count,
                         chartWidth: chartWidth,
-                        onUserDrag: onUserDrag
+                        onUserDrag: onUserDrag,
+                        crosshair: $crosshair
                     )
                     .frame(width: chartWidth, height: chartHeight)
                 }
@@ -305,6 +313,88 @@ struct ChartView: View {
             let labelX = max(leftX + 4, 4)
             context.draw(resolved, at: CGPoint(x: labelX, y: topY + 2), anchor: .topLeading)
         }
+    }
+
+    // MARK: - Crosshair
+
+    private static let crosshairTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    private func priceForY(_ y: CGFloat, chartHeight: CGFloat, priceRange: (min: Double, max: Double)) -> Double {
+        let normalized = 1.0 - Double(y / chartHeight)
+        return priceRange.min + normalized * (priceRange.max - priceRange.min)
+    }
+
+    private func drawCrosshairLines(
+        context: inout GraphicsContext,
+        chartWidth: CGFloat,
+        chartHeight: CGFloat,
+        crosshair: CrosshairState
+    ) {
+        let color = Color.white.opacity(0.6)
+        let style = StrokeStyle(lineWidth: 0.5, dash: [4, 3])
+        let clampedY = min(max(crosshair.mouseY, 0), chartHeight)
+        let snappedX = xForBar(index: crosshair.barIndex)
+
+        // Vertical line (snapped to candle center)
+        var vPath = Path()
+        vPath.move(to: CGPoint(x: snappedX, y: 0))
+        vPath.addLine(to: CGPoint(x: snappedX, y: chartHeight))
+        context.stroke(vPath, with: .color(color), style: style)
+
+        // Horizontal line (follows mouse)
+        var hPath = Path()
+        hPath.move(to: CGPoint(x: 0, y: clampedY))
+        hPath.addLine(to: CGPoint(x: chartWidth, y: clampedY))
+        context.stroke(hPath, with: .color(color), style: style)
+    }
+
+    private func drawCrosshairLabels(
+        context: inout GraphicsContext,
+        chartWidth: CGFloat,
+        chartHeight: CGFloat,
+        priceRange: (min: Double, max: Double),
+        crosshair: CrosshairState
+    ) {
+        let pillColor = Color.gray
+        let clampedY = min(max(crosshair.mouseY, 0), chartHeight)
+
+        // Price label on right axis
+        let price = priceForY(clampedY, chartHeight: chartHeight, priceRange: priceRange)
+        let priceText = Text(String(format: "%.5f", price))
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundColor(.white)
+        let resolvedPrice = context.resolve(priceText)
+        let priceSize = resolvedPrice.measure(in: CGSize(width: 200, height: 20))
+        let pricePill = CGRect(
+            x: chartWidth + 2,
+            y: clampedY - priceSize.height / 2 - 2,
+            width: priceSize.width + 8,
+            height: priceSize.height + 4
+        )
+        context.fill(Path(roundedRect: pricePill, cornerRadius: 3), with: .color(pillColor))
+        context.draw(resolvedPrice, at: CGPoint(x: chartWidth + 6, y: clampedY), anchor: .leading)
+
+        // Time label on bottom axis
+        let bar = bars[crosshair.barIndex]
+        let timeStr = Self.crosshairTimeFormatter.string(from: bar.date)
+        let timeText = Text(timeStr)
+            .font(.system(size: 9, weight: .medium, design: .monospaced))
+            .foregroundColor(.white)
+        let resolvedTime = context.resolve(timeText)
+        let timeSize = resolvedTime.measure(in: CGSize(width: 200, height: 20))
+        let snappedX = xForBar(index: crosshair.barIndex)
+        let timePill = CGRect(
+            x: snappedX - timeSize.width / 2 - 4,
+            y: chartHeight + 2,
+            width: timeSize.width + 8,
+            height: timeSize.height + 4
+        )
+        context.fill(Path(roundedRect: timePill, cornerRadius: 3), with: .color(pillColor))
+        context.draw(resolvedTime, at: CGPoint(x: snappedX, y: chartHeight + 4 + timeSize.height / 2), anchor: .center)
     }
 
     // MARK: - Helpers
