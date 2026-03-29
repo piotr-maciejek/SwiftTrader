@@ -11,10 +11,10 @@ enum CurrencyCorrelation {
     /// Correlation pairs for each currency.
     static let pairs: [String: [String]] = [
         "EUR": ["EURUSD", "EURJPY", "EURGBP", "EURCHF", "EURAUD", "EURCAD"],
+        "USD": ["USDJPY", "GBPUSD", "AUDUSD", "USDCAD", "USDCHF", "EURUSD"],
     ]
 
     /// Extract currency codes from an instrument that have correlation mappings.
-    /// e.g. "EURUSD" → ["EUR"] (only EUR has mappings so far).
     static func currencies(from instrument: String) -> [String] {
         guard instrument.count == 6 else { return [] }
         let base = String(instrument.prefix(3))
