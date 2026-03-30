@@ -9,7 +9,12 @@ struct ChartView: View {
     var showVolume: Bool = true
     var showEMA: Bool = true
     var emaConfigs: [EMALine] = []
+    var positions: [Position] = []
+    var currentInstrument: String = ""
+    var onModifyPosition: ((String, Double, Double) -> Void)? = nil
     @State private var crosshair: CrosshairState? = nil
+    @State private var dragPreview: DragPreviewState? = nil
+    @State private var pendingSLTPEdit: PendingChartSLTPEdit? = nil
 
     // Layout constants
     private let priceAxisWidth: CGFloat = 70
@@ -47,6 +52,10 @@ struct ChartView: View {
                     }
                     drawCandles(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange, priceRange: priceRange)
                     drawCurrentPriceLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    drawSLTPLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    if let preview = dragPreview {
+                        drawDragPreviewLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, preview: preview)
+                    }
                     if showEMA && !emaConfigs.isEmpty {
                         drawEMALines(context: &chartContext, chartHeight: chartHeight, priceRange: priceRange, visibleRange: visibleRange)
                     }
@@ -60,6 +69,7 @@ struct ChartView: View {
                     // Price axis and time axis drawn unclipped so they render in their reserved areas
                     drawPriceAxis(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawCurrentPriceLabel(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    drawSLTPLabels(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawTimeAxis(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange)
                     if let ch = crosshair, !bars.isEmpty {
                         drawCrosshairLabels(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, crosshair: ch)
@@ -72,9 +82,36 @@ struct ChartView: View {
                         barCount: bars.count,
                         chartWidth: chartWidth,
                         onUserDrag: onUserDrag,
-                        crosshair: $crosshair
+                        crosshair: $crosshair,
+                        positions: relevantPositions,
+                        chartHeight: chartHeight,
+                        priceRange: priceRange(for: visibleBarRange(chartWidth: chartWidth)),
+                        dragPreview: $dragPreview,
+                        pendingSLTPEdit: $pendingSLTPEdit
                     )
                     .frame(width: chartWidth, height: chartHeight + volumeHeight)
+                }
+                .confirmationDialog(
+                    "Adjust order",
+                    isPresented: Binding(
+                        get: { pendingSLTPEdit != nil },
+                        set: { if !$0 { pendingSLTPEdit = nil; dragPreview = nil } }
+                    ),
+                    titleVisibility: .visible
+                ) {
+                    Button("Confirm") {
+                        if let edit = pendingSLTPEdit {
+                            onModifyPosition?(edit.label, edit.stopLoss, edit.takeProfit)
+                        }
+                        pendingSLTPEdit = nil
+                        dragPreview = nil
+                    }
+                    Button("Cancel", role: .cancel) {
+                        pendingSLTPEdit = nil
+                        dragPreview = nil
+                    }
+                } message: {
+                    Text(pendingSLTPEdit?.confirmationMessage ?? "")
                 }
                 .onAppear {
                     onChartWidthChanged?(chartWidth)
@@ -409,6 +446,76 @@ struct ChartView: View {
         context.draw(resolvedTime, at: CGPoint(x: snappedX, y: chartHeight + 4 + timeSize.height / 2), anchor: .center)
     }
 
+    // MARK: - SL/TP Lines
+
+    private var relevantPositions: [Position] {
+        positions.filter { $0.instrument == currentInstrument }
+    }
+
+    private func drawSLTPLines(context: inout GraphicsContext, chartWidth: CGFloat,
+                                chartHeight: CGFloat, priceRange: (min: Double, max: Double)) {
+        for position in relevantPositions {
+            if position.stopLoss != 0 {
+                let y = yForPrice(position.stopLoss, chartHeight: chartHeight, priceRange: priceRange)
+                if y >= 0 && y <= chartHeight {
+                    var path = Path()
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: chartWidth, y: y))
+                    context.stroke(path, with: .color(bearishColor),
+                                   style: StrokeStyle(lineWidth: 1, dash: [6, 3]))
+                }
+            }
+            if position.takeProfit != 0 {
+                let y = yForPrice(position.takeProfit, chartHeight: chartHeight, priceRange: priceRange)
+                if y >= 0 && y <= chartHeight {
+                    var path = Path()
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: chartWidth, y: y))
+                    context.stroke(path, with: .color(bullishColor),
+                                   style: StrokeStyle(lineWidth: 1, dash: [6, 3]))
+                }
+            }
+        }
+    }
+
+    private func drawDragPreviewLine(context: inout GraphicsContext, chartWidth: CGFloat,
+                                      chartHeight: CGFloat, preview: DragPreviewState) {
+        let color: Color = preview.field == .stopLoss ? bearishColor : bullishColor
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: preview.currentY))
+        path.addLine(to: CGPoint(x: chartWidth, y: preview.currentY))
+        context.stroke(path, with: .color(color.opacity(0.6)),
+                       style: StrokeStyle(lineWidth: 2, dash: [4, 2]))
+    }
+
+    private func drawSLTPLabels(context: inout GraphicsContext, chartWidth: CGFloat,
+                                 chartHeight: CGFloat, priceRange: (min: Double, max: Double)) {
+        for position in relevantPositions {
+            for (price, color, tag) in [
+                (position.stopLoss, bearishColor, "SL"),
+                (position.takeProfit, bullishColor, "TP"),
+            ] where price != 0 {
+                let y = yForPrice(price, chartHeight: chartHeight, priceRange: priceRange)
+                guard y >= 0 && y <= chartHeight else { continue }
+
+                let label = Text("\(tag) \(String(format: "%.5f", price))")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white)
+                let resolved = context.resolve(label)
+                let labelSize = resolved.measure(in: CGSize(width: 200, height: 20))
+
+                let pillRect = CGRect(
+                    x: chartWidth + 2,
+                    y: y - labelSize.height / 2 - 2,
+                    width: labelSize.width + 8,
+                    height: labelSize.height + 4
+                )
+                context.fill(Path(roundedRect: pillRect, cornerRadius: 3), with: .color(color))
+                context.draw(resolved, at: CGPoint(x: chartWidth + 6, y: y), anchor: .leading)
+            }
+        }
+    }
+
     // MARK: - EMA
 
     private func computeEMA(period: Int) -> [Double] {
@@ -503,3 +610,4 @@ struct ChartView: View {
         return nice * magnitude
     }
 }
+

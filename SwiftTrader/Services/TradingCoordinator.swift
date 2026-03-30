@@ -22,6 +22,10 @@ final class TradingCoordinator: Sendable {
         try await apiService.closeOrder(label: label)
     }
 
+    func modifyOrder(label: String, stopLoss: Double, takeProfit: Double) async throws -> Position {
+        try await apiService.modifyOrder(label: label, stopLoss: stopLoss, takeProfit: takeProfit)
+    }
+
     func fetchPositions() async throws -> [Position] {
         try await apiService.fetchPositions()
     }

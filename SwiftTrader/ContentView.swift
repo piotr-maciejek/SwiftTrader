@@ -293,7 +293,12 @@ struct ContentView: View {
             showSessions: vm.showSessions,
             showVolume: vm.showVolume,
             showEMA: vm.showEMA,
-            emaConfigs: vm.emaConfigs
+            emaConfigs: vm.emaConfigs,
+            positions: workspace.trading.positions,
+            currentInstrument: vm.currentInstrument,
+            onModifyPosition: { label, sl, tp in
+                Task { await workspace.trading.modifyPosition(label: label, stopLoss: sl, takeProfit: tp) }
+            }
         )
         .overlay {
             if vm.bars.isEmpty {
@@ -374,6 +379,7 @@ struct ContentView: View {
     @ViewBuilder
     private func tradingControls(vm: ChartViewModel) -> some View {
         let trading = workspace.trading
+        let tradingEnabled = !trading.isSubmitting && !vm.bars.isEmpty && vm.isConnected
 
         HStack(spacing: 6) {
             // Mode toggle
@@ -399,21 +405,22 @@ struct ContentView: View {
             }
             .buttonStyle(.borderless)
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.6))
             .padding(.horizontal, 10)
             .padding(.vertical, 3)
-            .background(Color.green, in: RoundedRectangle(cornerRadius: 4))
-            .disabled(trading.isSubmitting || vm.bars.isEmpty)
+            .background(tradingEnabled ? Color.green : Color.gray, in: RoundedRectangle(cornerRadius: 4))
+            .disabled(!tradingEnabled)
             .popover(isPresented: $showBuyPopover) {
                 OrderEntryView(
                     direction: "BUY",
                     instrument: vm.currentInstrument,
-                    currentPrice: vm.bars.last?.close ?? 0
-                ) { sl, tp in
+                    currentPrice: vm.bars.last?.close ?? 0,
+                    amount: Binding(get: { trading.amount }, set: { trading.amount = $0 })
+                ) { amt, sl, tp in
                     Task {
                         await trading.submitMarketOrder(
                             instrument: vm.currentInstrument, direction: "BUY",
-                            stopLoss: sl, takeProfit: tp)
+                            amount: amt, stopLoss: sl, takeProfit: tp)
                     }
                 }
             }
@@ -430,21 +437,22 @@ struct ContentView: View {
             }
             .buttonStyle(.borderless)
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.6))
             .padding(.horizontal, 10)
             .padding(.vertical, 3)
-            .background(Color.red, in: RoundedRectangle(cornerRadius: 4))
-            .disabled(trading.isSubmitting || vm.bars.isEmpty)
+            .background(tradingEnabled ? Color.red : Color.gray, in: RoundedRectangle(cornerRadius: 4))
+            .disabled(!tradingEnabled)
             .popover(isPresented: $showSellPopover) {
                 OrderEntryView(
                     direction: "SELL",
                     instrument: vm.currentInstrument,
-                    currentPrice: vm.bars.last?.close ?? 0
-                ) { sl, tp in
+                    currentPrice: vm.bars.last?.close ?? 0,
+                    amount: Binding(get: { trading.amount }, set: { trading.amount = $0 })
+                ) { amt, sl, tp in
                     Task {
                         await trading.submitMarketOrder(
                             instrument: vm.currentInstrument, direction: "SELL",
-                            stopLoss: sl, takeProfit: tp)
+                            amount: amt, stopLoss: sl, takeProfit: tp)
                     }
                 }
             }

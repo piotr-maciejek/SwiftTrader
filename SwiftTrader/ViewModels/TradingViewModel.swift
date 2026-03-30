@@ -13,7 +13,7 @@ final class TradingViewModel {
     private var coordinator: TradingCoordinator
     private var wsTask: Task<Void, Never>?
 
-    static let defaultAmount = 0.001
+    var amount = 0.001
 
     init(coordinator: TradingCoordinator = TradingCoordinator()) {
         self.coordinator = coordinator
@@ -39,14 +39,14 @@ final class TradingViewModel {
     // MARK: - Order submission
 
     func submitMarketOrder(instrument: String, direction: String,
-                           stopLoss: Double, takeProfit: Double) async {
+                           amount: Double? = nil, stopLoss: Double, takeProfit: Double) async {
         isSubmitting = true
         orderError = nil
 
         do {
             _ = try await coordinator.submitOrder(
                 instrument: instrument, direction: direction,
-                amount: Self.defaultAmount,
+                amount: amount ?? self.amount,
                 stopLoss: stopLoss, takeProfit: takeProfit)
         } catch {
             orderError = error.localizedDescription
@@ -92,6 +92,14 @@ final class TradingViewModel {
     func closePosition(label: String) async {
         do {
             try await coordinator.closeOrder(label: label)
+        } catch {
+            orderError = error.localizedDescription
+        }
+    }
+
+    func modifyPosition(label: String, stopLoss: Double, takeProfit: Double) async {
+        do {
+            _ = try await coordinator.modifyOrder(label: label, stopLoss: stopLoss, takeProfit: takeProfit)
         } catch {
             orderError = error.localizedDescription
         }

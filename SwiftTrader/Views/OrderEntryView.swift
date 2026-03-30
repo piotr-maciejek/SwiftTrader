@@ -4,8 +4,10 @@ struct OrderEntryView: View {
     let direction: String
     let instrument: String
     let currentPrice: Double
-    let onSubmit: (Double, Double) -> Void
+    @Binding var amount: Double
+    let onSubmit: (Double, Double, Double) -> Void
 
+    @State private var amountText: String = ""
     @State private var stopLossText: String = ""
     @State private var takeProfitText: String = ""
     @Environment(\.dismiss) private var dismiss
@@ -20,12 +22,29 @@ struct OrderEntryView: View {
                     .font(.system(size: 13, weight: .medium))
             }
 
-            HStack {
-                Text("Amount:")
+            HStack(spacing: 4) {
+                Text("Amount")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                Text("0.001")
+                    .frame(width: 70, alignment: .leading)
+                Button(action: { adjustAmount(by: -0.001) }) {
+                    Image(systemName: "minus")
+                        .font(.system(size: 9, weight: .bold))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                TextField("e.g. 0.001", text: $amountText)
+                    .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11, design: .monospaced))
+                    .multilineTextAlignment(.center)
+                Button(action: { adjustAmount(by: 0.001) }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 9, weight: .bold))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
             }
 
             HStack {
@@ -48,21 +67,30 @@ struct OrderEntryView: View {
                 Spacer()
 
                 Button("Confirm") {
+                    let amt = Double(amountText) ?? amount
                     let sl = Double(stopLossText) ?? 0
                     let tp = Double(takeProfitText) ?? 0
-                    onSubmit(sl, tp)
+                    amount = amt
+                    onSubmit(amt, sl, tp)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(Double(stopLossText) == nil || Double(takeProfitText) == nil)
+                .disabled(Double(amountText) == nil || Double(stopLossText) == nil || Double(takeProfitText) == nil)
             }
         }
         .padding()
         .frame(width: 260)
         .onAppear {
+            amountText = String(format: "%g", amount)
             stopLossText = String(format: "%.5f", suggestedSL)
             takeProfitText = String(format: "%.5f", suggestedTP)
         }
+    }
+
+    private func adjustAmount(by delta: Double) {
+        let current = Double(amountText) ?? amount
+        let newAmount = max(0.001, current + delta)
+        amountText = String(format: "%g", newAmount)
     }
 
     private var suggestedSL: Double {
