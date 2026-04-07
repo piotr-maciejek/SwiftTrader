@@ -7,7 +7,7 @@ final class TradingWebSocketService: Sendable {
         self.url = URL(string: "ws://\(host):\(port)/ws/positions")!
     }
 
-    func positions() -> AsyncThrowingStream<[Position], Error> {
+    func snapshots() -> AsyncThrowingStream<TradingSnapshot, Error> {
         AsyncThrowingStream { continuation in
             let task = URLSession.shared.webSocketTask(with: url)
 
@@ -24,12 +24,12 @@ final class TradingWebSocketService: Sendable {
                         switch message {
                         case .string(let text):
                             if let data = text.data(using: .utf8) {
-                                let positions = try JSONDecoder().decode([Position].self, from: data)
-                                continuation.yield(positions)
+                                let snapshot = try JSONDecoder().decode(TradingSnapshot.self, from: data)
+                                continuation.yield(snapshot)
                             }
                         case .data(let data):
-                            let positions = try JSONDecoder().decode([Position].self, from: data)
-                            continuation.yield(positions)
+                            let snapshot = try JSONDecoder().decode(TradingSnapshot.self, from: data)
+                            continuation.yield(snapshot)
                         @unknown default:
                             break
                         }

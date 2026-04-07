@@ -30,7 +30,7 @@ final class TradingCoordinator: Sendable {
         try await apiService.fetchPositions()
     }
 
-    func streamPositions() -> AsyncThrowingStream<[Position], Error> {
-        TradingWebSocketService(host: host, port: port).positions()
+    func streamSnapshots() -> AsyncThrowingStream<TradingSnapshot, Error> {
+        TradingWebSocketService(host: host, port: port).snapshots()
     }
 }

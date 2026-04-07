@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class TradingViewModel {
     var positions: [Position] = []
+    var account: Account?
     var isConnected = false
     var isSubmitting = false
     var orderError: String?
@@ -120,9 +121,10 @@ final class TradingViewModel {
         wsTask = Task {
             while !Task.isCancelled {
                 do {
-                    for try await update in coordinator.streamPositions() {
+                    for try await snapshot in coordinator.streamSnapshots() {
                         if !isConnected { isConnected = true }
-                        positions = update
+                        positions = snapshot.positions
+                        account = snapshot.account
                     }
                 } catch is CancellationError {
                     break

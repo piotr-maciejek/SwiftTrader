@@ -60,10 +60,42 @@ struct ContentView: View {
                     RightPanel()
                 }
             }
+
+            Divider()
+            accountStatusBar
         }
         .frame(minWidth: 800, minHeight: 500)
         .background(WindowAccessor())
         .focusedSceneValue(\.workspace, workspace)
+    }
+
+    // MARK: - Account status bar
+
+    private var accountStatusBar: some View {
+        HStack(spacing: 16) {
+            if let account = workspace.trading.account {
+                accountField("Balance", value: account.balance, currency: account.currency)
+                accountField("Equity", value: account.equity, currency: account.currency,
+                             color: account.equity >= account.balance ? .green : .red)
+                accountField("Margin", value: account.usedMargin, currency: account.currency)
+                accountField("Free", value: account.freeMargin, currency: account.currency)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 24)
+        .background(.bar)
+    }
+
+    private func accountField(_ label: String, value: Double, currency: String,
+                              color: Color = .primary) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Text(String(format: "%.2f %@", value, currency))
+                .foregroundStyle(color)
+        }
+        .font(.system(size: 10, design: .monospaced))
     }
 
     // MARK: - Tab bar
