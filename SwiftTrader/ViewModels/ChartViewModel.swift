@@ -116,7 +116,7 @@ final class ChartViewModel {
         let key = CandleCache.CacheKey(instrument: instrument, period: period)
         let cached = await coordinator.cache.getBars(for: key)
         if Task.isCancelled { return }
-        if !cached.isEmpty && bars.isEmpty {
+        if !cached.isEmpty {
             bars = cached
             scrollToEnd()
         }
@@ -182,7 +182,7 @@ final class ChartViewModel {
             // Update the last bar if it has the same timestamp, otherwise append
             if let lastIndex = bars.indices.last, bars[lastIndex].time == bar.time {
                 bars[lastIndex] = bar
-            } else if let lastIndex = bars.indices.last, bar.time > bars[lastIndex].time {
+            } else if bars.isEmpty || bar.time > bars[bars.count - 1].time {
                 bars.append(bar)
                 if autoScroll { advanceByOneCandle() }
             }
