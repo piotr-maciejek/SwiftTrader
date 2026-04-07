@@ -2,12 +2,35 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var workspace = WorkspaceViewModel()
+    @State private var auth = AuthViewModel(port: AppSettings.shared.port)
     @State private var showBuyPopover = false
     @State private var showSellPopover = false
     @State private var showEMAPopover = false
     @State private var showCorrelationEMAPopover = false
 
     var body: some View {
+        Group {
+            switch auth.phase {
+            case .ready:
+                mainContent
+            case .pinRequired, .failed:
+                PinEntrySheet(auth: auth)
+                    .frame(minWidth: 800, minHeight: 500)
+            case .checking, .connecting:
+                VStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Connecting to server...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(minWidth: 800, minHeight: 500)
+            }
+        }
+        .task { await auth.start() }
+    }
+
+    private var mainContent: some View {
         VStack(spacing: 0) {
             // Tab bar
             tabBar
@@ -89,6 +112,7 @@ struct ContentView: View {
             .popover(isPresented: $workspace.showSettings) {
                 SettingsView(settings: workspace.settings) { port in
                     workspace.reconnectAll(port: port)
+                    auth.updatePort(port)
                 }
             }
 
