@@ -28,6 +28,9 @@ struct ContentView: View {
             }
         }
         .task { await auth.start() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            workspace.saveNow()
+        }
     }
 
     private var mainContent: some View {

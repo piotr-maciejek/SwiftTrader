@@ -41,6 +41,8 @@
 		A1000020 /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021; };
 		A1000021 /* PinEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000022; };
 		A1000022 /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023; };
+		A1000023 /* TabState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024; };
+		A1000024 /* WorkspaceStateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025; };
 		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001; };
 		B1000002 /* CandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002; };
 /* End PBXBuildFile section */
@@ -91,6 +93,9 @@
 		A2000021 /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
 		A2000022 /* PinEntrySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinEntrySheet.swift; sourceTree = "<group>"; };
 		A2000023 /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
+		A2000024 /* TabState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabState.swift; sourceTree = "<group>"; };
+		A2000025 /* WorkspaceStateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStateService.swift; sourceTree = "<group>"; };
+		A2000026 /* SwiftTrader.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SwiftTrader.entitlements; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
 		B2000002 /* CandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCacheTests.swift; sourceTree = "<group>"; };
@@ -132,6 +137,7 @@
 				A200001C /* MarketSession.swift */,
 				A200001D /* SessionCalculator.swift */,
 				A200001E /* EMAConfig.swift */,
+				A2000024 /* TabState.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -147,6 +153,7 @@
 				A2000015 /* TradingCoordinator.swift */,
 				A2000018 /* CandleCache.swift */,
 				A2000020 /* AuthService.swift */,
+				A2000025 /* WorkspaceStateService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -301,6 +308,8 @@
 				A1000020 /* AuthViewModel.swift in Sources */,
 				A1000021 /* PinEntrySheet.swift in Sources */,
 				A1000022 /* Account.swift in Sources */,
+				A1000023 /* TabState.swift in Sources */,
+				A1000024 /* WorkspaceStateService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

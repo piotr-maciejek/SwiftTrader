@@ -16,10 +16,15 @@ final class WorkspaceViewModel {
     let settings = AppSettings.shared
     let trading: TradingViewModel
     private let candleCache = CandleCache()
+    private var saveTask: Task<Void, Never>?
     var tabs: [Tab] = []
     var selectedTabID: UUID?
-    var showBottomPanel = false
-    var showRightPanel = false
+    var showBottomPanel = false {
+        didSet { scheduleSave() }
+    }
+    var showRightPanel = false {
+        didSet { scheduleSave() }
+    }
     var showSettings = false
 
     var selectedTab: Tab? {
@@ -28,12 +33,17 @@ final class WorkspaceViewModel {
 
     init() {
         trading = TradingViewModel(coordinator: TradingCoordinator(port: settings.port))
-        addTab()
+        if let saved = WorkspaceStateService.shared.load(), !saved.tabs.isEmpty {
+            restoreTabs(from: saved)
+        } else {
+            addTab()
+        }
         trading.start()
     }
 
     func addTab() {
         let vm = ChartViewModel(coordinator: MarketDataCoordinator(port: settings.port, cache: candleCache))
+        wireStateChanged(vm)
         if let current = selectedTab {
             switch current.content {
             case .chart(let cvm):
@@ -47,6 +57,7 @@ final class WorkspaceViewModel {
         tabs.append(tab)
         selectedTabID = tab.id
         Task { await vm.start() }
+        scheduleSave()
     }
 
     func addCorrelationTab(currency: String) {
@@ -75,10 +86,12 @@ final class WorkspaceViewModel {
             port: settings.port,
             cache: candleCache
         )
+        wireStateChanged(vm)
         let tab = Tab(content: .correlation(vm))
         tabs.append(tab)
         selectedTabID = tab.id
         Task { await vm.startAll() }
+        scheduleSave()
     }
 
     func reconnectAll(port: Int) {
@@ -103,10 +116,12 @@ final class WorkspaceViewModel {
             let newIndex = min(index, tabs.count - 1)
             selectedTabID = tabs[newIndex].id
         }
+        scheduleSave()
     }
 
     func selectTab(_ id: UUID) {
         selectedTabID = id
+        scheduleSave()
     }
 
     func moveTab(id: UUID, beforeID: UUID) {
@@ -117,6 +132,109 @@ final class WorkspaceViewModel {
         let tab = tabs.remove(at: tabs.firstIndex(where: { $0.id == id })!)
         let insertIndex = tabs.firstIndex(where: { $0.id == beforeID }) ?? tabs.endIndex
         tabs.insert(tab, at: insertIndex)
+        scheduleSave()
+    }
+
+    // MARK: - State persistence
+
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            saveNow()
+        }
+    }
+
+    /// Save immediately without debounce. Also called on app termination.
+    func saveNow() {
+        WorkspaceStateService.shared.save(snapshot())
+    }
+
+    private func snapshot() -> WorkspaceState {
+        let tabStates = tabs.map { tab -> TabState in
+            switch tab.content {
+            case .chart(let vm):
+                return TabState(id: tab.id, content: .chart(ChartTabState(
+                    instrument: vm.currentInstrument,
+                    period: vm.currentPeriod,
+                    showSessions: vm.showSessions,
+                    showVolume: vm.showVolume,
+                    showEMA: vm.showEMA,
+                    emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) }
+                )))
+            case .correlation(let vm):
+                return TabState(id: tab.id, content: .correlation(CorrelationTabState(
+                    currency: vm.currency,
+                    period: vm.currentPeriod,
+                    showSessions: vm.showSessions,
+                    showVolume: vm.showVolume,
+                    showEMA: vm.showEMA,
+                    emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) }
+                )))
+            }
+        }
+        let selectedIndex = tabs.firstIndex(where: { $0.id == selectedTabID })
+        return WorkspaceState(
+            tabs: tabStates,
+            selectedTabIndex: selectedIndex,
+            showBottomPanel: showBottomPanel,
+            showRightPanel: showRightPanel
+        )
+    }
+
+    private func restoreTabs(from state: WorkspaceState) {
+        showBottomPanel = state.showBottomPanel
+        showRightPanel = state.showRightPanel
+
+        for tabState in state.tabs {
+            switch tabState.content {
+            case .chart(let chartState):
+                let vm = ChartViewModel(
+                    coordinator: MarketDataCoordinator(port: settings.port, cache: candleCache)
+                )
+                vm.currentInstrument = chartState.instrument
+                vm.currentPeriod = chartState.period
+                vm.showSessions = chartState.showSessions
+                vm.showVolume = chartState.showVolume
+                vm.showEMA = chartState.showEMA
+                vm.emaConfigs = chartState.emaConfigs.map { $0.toEMALine() }
+                wireStateChanged(vm)
+                let tab = Tab(content: .chart(vm))
+                tabs.append(tab)
+                Task { await vm.start() }
+
+            case .correlation(let corrState):
+                let vm = CorrelationViewModel(
+                    currency: corrState.currency,
+                    period: corrState.period,
+                    port: settings.port,
+                    cache: candleCache
+                )
+                vm.showSessions = corrState.showSessions
+                vm.showVolume = corrState.showVolume
+                vm.showEMA = corrState.showEMA
+                vm.emaConfigs = corrState.emaConfigs.map { $0.toEMALine() }
+                wireStateChanged(vm)
+                let tab = Tab(content: .correlation(vm))
+                tabs.append(tab)
+                Task { await vm.startAll() }
+            }
+        }
+
+        if let index = state.selectedTabIndex, index < tabs.count {
+            selectedTabID = tabs[index].id
+        } else {
+            selectedTabID = tabs.first?.id
+        }
+    }
+
+    private func wireStateChanged(_ vm: ChartViewModel) {
+        vm.onStateChanged = { [weak self] in self?.scheduleSave() }
+    }
+
+    private func wireStateChanged(_ vm: CorrelationViewModel) {
+        vm.onStateChanged = { [weak self] in self?.scheduleSave() }
     }
 }
 

@@ -9,32 +9,30 @@ final class CorrelationViewModel {
     var currentPeriod: String
     var showSessions = true {
         didSet {
-            for vm in chartViewModels {
-                vm.showSessions = showSessions
-            }
+            for vm in chartViewModels { vm.showSessions = showSessions }
+            onStateChanged?()
         }
     }
     var showVolume = true {
         didSet {
-            for vm in chartViewModels {
-                vm.showVolume = showVolume
-            }
+            for vm in chartViewModels { vm.showVolume = showVolume }
+            onStateChanged?()
         }
     }
     var showEMA = true {
         didSet {
-            for vm in chartViewModels {
-                vm.showEMA = showEMA
-            }
+            for vm in chartViewModels { vm.showEMA = showEMA }
+            onStateChanged?()
         }
     }
     var emaConfigs: [EMALine] = EMALine.defaults {
         didSet {
-            for vm in chartViewModels {
-                vm.emaConfigs = emaConfigs
-            }
+            for vm in chartViewModels { vm.emaConfigs = emaConfigs }
+            onStateChanged?()
         }
     }
+
+    var onStateChanged: (() -> Void)?
 
     init(currency: String, period: String, port: Int, cache: CandleCache) {
         self.currency = currency

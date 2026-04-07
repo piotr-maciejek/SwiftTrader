@@ -9,13 +9,27 @@ final class ChartViewModel {
     var isConnected = false
     var error: String?
     var autoScroll = true
-    var currentInstrument = "EURUSD"
-    var currentPeriod = "FIFTEEN_MINS"
+    var currentInstrument = "EURUSD" {
+        didSet { onStateChanged?() }
+    }
+    var currentPeriod = "FIFTEEN_MINS" {
+        didSet { onStateChanged?() }
+    }
     var availableInstruments: [String] = ["EURUSD"]
-    var showSessions = true
-    var showVolume = true
-    var showEMA = true
-    var emaConfigs: [EMALine] = EMALine.defaults
+    var showSessions = true {
+        didSet { onStateChanged?() }
+    }
+    var showVolume = true {
+        didSet { onStateChanged?() }
+    }
+    var showEMA = true {
+        didSet { onStateChanged?() }
+    }
+    var emaConfigs: [EMALine] = EMALine.defaults {
+        didSet { onStateChanged?() }
+    }
+
+    var onStateChanged: (() -> Void)?
 
     static let availablePeriods: [(value: String, label: String)] = [
         ("ONE_SEC", "1s"),

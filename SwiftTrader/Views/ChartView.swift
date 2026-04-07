@@ -145,6 +145,12 @@ struct ChartView: View {
             lo = min(lo, bars[i].low)
             hi = max(hi, bars[i].high)
         }
+        // Ensure a minimum spread so grid/axis math never divides by zero
+        if hi - lo < 1e-8 {
+            let mid = (hi + lo) / 2
+            lo = mid - 0.0005
+            hi = mid + 0.0005
+        }
         let padding = (hi - lo) * pricePaddingPercent
         return (lo - padding, hi + padding)
     }
@@ -600,6 +606,7 @@ struct ChartView: View {
 
     private func niceGridStep(span: Double, targetLines: Int) -> Double {
         let rough = span / Double(targetLines)
+        guard rough > 1e-15 else { return 0.0001 }
         let magnitude = pow(10, floor(log10(rough)))
         let residual = rough / magnitude
         let nice: Double
