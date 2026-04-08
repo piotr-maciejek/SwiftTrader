@@ -12,6 +12,12 @@ enum CurrencyCorrelation {
     static let pairs: [String: [String]] = [
         "EUR": ["EURUSD", "EURJPY", "EURGBP", "EURCHF", "EURAUD", "EURCAD"],
         "USD": ["EURUSD", "USDJPY", "GBPUSD", "AUDUSD", "USDCAD", "USDCHF"],
+        "GBP": ["GBPUSD", "EURGBP", "GBPJPY", "GBPAUD", "GBPCAD", "GBPCHF"],
+        "JPY": ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY"],
+        "AUD": ["AUDUSD", "EURAUD", "GBPAUD", "AUDJPY", "AUDCAD", "AUDNZD"],
+        "CAD": ["USDCAD", "EURCAD", "GBPCAD", "AUDCAD", "CADJPY", "NZDCAD"],
+        "CHF": ["USDCHF", "EURCHF", "GBPCHF", "AUDCHF", "CADCHF", "CHFJPY"],
+        "NZD": ["NZDUSD", "EURNZD", "GBPNZD", "NZDJPY", "AUDNZD", "NZDCAD"],
     ]
 
     /// Extract currency codes from an instrument that have correlation mappings.
