@@ -31,7 +31,7 @@ actor ForexAPIService {
         let (data, response) = try await historySession.data(from: components.url!)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIError.serverError
+            throw APIError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1)
         }
 
         return try JSONDecoder().decode([CandleBar].self, from: data)
@@ -41,17 +41,23 @@ actor ForexAPIService {
         let url = baseURL.appendingPathComponent("/api/v1/instruments")
         let (data, response) = try await URLSession.shared.data(from: url)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIError.serverError
+            throw APIError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1)
         }
         return try JSONDecoder().decode([String].self, from: data)
     }
 
     enum APIError: Error, LocalizedError {
-        case serverError
+        case serverError(statusCode: Int)
 
         var errorDescription: String? {
             switch self {
-            case .serverError: return "Server returned an error"
+            case .serverError(let code): return "Server error (HTTP \(code))"
+            }
+        }
+
+        var isRetryable: Bool {
+            switch self {
+            case .serverError(let code): return code >= 500 || code == -1
             }
         }
     }

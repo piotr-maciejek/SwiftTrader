@@ -42,6 +42,7 @@ final class TradingViewModel {
     func submitMarketOrder(instrument: String, direction: String,
                            amount: Double? = nil, stopLoss: Double, takeProfit: Double) async {
         isSubmitting = true
+        defer { isSubmitting = false }
         orderError = nil
 
         do {
@@ -52,8 +53,6 @@ final class TradingViewModel {
         } catch {
             orderError = error.localizedDescription
         }
-
-        isSubmitting = false
     }
 
     func submitOneClickOrder(direction: String, instrument: String, bars: [CandleBar]) async {

@@ -8,7 +8,7 @@ final class ForexWebSocketService: Sendable {
     }
 
     func bars() -> AsyncThrowingStream<CandleBar, Error> {
-        AsyncThrowingStream { continuation in
+        AsyncThrowingStream(bufferingPolicy: .bufferingNewest(100)) { continuation in
             let task = URLSession.shared.webSocketTask(with: url)
 
             continuation.onTermination = { _ in
@@ -16,6 +16,18 @@ final class ForexWebSocketService: Sendable {
             }
 
             task.resume()
+
+            // Ping every 30s to detect stale connections
+            let pingTask = Task {
+                while !Task.isCancelled {
+                    try await Task.sleep(for: .seconds(30))
+                    task.sendPing { error in
+                        if let error {
+                            continuation.finish(throwing: error)
+                        }
+                    }
+                }
+            }
 
             Task {
                 do {
@@ -38,6 +50,7 @@ final class ForexWebSocketService: Sendable {
                 } catch {
                     continuation.finish(throwing: error)
                 }
+                pingTask.cancel()
             }
         }
     }
