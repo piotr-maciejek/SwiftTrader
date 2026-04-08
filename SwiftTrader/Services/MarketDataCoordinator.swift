@@ -40,7 +40,10 @@ final class MarketDataCoordinator: Sendable {
         count: Int = 1000
     ) async throws -> [CandleBar] {
         let key = CandleCache.CacheKey(instrument: instrument, period: period)
-        let before = await cache.earliestTime(for: key)
+        guard let before = await cache.earliestTime(for: key) else {
+            // Cache is empty — nothing to paginate from; return what we have
+            return await cache.getBars(for: key)
+        }
         let fetched = try await apiService.fetchHistory(
             instrument: instrument, period: period, count: count, before: before
         )

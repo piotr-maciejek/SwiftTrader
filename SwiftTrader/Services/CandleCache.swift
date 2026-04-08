@@ -44,10 +44,14 @@ actor CandleCache {
         if existing.isEmpty {
             existing = completed.sorted { $0.time < $1.time }
         } else {
+            // Replace existing bars when timestamps match (server may have corrected values),
+            // and append truly new bars.
+            let newByTime = Dictionary(completed.map { ($0.time, $0) }, uniquingKeysWith: { _, new in new })
+            existing = existing.map { bar in newByTime[bar.time] ?? bar }
             let existingTimes = Set(existing.map(\.time))
-            let newBars = completed.filter { !existingTimes.contains($0.time) }
-            if !newBars.isEmpty {
-                existing.append(contentsOf: newBars)
+            let additions = completed.filter { !existingTimes.contains($0.time) }
+            if !additions.isEmpty {
+                existing.append(contentsOf: additions)
                 existing.sort { $0.time < $1.time }
             }
         }

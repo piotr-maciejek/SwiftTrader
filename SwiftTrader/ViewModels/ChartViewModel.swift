@@ -201,12 +201,14 @@ final class ChartViewModel {
 
     private func connectWebSocket() {
         wsTask?.cancel()
+        let instrument = currentInstrument
+        let period = currentPeriod
         wsTask = Task {
             while !Task.isCancelled {
                 do {
-                    for try await bar in coordinator.streamCandles(instrument: currentInstrument, period: currentPeriod) {
+                    for try await bar in coordinator.streamCandles(instrument: instrument, period: period) {
                         if !isConnected { isConnected = true }
-                        handleBar(bar)
+                        handleBar(bar, expectedInstrument: instrument, expectedPeriod: period)
                     }
                 } catch is CancellationError {
                     break
@@ -219,7 +221,9 @@ final class ChartViewModel {
         }
     }
 
-    private func handleBar(_ bar: CandleBar) {
+    private func handleBar(_ bar: CandleBar, expectedInstrument: String, expectedPeriod: String) {
+        // Discard bars from a stale WebSocket that hasn't been cancelled yet
+        guard expectedInstrument == currentInstrument, expectedPeriod == currentPeriod else { return }
         if bar.partial {
             // Update the last bar if it has the same timestamp, otherwise append
             if let lastIndex = bars.indices.last, bars[lastIndex].time == bar.time {
@@ -296,7 +300,9 @@ final class ChartViewModel {
                 // Shift scroll offset so the same candles stay in view
                 transform.xOffset += CGFloat(addedCount) * transform.candleSlotWidth
             }
-        } catch {}
+        } catch {
+            self.error = "Earlier bars: \(error.localizedDescription)"
+        }
 
         isLoadingEarlier = false
     }

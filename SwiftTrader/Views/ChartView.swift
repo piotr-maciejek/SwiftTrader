@@ -443,6 +443,7 @@ struct ChartView: View {
         volumeHeight: CGFloat = 0,
         crosshair: CrosshairState
     ) {
+        guard crosshair.barIndex >= 0, crosshair.barIndex < bars.count else { return }
         let color = Color.white.opacity(0.6)
         let style = StrokeStyle(lineWidth: 0.5, dash: [4, 3])
         let clampedY = min(max(crosshair.mouseY, 0), chartHeight)
@@ -468,6 +469,7 @@ struct ChartView: View {
         priceRange: (min: Double, max: Double),
         crosshair: CrosshairState
     ) {
+        guard crosshair.barIndex >= 0, crosshair.barIndex < bars.count else { return }
         let pillColor = Color.gray
         let clampedY = min(max(crosshair.mouseY, 0), chartHeight)
 
