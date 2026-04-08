@@ -27,7 +27,10 @@ struct ContentView: View {
                 .frame(minWidth: 800, minHeight: 500)
             }
         }
-        .task { await auth.start() }
+        .task {
+            workspace.startAll()
+            await auth.start()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             workspace.saveNow()
         }
@@ -368,6 +371,19 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            } else if let err = vm.error {
+                VStack(spacing: 4) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text(err)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(8)
             }
         }
         .id(tabID)

@@ -2,6 +2,15 @@ import Foundation
 
 actor ForexAPIService {
     private let baseURL: URL
+    /// History requests can take a long time when the Dukascopy data feed is
+    /// cold-loading chunks. Use a generous timeout so the server has time to
+    /// complete the JForex `getBars()` call instead of the client retrying in a
+    /// loop and never letting it finish.
+    private let historySession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 120
+        return URLSession(configuration: config)
+    }()
 
     init(baseURL: URL = URL(string: "http://localhost:8080")!) {
         self.baseURL = baseURL
@@ -19,7 +28,7 @@ actor ForexAPIService {
         }
         components.queryItems = queryItems
 
-        let (data, response) = try await URLSession.shared.data(from: components.url!)
+        let (data, response) = try await historySession.data(from: components.url!)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             throw APIError.serverError

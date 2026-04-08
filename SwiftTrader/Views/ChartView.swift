@@ -50,6 +50,7 @@ struct ChartView: View {
                     if showSessions {
                         drawSessionOverlays(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange, priceRange: priceRange)
                     }
+                    drawWeekendSeparators(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, volumeHeight: volumeHeight, visibleRange: visibleRange)
                     drawCandles(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange, priceRange: priceRange)
                     drawCurrentPriceLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawSLTPLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
@@ -130,10 +131,11 @@ struct ChartView: View {
     // MARK: - Visible range calculation
 
     private func visibleBarRange(chartWidth: CGFloat) -> Range<Int> {
-        guard !bars.isEmpty else { return 0..<0 }
+        guard !bars.isEmpty, chartWidth > 0 else { return 0..<0 }
         let slotWidth = transform.candleSlotWidth
         let startIndex = max(0, Int(floor(transform.xOffset / slotWidth)))
         let endIndex = min(bars.count, Int(ceil((transform.xOffset + chartWidth) / slotWidth)) + 1)
+        guard startIndex < endIndex else { return 0..<0 }
         return startIndex..<endIndex
     }
 
@@ -282,9 +284,10 @@ struct ChartView: View {
 
         let timeFormatter = DateFormatter()
         timeFormatter.dateFormat = "HH:mm"
+        timeFormatter.timeZone = .current
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "dd MMM yy"
-        let calendar = Calendar.current
+        dateFormatter.dateFormat = "dd MMM"
+        dateFormatter.timeZone = .current
 
         // Show a time label roughly every 80px
         let step = max(1, Int(80 / transform.candleSlotWidth))
@@ -295,14 +298,14 @@ struct ChartView: View {
             guard x > 0 && x < chartWidth else { continue }
 
             let date = bars[i].date
-            let day = calendar.component(.day, from: date)
+            let day = Calendar.current.component(.day, from: date)
             let dayChanged = lastDay != nil && day != lastDay
             lastDay = day
 
             if dayChanged {
                 // Show date on top, time below
                 let dateLine = Text(dateFormatter.string(from: date))
-                    .font(.system(size: 8, design: .monospaced))
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
                     .foregroundColor(axisTextColor)
                 let timeLine = Text(timeFormatter.string(from: date))
                     .font(.system(size: 8, design: .monospaced))
@@ -315,6 +318,57 @@ struct ChartView: View {
                     .foregroundColor(axisTextColor)
                 context.draw(context.resolve(text), at: CGPoint(x: x, y: chartHeight + 6), anchor: .top)
             }
+        }
+
+        // Draw weekend gap labels directly at weekend boundaries
+        for i in visibleRange.lowerBound..<(visibleRange.upperBound - 1) {
+            let gap = bars[i + 1].time - bars[i].time
+            guard gap > 24 * 60 * 60 * 1000 else { continue }
+            let x1 = xForBar(index: i)
+            let x2 = xForBar(index: i + 1)
+            let midX = (x1 + x2) / 2
+            guard midX > 0, midX < chartWidth else { continue }
+
+            let label = Text("wknd")
+                .font(.system(size: 7, design: .monospaced))
+                .foregroundColor(Color.gray.opacity(0.5))
+            context.draw(context.resolve(label), at: CGPoint(x: midX, y: chartHeight + 8), anchor: .top)
+        }
+    }
+
+    /// Draw subtle weekend separators — a thin vertical gap with a dashed line
+    /// between Friday's close and Sunday's open so the user can see where weekends are.
+    private func drawWeekendSeparators(
+        context: inout GraphicsContext,
+        chartWidth: CGFloat,
+        chartHeight: CGFloat,
+        volumeHeight: CGFloat,
+        visibleRange: Range<Int>
+    ) {
+        guard visibleRange.count > 1 else { return }
+        let calendar = Calendar.current
+        let totalHeight = chartHeight + volumeHeight
+        let gapColor = Color.gray.opacity(0.25)
+
+        for i in visibleRange.lowerBound..<(visibleRange.upperBound - 1) {
+            let gap = bars[i + 1].time - bars[i].time
+            // Weekend gap: > 24 hours between consecutive bars
+            guard gap > 24 * 60 * 60 * 1000 else { continue }
+
+            // Dashed vertical line at the midpoint between the two bars
+            let x1 = xForBar(index: i)
+            let x2 = xForBar(index: i + 1)
+            let midX = (x1 + x2) / 2
+            guard midX > 0, midX < chartWidth else { continue }
+
+            var path = Path()
+            path.move(to: CGPoint(x: midX, y: 0))
+            path.addLine(to: CGPoint(x: midX, y: totalHeight))
+            context.stroke(
+                path,
+                with: .color(gapColor),
+                style: StrokeStyle(lineWidth: 0.5, dash: [4, 3])
+            )
         }
     }
 

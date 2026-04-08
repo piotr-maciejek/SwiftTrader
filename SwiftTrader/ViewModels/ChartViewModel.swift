@@ -10,7 +10,15 @@ final class ChartViewModel {
     var error: String?
     var autoScroll = true
     var currentInstrument = "EURUSD" {
-        didSet { onStateChanged?() }
+        didSet {
+            // Keep the instrument in the Picker's tag list so SwiftUI never sees an
+            // "invalid selection" — which can trigger undefined Picker behaviour
+            // (including silently resetting the selection) and race with start().
+            if !availableInstruments.contains(currentInstrument) {
+                availableInstruments.append(currentInstrument)
+            }
+            onStateChanged?()
+        }
     }
     var currentPeriod = "FIFTEEN_MINS" {
         didSet { onStateChanged?() }
@@ -49,6 +57,7 @@ final class ChartViewModel {
     var chartWidth: CGFloat = 1200
 
     private var coordinator: MarketDataCoordinator
+    private var startTask: Task<Void, Never>?
     private var wsTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
     private var hasStarted = false
@@ -64,7 +73,13 @@ final class ChartViewModel {
         hasStarted = false
         bars = []
         transform = ChartTransform()
-        Task { await start() }
+        startAsync()
+    }
+
+    /// Launch `start()` in a tracked Task so it can be cancelled on instrument
+    /// switches / reconnects instead of lingering with a pending HTTP request.
+    func startAsync() {
+        startTask = Task { await start() }
     }
 
     func start() async {
@@ -75,6 +90,12 @@ final class ChartViewModel {
         while !Task.isCancelled {
             if let instruments = try? await coordinator.fetchInstruments(), !instruments.isEmpty {
                 availableInstruments = instruments
+                // Re-add currentInstrument if it's not in the server's list (e.g.
+                // restored from saved state with an instrument the server doesn't
+                // subscribe to for live data, but can still serve history for).
+                if !availableInstruments.contains(currentInstrument) {
+                    availableInstruments.append(currentInstrument)
+                }
                 break
             }
             try? await Task.sleep(for: .seconds(2))
@@ -103,9 +124,17 @@ final class ChartViewModel {
     }
 
     private func reloadChart() {
+        startTask?.cancel()
         reloadTask?.cancel()
         wsTask?.cancel()
         isLoadingEarlier = false
+
+        // Reset synchronously so the Canvas never sees a stale xOffset
+        // paired with fewer bars from the new instrument/period.
+        bars = []
+        transform = ChartTransform()
+        error = nil
+
         let key = CandleCache.CacheKey(instrument: currentInstrument, period: currentPeriod)
         connectWebSocket()
         reloadTask = Task {
@@ -113,9 +142,6 @@ final class ChartViewModel {
             if !cached.isEmpty {
                 bars = cached
                 scrollToEnd()
-            } else {
-                bars = []
-                transform = ChartTransform()
             }
             await loadHistoryWithRetry()
         }
@@ -149,7 +175,9 @@ final class ChartViewModel {
                 }
             } catch is CancellationError {
                 return
-            } catch {}
+            } catch let e {
+                error = "History: \(e.localizedDescription)"
+            }
             try? await Task.sleep(for: .seconds(3))
         }
     }
@@ -223,6 +251,8 @@ final class ChartViewModel {
     }
 
     func stop() {
+        startTask?.cancel()
+        startTask = nil
         reloadTask?.cancel()
         reloadTask = nil
         wsTask?.cancel()

@@ -31,14 +31,41 @@ final class WorkspaceViewModel {
         tabs.first { $0.id == selectedTabID }
     }
 
+    private var hasStarted = false
+
     init() {
         trading = TradingViewModel(coordinator: TradingCoordinator(port: settings.port))
+        // NOTE: Do NOT start tasks here. SwiftUI re-evaluates @State initializers
+        // on every body evaluation, creating (and discarding) many WorkspaceViewModels.
+        // Only the first instance is kept; the rest are garbage-collected — but any
+        // Tasks launched from init() continue running as orphans.
         if let saved = WorkspaceStateService.shared.load(), !saved.tabs.isEmpty {
-            restoreTabs(from: saved)
+            restoreTabs(from: saved, startTasks: false)
         } else {
-            addTab()
+            addTabWithoutStarting()
+        }
+    }
+
+    /// Called once from ContentView's .task to start WebSocket/REST tasks.
+    func startAll() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        for tab in tabs {
+            switch tab.content {
+            case .chart(let vm): vm.startAsync()
+            case .correlation(let vm): Task { await vm.startAll() }
+            }
         }
         trading.start()
+    }
+
+    /// Creates a default tab without starting tasks (used by init to avoid orphaned tasks).
+    private func addTabWithoutStarting() {
+        let vm = ChartViewModel(coordinator: MarketDataCoordinator(port: settings.port, cache: candleCache))
+        wireStateChanged(vm)
+        let tab = Tab(content: .chart(vm))
+        tabs.append(tab)
+        selectedTabID = tab.id
     }
 
     func addTab() {
@@ -56,7 +83,7 @@ final class WorkspaceViewModel {
         let tab = Tab(content: .chart(vm))
         tabs.append(tab)
         selectedTabID = tab.id
-        Task { await vm.start() }
+        vm.startAsync()
         scheduleSave()
     }
 
@@ -183,7 +210,7 @@ final class WorkspaceViewModel {
         )
     }
 
-    private func restoreTabs(from state: WorkspaceState) {
+    private func restoreTabs(from state: WorkspaceState, startTasks: Bool = true) {
         showBottomPanel = state.showBottomPanel
         showRightPanel = state.showRightPanel
 
@@ -202,7 +229,7 @@ final class WorkspaceViewModel {
                 wireStateChanged(vm)
                 let tab = Tab(content: .chart(vm))
                 tabs.append(tab)
-                Task { await vm.start() }
+                if startTasks { vm.startAsync() }
 
             case .correlation(let corrState):
                 let vm = CorrelationViewModel(
@@ -218,7 +245,7 @@ final class WorkspaceViewModel {
                 wireStateChanged(vm)
                 let tab = Tab(content: .correlation(vm))
                 tabs.append(tab)
-                Task { await vm.startAll() }
+                if startTasks { Task { await vm.startAll() } }
             }
         }
 
