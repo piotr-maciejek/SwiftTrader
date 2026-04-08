@@ -106,64 +106,116 @@ struct ContentView: View {
 
     // MARK: - Tab bar
 
-    private var tabBar: some View {
-        HStack(spacing: 0) {
-            // Tabs
-            ForEach(workspace.tabs) { tab in
-                tabButton(for: tab)
-            }
-
-            // New tab button
-            Button(action: { workspace.addTab() }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .medium))
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .help("New Tab (⌘T)")
-            .dropDestination(for: String.self) { items, _ in
-                guard let draggedIDString = items.first,
-                      let draggedID = UUID(uuidString: draggedIDString),
-                      let index = workspace.tabs.firstIndex(where: { $0.id == draggedID }),
-                      index != workspace.tabs.count - 1
-                else { return false }
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    let tab = workspace.tabs.remove(at: index)
-                    workspace.tabs.append(tab)
-                }
-                return true
-            }
-
-            Spacer()
-
-            // Settings gear
-            Button(action: { workspace.showSettings = true }) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .help("Settings")
-            .popover(isPresented: $workspace.showSettings) {
-                SettingsView(settings: workspace.settings) { port in
-                    workspace.reconnectAll(port: port)
-                    auth.updatePort(port)
-                }
-            }
-
-            // Panel toggle buttons
-            panelToggles
-        }
-        .padding(.horizontal, 4)
-        .frame(height: 32)
-        .background(.bar)
+    private var chartTabs: [WorkspaceViewModel.Tab] {
+        workspace.tabs.filter { if case .chart = $0.content { return true }; return false }
     }
 
-    private func tabButton(for tab: WorkspaceViewModel.Tab) -> some View {
+    private var correlationTabs: [WorkspaceViewModel.Tab] {
+        workspace.tabs.filter { if case .correlation = $0.content { return true }; return false }
+    }
+
+    private func isChartTab(_ id: UUID) -> Bool {
+        workspace.tabs.first(where: { $0.id == id }).map {
+            if case .chart = $0.content { return true }; return false
+        } ?? false
+    }
+
+    // MARK: - Gesture-based tab drag state
+
+    @State private var draggedTabID: UUID?
+    @State private var dragOffset: CGFloat = 0
+    @State private var tabFrames: [UUID: CGRect] = [:]  // in row coordinate space
+
+    private func reorderDuringDrag(tab: WorkspaceViewModel.Tab, rowTabs: [WorkspaceViewModel.Tab]) {
+        guard let dragFrame = tabFrames[tab.id] else { return }
+        let dragCenter = dragFrame.midX + dragOffset
+
+        for other in rowTabs where other.id != tab.id {
+            guard let otherFrame = tabFrames[other.id] else { continue }
+            let otherIndex = workspace.tabs.firstIndex(where: { $0.id == other.id })!
+            let dragIndex = workspace.tabs.firstIndex(where: { $0.id == tab.id })!
+
+            // If dragging right and center passes another tab's midpoint
+            if dragIndex < otherIndex && dragCenter > otherFrame.midX {
+                workspace.moveTab(id: tab.id, beforeID: other.id)
+                // moveTab puts us before other, but we want after — so move other before us
+                workspace.moveTab(id: other.id, beforeID: tab.id)
+                return
+            }
+            // If dragging left and center passes another tab's midpoint
+            if dragIndex > otherIndex && dragCenter < otherFrame.midX {
+                workspace.moveTab(id: tab.id, beforeID: other.id)
+                return
+            }
+        }
+    }
+
+    private var tabBar: some View {
+        VStack(spacing: 0) {
+            // Row 1: chart tabs
+            HStack(spacing: 0) {
+                ForEach(chartTabs) { tab in
+                    tabButton(for: tab, coordinateSpace: "chartRow", rowTabs: chartTabs)
+                }
+
+                // New tab button
+                Button(action: { workspace.addTab() }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("New Tab (⌘T)")
+
+                Spacer()
+
+                // Settings gear
+                Button(action: { workspace.showSettings = true }) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Settings")
+                .popover(isPresented: $workspace.showSettings) {
+                    SettingsView(settings: workspace.settings) { port in
+                        workspace.reconnectAll(port: port)
+                        auth.updatePort(port)
+                    }
+                }
+
+                // Panel toggle buttons
+                panelToggles
+            }
+            .padding(.horizontal, 4)
+            .frame(height: 32)
+            .background(.bar)
+            .coordinateSpace(name: "chartRow")
+
+            // Row 2: correlation tabs (only when present)
+            if !correlationTabs.isEmpty {
+                Divider()
+                HStack(spacing: 0) {
+                    ForEach(correlationTabs) { tab in
+                        tabButton(for: tab, coordinateSpace: "correlationRow", rowTabs: correlationTabs)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+                .frame(height: 32)
+                .background(.bar)
+                .coordinateSpace(name: "correlationRow")
+            }
+        }
+    }
+
+    private func tabButton(for tab: WorkspaceViewModel.Tab, coordinateSpace: String,
+                           rowTabs: [WorkspaceViewModel.Tab]) -> some View {
         let isSelected = tab.id == workspace.selectedTabID
+        let isDragged = tab.id == draggedTabID
 
         let periodLabel = { (p: String) in
             ChartViewModel.availablePeriods.first { $0.value == p }?.label ?? p
@@ -196,17 +248,37 @@ struct ContentView: View {
                 .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         )
         .contentShape(Rectangle())
-        .onTapGesture { workspace.selectTab(tab.id) }
-        .draggable(tab.id.uuidString)
-        .dropDestination(for: String.self) { items, _ in
-            guard let draggedIDString = items.first,
-                  let draggedID = UUID(uuidString: draggedIDString)
-            else { return false }
-            withAnimation(.easeInOut(duration: 0.2)) {
-                workspace.moveTab(id: draggedID, beforeID: tab.id)
+        .offset(x: isDragged ? dragOffset : 0)
+        .zIndex(isDragged ? 1 : 0)
+        .opacity(isDragged ? 0.8 : 1)
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { tabFrames[tab.id] = geo.frame(in: .named(coordinateSpace)) }
+                    .onChange(of: geo.frame(in: .named(coordinateSpace))) { _, frame in
+                        if !isDragged { tabFrames[tab.id] = frame }
+                    }
             }
-            return true
-        }
+        )
+        .gesture(
+            DragGesture(minimumDistance: 5)
+                .onChanged { value in
+                    if draggedTabID == nil {
+                        draggedTabID = tab.id
+                        // Snapshot current frame before dragging changes layout
+                        tabFrames[tab.id] = tabFrames[tab.id]
+                    }
+                    dragOffset = value.translation.width
+                    reorderDuringDrag(tab: tab, rowTabs: rowTabs)
+                }
+                .onEnded { _ in
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        dragOffset = 0
+                        draggedTabID = nil
+                    }
+                }
+        )
+        .onTapGesture { workspace.selectTab(tab.id) }
     }
 
     // MARK: - Panel toggles

@@ -162,6 +162,15 @@ final class WorkspaceViewModel {
         scheduleSave()
     }
 
+    func moveTabToEnd(id: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }),
+              index != tabs.count - 1
+        else { return }
+        let tab = tabs.remove(at: index)
+        tabs.append(tab)
+        scheduleSave()
+    }
+
     // MARK: - State persistence
 
     private func scheduleSave() {
