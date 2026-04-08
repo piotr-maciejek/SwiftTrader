@@ -101,10 +101,10 @@ final class ChartViewModel {
             try? await Task.sleep(for: .seconds(2))
         }
 
-        // Start WebSocket immediately so live data flows while history loads
-        connectWebSocket()
-        // Retry history until we get actual bars (server may be up but data source not yet connected)
+        // Load history first so the REST call isn't starved by WebSocket
+        // callbacks competing for MainActor time.
         await loadHistoryWithRetry()
+        connectWebSocket()
     }
 
     func switchInstrument(_ instrument: String) {
@@ -136,7 +136,6 @@ final class ChartViewModel {
         error = nil
 
         let key = CandleCache.CacheKey(instrument: currentInstrument, period: currentPeriod)
-        connectWebSocket()
         reloadTask = Task {
             let cached = await coordinator.cache.getBars(for: key)
             if !cached.isEmpty {
@@ -144,6 +143,7 @@ final class ChartViewModel {
                 scrollToEnd()
             }
             await loadHistoryWithRetry()
+            connectWebSocket()
         }
     }
 
