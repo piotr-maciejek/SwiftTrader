@@ -56,37 +56,16 @@ final class TradingViewModel {
     }
 
     func submitOneClickOrder(direction: String, instrument: String, bars: [CandleBar]) async {
-        // Find the last completed candle
-        guard let previous = lastCompletedBar(in: bars),
-              let current = bars.last else {
-            orderError = "Not enough candle data"
-            return
-        }
-
-        let currentPrice = current.close
-        let stopLoss: Double
-        let takeProfit: Double
-
-        if direction == "BUY" {
-            stopLoss = previous.low
-            let risk = currentPrice - stopLoss
-            guard risk > 0 else {
-                orderError = "Invalid SL: current price below previous low"
-                return
+        switch Self.calculateOneClick(direction: direction, bars: bars) {
+        case .success(let params):
+            await submitMarketOrder(instrument: instrument, direction: direction,
+                                    stopLoss: params.stopLoss, takeProfit: params.takeProfit)
+        case .failure(let error):
+            switch error {
+            case .insufficientData: orderError = "Not enough candle data"
+            case .invalidRisk(let detail): orderError = "Invalid SL: \(detail)"
             }
-            takeProfit = currentPrice + risk * 3
-        } else {
-            stopLoss = previous.high
-            let risk = stopLoss - currentPrice
-            guard risk > 0 else {
-                orderError = "Invalid SL: current price above previous high"
-                return
-            }
-            takeProfit = currentPrice - risk * 3
         }
-
-        await submitMarketOrder(instrument: instrument, direction: direction,
-                                stopLoss: stopLoss, takeProfit: takeProfit)
     }
 
     func closePosition(label: String) async {
@@ -105,15 +84,52 @@ final class TradingViewModel {
         }
     }
 
-    // MARK: - Private
+    // MARK: - Order Calculation
 
-    private func lastCompletedBar(in bars: [CandleBar]) -> CandleBar? {
+    struct OneClickParams: Equatable {
+        let stopLoss: Double
+        let takeProfit: Double
+    }
+
+    enum OneClickError: Error, Equatable {
+        case insufficientData
+        case invalidRisk(String)
+    }
+
+    /// Pure calculation of one-click order SL/TP. Exposed for testing.
+    nonisolated static func calculateOneClick(direction: String, bars: [CandleBar]) -> Result<OneClickParams, OneClickError> {
+        guard let previous = lastCompletedBar(in: bars),
+              let current = bars.last else {
+            return .failure(.insufficientData)
+        }
+
+        let currentPrice = current.close
+        if direction == "BUY" {
+            let stopLoss = previous.low
+            let risk = currentPrice - stopLoss
+            guard risk > 0 else {
+                return .failure(.invalidRisk("current price below previous low"))
+            }
+            return .success(OneClickParams(stopLoss: stopLoss, takeProfit: currentPrice + risk * 3))
+        } else {
+            let stopLoss = previous.high
+            let risk = stopLoss - currentPrice
+            guard risk > 0 else {
+                return .failure(.invalidRisk("current price above previous high"))
+            }
+            return .success(OneClickParams(stopLoss: stopLoss, takeProfit: currentPrice - risk * 3))
+        }
+    }
+
+    nonisolated static func lastCompletedBar(in bars: [CandleBar]) -> CandleBar? {
         guard !bars.isEmpty else { return nil }
         if let last = bars.last, !last.partial {
             return bars.count >= 2 ? bars[bars.count - 2] : nil
         }
         return bars.count >= 3 ? bars[bars.count - 3] : (bars.count >= 2 ? bars[bars.count - 2] : nil)
     }
+
+    // MARK: - Private
 
     private func connectWebSocket() {
         wsTask?.cancel()

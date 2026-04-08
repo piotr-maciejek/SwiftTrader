@@ -43,9 +43,13 @@
 		A1000022 /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023; };
 		A1000023 /* TabState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024; };
 		A1000024 /* WorkspaceStateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025; };
+		A1000025 /* MarketDataProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000027; };
 		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001; };
 		B1000002 /* CandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002; };
 		B1000003 /* ForexAPIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003; };
+		B1000004 /* MockMarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000004; };
+		B1000005 /* ChartViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000005; };
+		B1000006 /* OneClickOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000006; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -97,10 +101,14 @@
 		A2000024 /* TabState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabState.swift; sourceTree = "<group>"; };
 		A2000025 /* WorkspaceStateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStateService.swift; sourceTree = "<group>"; };
 		A2000026 /* SwiftTrader.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SwiftTrader.entitlements; sourceTree = "<group>"; };
+		A2000027 /* MarketDataProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketDataProviding.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
 		B2000002 /* CandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCacheTests.swift; sourceTree = "<group>"; };
 		B2000003 /* ForexAPIServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForexAPIServiceTests.swift; sourceTree = "<group>"; };
+		B2000004 /* MockMarketDataCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockMarketDataCoordinator.swift; sourceTree = "<group>"; };
+		B2000005 /* ChartViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartViewModelTests.swift; sourceTree = "<group>"; };
+		B2000006 /* OneClickOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneClickOrderTests.swift; sourceTree = "<group>"; };
 		B3000001 /* SwiftTraderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SwiftTraderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -156,6 +164,7 @@
 				A2000018 /* CandleCache.swift */,
 				A2000020 /* AuthService.swift */,
 				A2000025 /* WorkspaceStateService.swift */,
+				A2000027 /* MarketDataProviding.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -205,6 +214,9 @@
 				B2000001 /* SessionCalculatorTests.swift */,
 				B2000002 /* CandleCacheTests.swift */,
 				B2000003 /* ForexAPIServiceTests.swift */,
+				B2000004 /* MockMarketDataCoordinator.swift */,
+				B2000005 /* ChartViewModelTests.swift */,
+				B2000006 /* OneClickOrderTests.swift */,
 			);
 			path = SwiftTraderTests;
 			sourceTree = "<group>";
@@ -313,6 +325,7 @@
 				A1000022 /* Account.swift in Sources */,
 				A1000023 /* TabState.swift in Sources */,
 				A1000024 /* WorkspaceStateService.swift in Sources */,
+				A1000025 /* MarketDataProviding.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -323,6 +336,9 @@
 				B1000001 /* SessionCalculatorTests.swift in Sources */,
 				B1000002 /* CandleCacheTests.swift in Sources */,
 				B1000003 /* ForexAPIServiceTests.swift in Sources */,
+				B1000004 /* MockMarketDataCoordinator.swift in Sources */,
+				B1000005 /* ChartViewModelTests.swift in Sources */,
+				B1000006 /* OneClickOrderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

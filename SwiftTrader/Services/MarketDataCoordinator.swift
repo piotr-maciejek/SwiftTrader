@@ -1,6 +1,6 @@
 import Foundation
 
-final class MarketDataCoordinator: Sendable {
+final class MarketDataCoordinator: MarketDataProviding, Sendable {
     private let apiService: ForexAPIService
     private let host: String
     private let port: Int

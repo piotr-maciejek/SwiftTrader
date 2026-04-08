@@ -56,14 +56,14 @@ final class ChartViewModel {
     /// Set by ChartView via GeometryReader so scroll calculations use real width
     var chartWidth: CGFloat = 1200
 
-    private var coordinator: MarketDataCoordinator
+    private var coordinator: any MarketDataProviding
     private var startTask: Task<Void, Never>?
     private var wsTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
     private var hasStarted = false
     private var isLoadingEarlier = false
 
-    init(coordinator: MarketDataCoordinator = MarketDataCoordinator()) {
+    init(coordinator: any MarketDataProviding = MarketDataCoordinator()) {
         self.coordinator = coordinator
     }
 
@@ -221,7 +221,7 @@ final class ChartViewModel {
         }
     }
 
-    private func handleBar(_ bar: CandleBar, expectedInstrument: String, expectedPeriod: String) {
+    func handleBar(_ bar: CandleBar, expectedInstrument: String, expectedPeriod: String) {
         // Discard bars from a stale WebSocket that hasn't been cancelled yet
         guard expectedInstrument == currentInstrument, expectedPeriod == currentPeriod else { return }
         if bar.partial {
