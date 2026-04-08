@@ -6,7 +6,9 @@ struct ContentView: View {
     @State private var showBuyPopover = false
     @State private var showSellPopover = false
     @State private var showEMAPopover = false
+    @State private var showATRPopover = false
     @State private var showCorrelationEMAPopover = false
+    @State private var showCorrelationATRPopover = false
 
     var body: some View {
         Group {
@@ -386,6 +388,20 @@ struct ContentView: View {
                 )
             }
 
+            Button(action: { showATRPopover.toggle() }) {
+                Text("ATR")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(vm.showATR ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Average True Range")
+            .popover(isPresented: $showATRPopover) {
+                ATRPopover(
+                    showATR: Binding(get: { vm.showATR }, set: { vm.showATR = $0 }),
+                    atrPeriod: Binding(get: { vm.atrPeriod }, set: { vm.atrPeriod = $0 })
+                )
+            }
+
             Divider().frame(height: 16)
 
             // Trading controls
@@ -430,6 +446,10 @@ struct ContentView: View {
             emaConfigs: vm.emaConfigs,
             positions: workspace.trading.positions,
             currentInstrument: vm.currentInstrument,
+            showATR: vm.showATR,
+            atrPeriod: vm.atrPeriod,
+            atrPips: vm.atrPips,
+            todayATRPercent: vm.todayATRPercent,
             onModifyPosition: { label, sl, tp in
                 Task { await workspace.trading.modifyPosition(label: label, stopLoss: sl, takeProfit: tp) }
             }
@@ -508,6 +528,20 @@ struct ContentView: View {
                 EMAPopover(
                     showEMA: Binding(get: { vm.showEMA }, set: { vm.showEMA = $0 }),
                     emaConfigs: Binding(get: { vm.emaConfigs }, set: { vm.emaConfigs = $0 })
+                )
+            }
+
+            Button(action: { showCorrelationATRPopover.toggle() }) {
+                Text("ATR")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(vm.showATR ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Average True Range")
+            .popover(isPresented: $showCorrelationATRPopover) {
+                ATRPopover(
+                    showATR: Binding(get: { vm.showATR }, set: { vm.showATR = $0 }),
+                    atrPeriod: Binding(get: { vm.atrPeriod }, set: { vm.atrPeriod = $0 })
                 )
             }
 

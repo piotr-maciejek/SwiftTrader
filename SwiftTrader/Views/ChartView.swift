@@ -11,6 +11,10 @@ struct ChartView: View {
     var emaConfigs: [EMALine] = []
     var positions: [Position] = []
     var currentInstrument: String = ""
+    var showATR: Bool = true
+    var atrPeriod: Int = 14
+    var atrPips: Double?
+    var todayATRPercent: Double?
     var onModifyPosition: ((String, Double, Double) -> Void)? = nil
     @State private var crosshair: CrosshairState? = nil
     @State private var dragPreview: DragPreviewState? = nil
@@ -74,6 +78,9 @@ struct ChartView: View {
                     drawTimeAxis(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange)
                     if let ch = crosshair, !bars.isEmpty {
                         drawCrosshairLabels(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, crosshair: ch)
+                    }
+                    if showATR, let pips = atrPips, let percent = todayATRPercent {
+                        drawATROverlay(context: &context, chartWidth: chartWidth, atrPeriod: atrPeriod, atrPips: pips, todayPercent: percent)
                     }
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
@@ -613,6 +620,27 @@ struct ChartView: View {
             }
             context.stroke(path, with: .color(config.color), lineWidth: 1.5)
         }
+    }
+
+    // MARK: - ATR overlay
+
+    private func drawATROverlay(
+        context: inout GraphicsContext,
+        chartWidth: CGFloat,
+        atrPeriod: Int,
+        atrPips: Double,
+        todayPercent: Double
+    ) {
+        let text = String(format: "ATR(%d): %.1f pips  |  Today: %.0f%%", atrPeriod, atrPips, todayPercent)
+        let resolved = context.resolve(
+            Text(text)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.secondary.opacity(0.8))
+        )
+        let size = resolved.measure(in: CGSize(width: chartWidth, height: .infinity))
+        // Top-left corner with padding
+        context.draw(resolved, at: CGPoint(x: 8, y: 8), anchor: .topLeading)
+        _ = size // suppress unused warning
     }
 
     // MARK: - Volume

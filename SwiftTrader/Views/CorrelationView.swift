@@ -61,7 +61,11 @@ struct CorrelationView: View {
                 showSessions: vm.showSessions,
                 showVolume: vm.showVolume,
                 showEMA: vm.showEMA,
-                emaConfigs: vm.emaConfigs
+                emaConfigs: vm.emaConfigs,
+                showATR: vm.showATR,
+                atrPeriod: vm.atrPeriod,
+                atrPips: vm.atrPips,
+                todayATRPercent: vm.todayATRPercent
             )
             .overlay {
                 if vm.bars.isEmpty {

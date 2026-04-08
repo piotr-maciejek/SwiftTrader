@@ -31,6 +31,18 @@ final class CorrelationViewModel {
             onStateChanged?()
         }
     }
+    var showATR = true {
+        didSet {
+            for vm in chartViewModels { vm.showATR = showATR }
+            onStateChanged?()
+        }
+    }
+    var atrPeriod = 14 {
+        didSet {
+            for vm in chartViewModels { vm.atrPeriod = atrPeriod }
+            onStateChanged?()
+        }
+    }
 
     var onStateChanged: (() -> Void)?
 

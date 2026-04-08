@@ -32,6 +32,28 @@ struct ChartTabState: Codable, Equatable {
     var showVolume: Bool
     var showEMA: Bool
     var emaConfigs: [EMALineState]
+    var showATR: Bool
+    var atrPeriod: Int
+
+    init(instrument: String, period: String, showSessions: Bool, showVolume: Bool,
+         showEMA: Bool, emaConfigs: [EMALineState], showATR: Bool = true, atrPeriod: Int = 14) {
+        self.instrument = instrument; self.period = period
+        self.showSessions = showSessions; self.showVolume = showVolume
+        self.showEMA = showEMA; self.emaConfigs = emaConfigs
+        self.showATR = showATR; self.atrPeriod = atrPeriod
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        instrument = try c.decode(String.self, forKey: .instrument)
+        period = try c.decode(String.self, forKey: .period)
+        showSessions = try c.decode(Bool.self, forKey: .showSessions)
+        showVolume = try c.decode(Bool.self, forKey: .showVolume)
+        showEMA = try c.decode(Bool.self, forKey: .showEMA)
+        emaConfigs = try c.decode([EMALineState].self, forKey: .emaConfigs)
+        showATR = try c.decodeIfPresent(Bool.self, forKey: .showATR) ?? true
+        atrPeriod = try c.decodeIfPresent(Int.self, forKey: .atrPeriod) ?? 14
+    }
 }
 
 struct CorrelationTabState: Codable, Equatable {
@@ -41,6 +63,28 @@ struct CorrelationTabState: Codable, Equatable {
     var showVolume: Bool
     var showEMA: Bool
     var emaConfigs: [EMALineState]
+    var showATR: Bool
+    var atrPeriod: Int
+
+    init(currency: String, period: String, showSessions: Bool, showVolume: Bool,
+         showEMA: Bool, emaConfigs: [EMALineState], showATR: Bool = true, atrPeriod: Int = 14) {
+        self.currency = currency; self.period = period
+        self.showSessions = showSessions; self.showVolume = showVolume
+        self.showEMA = showEMA; self.emaConfigs = emaConfigs
+        self.showATR = showATR; self.atrPeriod = atrPeriod
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        currency = try c.decode(String.self, forKey: .currency)
+        period = try c.decode(String.self, forKey: .period)
+        showSessions = try c.decode(Bool.self, forKey: .showSessions)
+        showVolume = try c.decode(Bool.self, forKey: .showVolume)
+        showEMA = try c.decode(Bool.self, forKey: .showEMA)
+        emaConfigs = try c.decode([EMALineState].self, forKey: .emaConfigs)
+        showATR = try c.decodeIfPresent(Bool.self, forKey: .showATR) ?? true
+        atrPeriod = try c.decodeIfPresent(Int.self, forKey: .atrPeriod) ?? 14
+    }
 }
 
 enum TabContentState: Codable, Equatable {

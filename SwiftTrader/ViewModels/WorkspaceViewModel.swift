@@ -197,7 +197,9 @@ final class WorkspaceViewModel {
                     showSessions: vm.showSessions,
                     showVolume: vm.showVolume,
                     showEMA: vm.showEMA,
-                    emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) }
+                    emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) },
+                    showATR: vm.showATR,
+                    atrPeriod: vm.atrPeriod
                 )))
             case .correlation(let vm):
                 return TabState(id: tab.id, content: .correlation(CorrelationTabState(
@@ -206,7 +208,9 @@ final class WorkspaceViewModel {
                     showSessions: vm.showSessions,
                     showVolume: vm.showVolume,
                     showEMA: vm.showEMA,
-                    emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) }
+                    emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) },
+                    showATR: vm.showATR,
+                    atrPeriod: vm.atrPeriod
                 )))
             }
         }
@@ -235,6 +239,8 @@ final class WorkspaceViewModel {
                 vm.showVolume = chartState.showVolume
                 vm.showEMA = chartState.showEMA
                 vm.emaConfigs = chartState.emaConfigs.map { $0.toEMALine() }
+                vm.showATR = chartState.showATR
+                vm.atrPeriod = chartState.atrPeriod
                 wireStateChanged(vm)
                 let tab = Tab(content: .chart(vm))
                 tabs.append(tab)
@@ -251,6 +257,8 @@ final class WorkspaceViewModel {
                 vm.showVolume = corrState.showVolume
                 vm.showEMA = corrState.showEMA
                 vm.emaConfigs = corrState.emaConfigs.map { $0.toEMALine() }
+                vm.showATR = corrState.showATR
+                vm.atrPeriod = corrState.atrPeriod
                 wireStateChanged(vm)
                 let tab = Tab(content: .correlation(vm))
                 tabs.append(tab)

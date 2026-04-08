@@ -36,6 +36,18 @@ final class ChartViewModel {
     var emaConfigs: [EMALine] = EMALine.defaults {
         didSet { onStateChanged?() }
     }
+    var showATR = true {
+        didSet { onStateChanged?() }
+    }
+    var atrPeriod = 14 {
+        didSet {
+            onStateChanged?()
+            loadATR()
+        }
+    }
+    var atrValue: Double?
+    var atrPips: Double?
+    var todayATRPercent: Double?
 
     var onStateChanged: (() -> Void)?
 
@@ -60,6 +72,7 @@ final class ChartViewModel {
     private var startTask: Task<Void, Never>?
     private var wsTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
+    private var atrTask: Task<Void, Never>?
     private var hasStarted = false
     private var isLoadingEarlier = false
 
@@ -104,6 +117,7 @@ final class ChartViewModel {
         // Load history first so the REST call isn't starved by WebSocket
         // callbacks competing for MainActor time.
         await loadHistoryWithRetry()
+        loadATR()
         connectWebSocket()
     }
 
@@ -127,6 +141,7 @@ final class ChartViewModel {
         startTask?.cancel()
         reloadTask?.cancel()
         wsTask?.cancel()
+        atrTask?.cancel()
         isLoadingEarlier = false
 
         // Reset synchronously so the Canvas never sees a stale xOffset
@@ -143,6 +158,7 @@ final class ChartViewModel {
                 scrollToEnd()
             }
             await loadHistoryWithRetry()
+            loadATR()
             connectWebSocket()
         }
     }
@@ -195,6 +211,42 @@ final class ChartViewModel {
         } catch {
             if bars.isEmpty {
                 self.error = "Failed to load history: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    // MARK: - ATR
+
+    func loadATR() {
+        atrTask?.cancel()
+        let instrument = currentInstrument
+        atrTask = Task {
+            do {
+                // Fetch enough hourly candles to cover atrPeriod + 2 trading days.
+                // Trading days ≈ 5/7 of calendar days, each has ~24 hourly bars.
+                let tradingDaysNeeded = self.atrPeriod + 2
+                let calendarDays = Int(ceil(Double(tradingDaysNeeded) * 7.0 / 5.0))
+                let count = calendarDays * 24
+                let hourlyBars = try await coordinator.fetchCandles(
+                    instrument: instrument, period: "ONE_HOUR", count: count
+                )
+                guard !Task.isCancelled, instrument == currentInstrument else { return }
+                if let result = TradingDayATR.compute(from: hourlyBars, instrument: instrument, period: self.atrPeriod) {
+                    atrValue = result.atr
+                    atrPips = result.pips
+                    todayATRPercent = result.todayPercent
+                } else {
+                    atrValue = nil
+                    atrPips = nil
+                    todayATRPercent = nil
+                }
+            } catch {
+                // Non-critical — just clear values
+                if !Task.isCancelled {
+                    atrValue = nil
+                    atrPips = nil
+                    todayATRPercent = nil
+                }
             }
         }
     }
@@ -261,6 +313,8 @@ final class ChartViewModel {
         reloadTask = nil
         wsTask?.cancel()
         wsTask = nil
+        atrTask?.cancel()
+        atrTask = nil
         isConnected = false
     }
 
