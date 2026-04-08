@@ -20,7 +20,13 @@ final class WorkspaceStateService {
     }
 
     func save(_ state: WorkspaceState) {
-        guard let data = try? JSONEncoder().encode(state) else { return }
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(state)
+        } catch {
+            print("WorkspaceStateService: failed to encode state: \(error)")
+            return
+        }
         UserDefaults.standard.set(data, forKey: key)
         cloudStore?.set(data, forKey: key)
         cloudStore?.synchronize()
