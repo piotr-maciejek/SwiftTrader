@@ -139,4 +139,14 @@ struct CandleCacheTests {
         let result = await cache.getBars(for: testKey)
         #expect(result.isEmpty)
     }
+
+    @Test("Merge replaces existing bars when timestamps match")
+    func mergeReplacesMatchingTimestamps() async {
+        let cache = CandleCache()
+        _ = await cache.merge([makeBar(time: 100, close: 1.0), makeBar(time: 200, close: 2.0)], for: testKey)
+        let result = await cache.merge([makeBar(time: 200, close: 9.0)], for: testKey)
+        #expect(result.count == 2)
+        #expect(result[0].close == 1.0)  // time 100 unchanged
+        #expect(result[1].close == 9.0)  // time 200 replaced with new value
+    }
 }
