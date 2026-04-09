@@ -60,6 +60,8 @@ struct CorrelationView: View {
                 onUserDrag: { vm.onUserScroll() },
                 showSessions: vm.showSessions,
                 showVolume: vm.showVolume,
+                showVolumeMA: vm.showVolumeMA,
+                volumeMA: vm.volumeMA,
                 showEMA: vm.showEMA,
                 emaConfigs: vm.emaConfigs,
                 showATR: vm.showATR,

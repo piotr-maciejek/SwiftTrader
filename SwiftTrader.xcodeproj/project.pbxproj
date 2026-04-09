@@ -46,6 +46,7 @@
 		A1000025 /* MarketDataProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000027; };
 		A1000026 /* TradingDayATR.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000028; };
 		A1000027 /* ATRPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000029; };
+		A1000028 /* VolumeMAPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002A; };
 		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001; };
 		B1000002 /* CandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002; };
 		B1000003 /* ForexAPIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003; };
@@ -108,6 +109,7 @@
 		A2000027 /* MarketDataProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketDataProviding.swift; sourceTree = "<group>"; };
 		A2000028 /* TradingDayATR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingDayATR.swift; sourceTree = "<group>"; };
 		A2000029 /* ATRPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ATRPopover.swift; sourceTree = "<group>"; };
+		A200002A /* VolumeMAPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeMAPopover.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
 		B2000002 /* CandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCacheTests.swift; sourceTree = "<group>"; };
@@ -214,6 +216,7 @@
 				A200001F /* EMAPopover.swift */,
 				A2000022 /* PinEntrySheet.swift */,
 				A2000029 /* ATRPopover.swift */,
+				A200002A /* VolumeMAPopover.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -340,6 +343,7 @@
 				A1000025 /* MarketDataProviding.swift in Sources */,
 				A1000026 /* TradingDayATR.swift in Sources */,
 				A1000027 /* ATRPopover.swift in Sources */,
+				A1000028 /* VolumeMAPopover.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

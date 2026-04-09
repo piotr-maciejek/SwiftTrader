@@ -30,6 +30,12 @@ final class ChartViewModel {
     var showVolume = true {
         didSet { onStateChanged?() }
     }
+    var showVolumeMA = true {
+        didSet { onStateChanged?() }
+    }
+    var volumeMA: EMALine = EMALine(period: 20, color: .cyan) {
+        didSet { onStateChanged?() }
+    }
     var showEMA = true {
         didSet { onStateChanged?() }
     }

@@ -7,6 +7,8 @@ struct ChartView: View {
     var onUserDrag: (() -> Void)?
     var showSessions: Bool = true
     var showVolume: Bool = true
+    var showVolumeMA: Bool = true
+    var volumeMA: EMALine = EMALine(period: 20, color: .cyan)
     var showEMA: Bool = true
     var emaConfigs: [EMALine] = []
     var positions: [Position] = []
@@ -66,6 +68,10 @@ struct ChartView: View {
                     }
                     if showVolume {
                         drawVolumeBars(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, volumeHeight: volumeHeight, visibleRange: visibleRange)
+                        if showVolumeMA {
+                            let maxVol = visibleRange.reduce(0.0) { max($0, bars[$1].volume) }
+                            drawVolumeSMALine(context: &chartContext, chartHeight: chartHeight, volumeHeight: volumeHeight, maxVol: maxVol, visibleRange: visibleRange)
+                        }
                     }
                     if let ch = crosshair, !bars.isEmpty {
                         drawCrosshairLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, volumeHeight: volumeHeight, crosshair: ch)
@@ -684,6 +690,47 @@ struct ChartView: View {
             )
             context.fill(Path(rect), with: .color(color))
         }
+    }
+
+    // MARK: - Volume SMA
+
+    private func computeVolumeSMA(period: Int) -> [Double] {
+        guard !bars.isEmpty else { return [] }
+        var sma = [Double](repeating: 0, count: bars.count)
+        var runningSum = 0.0
+        for i in 0..<bars.count {
+            runningSum += bars[i].volume
+            if i >= period {
+                runningSum -= bars[i - period].volume
+                sma[i] = runningSum / Double(period)
+            } else {
+                sma[i] = runningSum / Double(i + 1)
+            }
+        }
+        return sma
+    }
+
+    private func drawVolumeSMALine(
+        context: inout GraphicsContext,
+        chartHeight: CGFloat,
+        volumeHeight: CGFloat,
+        maxVol: Double,
+        visibleRange: Range<Int>
+    ) {
+        guard maxVol > 0 else { return }
+        let values = computeVolumeSMA(period: volumeMA.period)
+        guard values.count > 1 else { return }
+
+        let volumeBottom = chartHeight + volumeHeight
+        var path = Path()
+
+        for i in visibleRange {
+            let x = xForBar(index: i)
+            let y = volumeBottom - CGFloat(values[i] / maxVol) * (volumeHeight - 2)
+            if i == visibleRange.lowerBound { path.move(to: CGPoint(x: x, y: y)) }
+            else { path.addLine(to: CGPoint(x: x, y: y)) }
+        }
+        context.stroke(path, with: .color(volumeMA.color), lineWidth: 1.5)
     }
 
     // MARK: - Helpers

@@ -19,6 +19,18 @@ final class CorrelationViewModel {
             onStateChanged?()
         }
     }
+    var showVolumeMA = true {
+        didSet {
+            for vm in chartViewModels { vm.showVolumeMA = showVolumeMA }
+            onStateChanged?()
+        }
+    }
+    var volumeMA: EMALine = EMALine(period: 20, color: .cyan) {
+        didSet {
+            for vm in chartViewModels { vm.volumeMA = volumeMA }
+            onStateChanged?()
+        }
+    }
     var showEMA = true {
         didSet {
             for vm in chartViewModels { vm.showEMA = showEMA }

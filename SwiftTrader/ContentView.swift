@@ -6,8 +6,10 @@ struct ContentView: View {
     @State private var showBuyPopover = false
     @State private var showSellPopover = false
     @State private var showEMAPopover = false
+    @State private var showVolumeMAPopover = false
     @State private var showATRPopover = false
     @State private var showCorrelationEMAPopover = false
+    @State private var showCorrelationVolumeMAPopover = false
     @State private var showCorrelationATRPopover = false
 
     var body: some View {
@@ -374,6 +376,20 @@ struct ContentView: View {
             .buttonStyle(.borderless)
             .help("Volume")
 
+            Button(action: { showVolumeMAPopover.toggle() }) {
+                Text("VMA")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(vm.showVolumeMA ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Volume MA")
+            .popover(isPresented: $showVolumeMAPopover) {
+                VolumeMAPopover(
+                    showVolumeMA: Binding(get: { vm.showVolumeMA }, set: { vm.showVolumeMA = $0 }),
+                    volumeMA: Binding(get: { vm.volumeMA }, set: { vm.volumeMA = $0 })
+                )
+            }
+
             Button(action: { showEMAPopover.toggle() }) {
                 Image(systemName: "chart.line.uptrend.xyaxis")
                     .font(.system(size: 11))
@@ -442,6 +458,8 @@ struct ContentView: View {
             onUserDrag: { vm.onUserScroll() },
             showSessions: vm.showSessions,
             showVolume: vm.showVolume,
+            showVolumeMA: vm.showVolumeMA,
+            volumeMA: vm.volumeMA,
             showEMA: vm.showEMA,
             emaConfigs: vm.emaConfigs,
             positions: workspace.trading.positions,
@@ -516,6 +534,20 @@ struct ContentView: View {
             }
             .buttonStyle(.borderless)
             .help("Volume")
+
+            Button(action: { showCorrelationVolumeMAPopover.toggle() }) {
+                Text("VMA")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(vm.showVolumeMA ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Volume MA")
+            .popover(isPresented: $showCorrelationVolumeMAPopover) {
+                VolumeMAPopover(
+                    showVolumeMA: Binding(get: { vm.showVolumeMA }, set: { vm.showVolumeMA = $0 }),
+                    volumeMA: Binding(get: { vm.volumeMA }, set: { vm.volumeMA = $0 })
+                )
+            }
 
             Button(action: { showCorrelationEMAPopover.toggle() }) {
                 Image(systemName: "chart.line.uptrend.xyaxis")
