@@ -79,11 +79,21 @@ final class ChartViewModel {
     private var wsTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
     private var atrTask: Task<Void, Never>?
+    private var todayTradingDayStart: Date?
+    private var todayHigh: Double?
+    private var todayLow: Double?
     private var hasStarted = false
     private var isLoadingEarlier = false
 
     init(coordinator: any MarketDataProviding = MarketDataCoordinator()) {
         self.coordinator = coordinator
+    }
+
+    /// Test helper to seed today's ATR tracking state.
+    func setTodayATRRange(dayStart: Date, high: Double, low: Double) {
+        todayTradingDayStart = dayStart
+        todayHigh = high
+        todayLow = low
     }
 
     func reconnect(port: Int) {
@@ -241,6 +251,15 @@ final class ChartViewModel {
                     atrValue = result.atr
                     atrPips = result.pips
                     todayATRPercent = result.todayPercent
+
+                    // Store today's trading day boundary and high/low so handleBar
+                    // can update todayATRPercent in real-time.
+                    let allDays = TradingDayATR.tradingDayRanges(from: hourlyBars)
+                    if let today = allDays.last {
+                        todayTradingDayStart = today.start
+                        todayHigh = today.high
+                        todayLow = today.low
+                    }
                 } else {
                     atrValue = nil
                     atrPips = nil
@@ -254,6 +273,28 @@ final class ChartViewModel {
                     todayATRPercent = nil
                 }
             }
+        }
+    }
+
+    /// Update today's ATR percentage from a live bar if it falls within
+    /// the current trading day.
+    private func updateATRFromBar(_ bar: CandleBar) {
+        guard let atr = atrValue, atr > 0,
+              let dayStart = todayTradingDayStart,
+              var high = todayHigh,
+              var low = todayLow else { return }
+
+        // Check the bar belongs to today's trading day
+        let barDate = bar.date
+        guard barDate >= dayStart else { return }
+
+        var changed = false
+        if bar.high > high { high = bar.high; todayHigh = high; changed = true }
+        if bar.low < low { low = bar.low; todayLow = low; changed = true }
+
+        if changed {
+            let range = high - low
+            todayATRPercent = (range / atr) * 100
         }
     }
 
@@ -300,6 +341,7 @@ final class ChartViewModel {
             }
             Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod) }
         }
+        updateATRFromBar(bar)
     }
 
     func scrollToEnd() {

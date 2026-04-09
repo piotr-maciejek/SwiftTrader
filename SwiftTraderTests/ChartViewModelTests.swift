@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import SwiftTrader
 
 private func makeBar(time: Int64, open: Double = 1.0, high: Double = 1.2, low: Double = 0.9, close: Double = 1.1, volume: Double = 100, partial: Bool = false) -> CandleBar {
@@ -221,6 +222,52 @@ struct ChartViewModelTests {
 
         #expect(mock.fetchCandlesCalls.first?.count == 500)
         vm.stop()
+    }
+
+    // MARK: - Live ATR today% update
+
+    @Test("handleBar updates todayATRPercent when bar extends today's high")
+    func handleBarUpdatesATRPercent() {
+        let mock = MockMarketDataCoordinator()
+        let vm = ChartViewModel(coordinator: mock)
+        vm.bars = [makeBar(time: 1000)]
+
+        // Simulate state after loadATR: ATR = 0.0100, today's range so far 1.100–1.104
+        vm.atrValue = 0.0100
+        vm.todayATRPercent = 40.0  // (1.104-1.100)/0.01*100
+        vm.setTodayATRRange(
+            dayStart: Date.distantPast,
+            high: 1.104,
+            low: 1.100
+        )
+
+        // New bar with higher high: 1.107 → range becomes 1.107-1.100 = 0.007 → 70%
+        vm.handleBar(makeBar(time: 2000, high: 1.107, low: 1.101, close: 1.106),
+                     expectedInstrument: "EURUSD", expectedPeriod: "FIFTEEN_MINS")
+
+        #expect(vm.todayATRPercent != nil)
+        #expect(abs(vm.todayATRPercent! - 70.0) < 0.01)
+    }
+
+    @Test("handleBar does not lower todayATRPercent when bar is within existing range")
+    func handleBarDoesNotShrinkATRRange() {
+        let mock = MockMarketDataCoordinator()
+        let vm = ChartViewModel(coordinator: mock)
+        vm.bars = [makeBar(time: 1000)]
+
+        vm.atrValue = 0.0100
+        vm.todayATRPercent = 40.0
+        vm.setTodayATRRange(
+            dayStart: Date.distantPast,
+            high: 1.104,
+            low: 1.100
+        )
+
+        // Bar within existing range — should not change percentage
+        vm.handleBar(makeBar(time: 2000, high: 1.103, low: 1.101, close: 1.102),
+                     expectedInstrument: "EURUSD", expectedPeriod: "FIFTEEN_MINS")
+
+        #expect(abs(vm.todayATRPercent! - 40.0) < 0.01)
     }
 
     @Test("start() guard prevents double start")
