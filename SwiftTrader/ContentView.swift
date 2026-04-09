@@ -585,7 +585,7 @@ struct ContentView: View {
 
         Divider()
 
-        CorrelationView(viewModel: vm)
+        CorrelationView(viewModel: vm, onInstrumentTap: { workspace.selectOrCreateChartTab(instrument: $0) })
     }
 
     // MARK: - Trading controls

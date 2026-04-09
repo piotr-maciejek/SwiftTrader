@@ -87,6 +87,36 @@ final class WorkspaceViewModel {
         scheduleSave()
     }
 
+    func selectOrCreateChartTab(instrument: String) {
+        if let existing = tabs.first(where: {
+            if case .chart(let vm) = $0.content { return vm.currentInstrument == instrument }
+            return false
+        }) {
+            selectedTabID = existing.id
+            return
+        }
+
+        let period: String
+        if let current = selectedTab {
+            switch current.content {
+            case .chart(let vm): period = vm.currentPeriod
+            case .correlation(let vm): period = vm.currentPeriod
+            }
+        } else {
+            period = "ONE_MIN"
+        }
+
+        let vm = ChartViewModel(coordinator: MarketDataCoordinator(port: settings.port, cache: candleCache))
+        wireStateChanged(vm)
+        vm.currentInstrument = instrument
+        vm.currentPeriod = period
+        let tab = Tab(content: .chart(vm))
+        tabs.append(tab)
+        selectedTabID = tab.id
+        vm.startAsync()
+        scheduleSave()
+    }
+
     func addCorrelationTab(currency: String) {
         // If a correlation tab for this currency already exists, switch to it
         if let existing = tabs.first(where: {

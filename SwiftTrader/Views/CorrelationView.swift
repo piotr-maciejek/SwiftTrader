@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CorrelationView: View {
     let viewModel: CorrelationViewModel
+    var onInstrumentTap: ((String) -> Void)?
 
     private let columns = 3
     private let rows = 2
@@ -34,6 +35,9 @@ struct CorrelationView: View {
             HStack(spacing: 4) {
                 Text(formatInstrument(instrument))
                     .font(.system(size: 11, weight: .medium))
+                    .underline()
+                    .onTapGesture { onInstrumentTap?(instrument) }
+                    .pointerStyle(.link)
 
                 if let last = vm.bars.last {
                     Text(String(format: "%.5f", last.close))
