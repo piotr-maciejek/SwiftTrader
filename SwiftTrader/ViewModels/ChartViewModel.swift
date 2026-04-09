@@ -186,7 +186,7 @@ final class ChartViewModel {
         while !Task.isCancelled {
             guard instrument == currentInstrument, period == currentPeriod else { return }
             do {
-                let history = try await coordinator.fetchCandles(instrument: instrument, period: period, count: 1000)
+                let history = try await coordinator.fetchCandles(instrument: instrument, period: period, count: Self.barCount(for: period))
                 if Task.isCancelled { return }
                 guard instrument == currentInstrument, period == currentPeriod else { return }
                 if !history.isEmpty {
@@ -209,7 +209,7 @@ final class ChartViewModel {
         let instrument = currentInstrument
         let period = currentPeriod
         do {
-            let history = try await coordinator.fetchCandles(instrument: instrument, period: period, count: 1000)
+            let history = try await coordinator.fetchCandles(instrument: instrument, period: period, count: Self.barCount(for: period))
             guard instrument == currentInstrument, period == currentPeriod else { return }
             bars = history
             error = nil
@@ -305,6 +305,11 @@ final class ChartViewModel {
     func scrollToEnd() {
         let totalWidth = CGFloat(bars.count) * transform.candleSlotWidth
         transform.xOffset = max(0, totalWidth - chartWidth)
+
+        // If bars don't fill the screen, fetch earlier bars automatically
+        if totalWidth < chartWidth && !isLoadingEarlier && !bars.isEmpty {
+            Task { await loadEarlierBars() }
+        }
     }
 
     /// Shift the view by one candle slot so the new bar appears where the old last bar was.
@@ -340,6 +345,16 @@ final class ChartViewModel {
         }
     }
 
+    /// Bar count scaled to the timeframe — avoids multi-year CDN downloads for larger periods.
+    private static func barCount(for period: String) -> Int {
+        switch period {
+        case "DAILY":      return 250  // ~1 year of trading days
+        case "FOUR_HOURS": return 500  // ~3 months
+        case "ONE_HOUR":   return 500  // ~3 weeks
+        default:           return 1000 // intraday
+        }
+    }
+
     private func loadEarlierBars() async {
         isLoadingEarlier = true
         let instrument = currentInstrument
@@ -348,7 +363,7 @@ final class ChartViewModel {
 
         do {
             let allBars = try await coordinator.fetchEarlierCandles(
-                instrument: instrument, period: period, count: 1000
+                instrument: instrument, period: period, count: Self.barCount(for: period)
             )
             guard instrument == currentInstrument, period == currentPeriod else {
                 isLoadingEarlier = false

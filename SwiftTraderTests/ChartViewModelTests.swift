@@ -179,6 +179,50 @@ struct ChartViewModelTests {
         vm.stop()
     }
 
+    // MARK: - barCount(for:) via fetchCandles count
+
+    @Test("Daily period requests 250 bars")
+    func startDailyRequests250() async {
+        let mock = MockMarketDataCoordinator()
+        mock.instrumentsResult = .success(["EURUSD"])
+        mock.fetchCandlesResult = .success([makeBar(time: 100)])
+        let vm = ChartViewModel(coordinator: mock)
+        vm.currentPeriod = "DAILY"
+
+        await vm.start()
+
+        #expect(mock.fetchCandlesCalls.first?.count == 250)
+        vm.stop()
+    }
+
+    @Test("Intraday period requests 1000 bars")
+    func startIntradayRequests1000() async {
+        let mock = MockMarketDataCoordinator()
+        mock.instrumentsResult = .success(["EURUSD"])
+        mock.fetchCandlesResult = .success([makeBar(time: 100)])
+        let vm = ChartViewModel(coordinator: mock)
+        vm.currentPeriod = "FIFTEEN_MINS"
+
+        await vm.start()
+
+        #expect(mock.fetchCandlesCalls.first?.count == 1000)
+        vm.stop()
+    }
+
+    @Test("Four-hour period requests 500 bars")
+    func startFourHourRequests500() async {
+        let mock = MockMarketDataCoordinator()
+        mock.instrumentsResult = .success(["EURUSD"])
+        mock.fetchCandlesResult = .success([makeBar(time: 100)])
+        let vm = ChartViewModel(coordinator: mock)
+        vm.currentPeriod = "FOUR_HOURS"
+
+        await vm.start()
+
+        #expect(mock.fetchCandlesCalls.first?.count == 500)
+        vm.stop()
+    }
+
     @Test("start() guard prevents double start")
     func startGuardPreventsDoubleStart() async {
         let mock = MockMarketDataCoordinator()
