@@ -6,6 +6,7 @@ struct ChartView: View {
     var onChartWidthChanged: ((CGFloat) -> Void)?
     var onUserDrag: (() -> Void)?
     var showSessions: Bool = true
+    var currentPeriod: String = "FIFTEEN_MINS"
     var showVolume: Bool = true
     var showVolumeMA: Bool = true
     var volumeMA: EMALine = EMALine(period: 20, color: .cyan)
@@ -53,7 +54,7 @@ struct ChartView: View {
                     chartContext.clip(to: chartClip)
 
                     drawGrid(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
-                    if showSessions {
+                    if showSessions, !["FOUR_HOURS", "DAILY", "WEEKLY"].contains(currentPeriod) {
                         drawSessionOverlays(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange, priceRange: priceRange)
                     }
                     drawWeekendSeparators(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, volumeHeight: volumeHeight, visibleRange: visibleRange)

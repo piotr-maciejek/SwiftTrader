@@ -457,6 +457,7 @@ struct ContentView: View {
             onChartWidthChanged: { vm.chartWidth = $0 },
             onUserDrag: { vm.onUserScroll() },
             showSessions: vm.showSessions,
+            currentPeriod: vm.currentPeriod,
             showVolume: vm.showVolume,
             showVolumeMA: vm.showVolumeMA,
             volumeMA: vm.volumeMA,
