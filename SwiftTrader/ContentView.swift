@@ -3,8 +3,6 @@ import SwiftUI
 struct ContentView: View {
     @State private var workspace = WorkspaceViewModel()
     @State private var auth = AuthViewModel(port: AppSettings.shared.port)
-    @State private var showBuyPopover = false
-    @State private var showSellPopover = false
     @State private var showEMAPopover = false
     @State private var showVolumeMAPopover = false
     @State private var showATRPopover = false
@@ -472,7 +470,7 @@ struct ContentView: View {
             onModifyPosition: { label, sl, tp in
                 Task { await workspace.trading.modifyPosition(label: label, stopLoss: sl, takeProfit: tp) }
             },
-            visualOrder: workspace.trading.visualOrder(for: vm.currentInstrument),
+            visualOrder: workspace.trading.visualOrderWithLivePrice(for: vm.currentInstrument, currentPrice: vm.bars.last?.close, barCount: vm.bars.count),
             onConfirmVisualOrder: {
                 Task { await workspace.trading.confirmVisualOrder(instrument: vm.currentInstrument) }
             },
@@ -484,6 +482,9 @@ struct ContentView: View {
             },
             onUpdateVisualOrderTP: { price in
                 workspace.trading.visualOrders[vm.currentInstrument]?.takeProfit = price
+            },
+            onAdjustVisualOrderAmount: { delta in
+                workspace.trading.adjustVisualOrderAmount(instrument: vm.currentInstrument, by: delta)
             }
         )
         .overlay {
@@ -609,24 +610,9 @@ struct ContentView: View {
         let tradingEnabled = !trading.isSubmitting && !vm.bars.isEmpty && vm.isConnected
 
         HStack(spacing: 6) {
-            // Mode toggle
-            Toggle(isOn: Binding(
-                get: { trading.visualMode },
-                set: { trading.visualMode = $0 }
-            )) {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 10))
-            }
-            .toggleStyle(.checkbox)
-            .help(trading.visualMode ? "Visual mode (chart SL/TP)" : "Manual mode")
-
             Button("Buy") {
-                if trading.visualMode {
-                    trading.beginVisualOrder(
-                        direction: "BUY", instrument: vm.currentInstrument, bars: vm.bars)
-                } else {
-                    showBuyPopover = true
-                }
+                trading.beginVisualOrder(
+                    direction: "BUY", instrument: vm.currentInstrument, bars: vm.bars)
             }
             .buttonStyle(.borderless)
             .font(.system(size: 11, weight: .semibold))
@@ -635,28 +621,10 @@ struct ContentView: View {
             .padding(.vertical, 3)
             .background(tradingEnabled ? Color.green : Color.gray, in: RoundedRectangle(cornerRadius: 4))
             .disabled(!tradingEnabled)
-            .popover(isPresented: $showBuyPopover) {
-                OrderEntryView(
-                    direction: "BUY",
-                    instrument: vm.currentInstrument,
-                    currentPrice: vm.bars.last?.close ?? 0,
-                    amount: Binding(get: { trading.amount }, set: { trading.amount = $0 })
-                ) { amt, sl, tp in
-                    Task {
-                        await trading.submitMarketOrder(
-                            instrument: vm.currentInstrument, direction: "BUY",
-                            amount: amt, stopLoss: sl, takeProfit: tp)
-                    }
-                }
-            }
 
             Button("Sell") {
-                if trading.visualMode {
-                    trading.beginVisualOrder(
-                        direction: "SELL", instrument: vm.currentInstrument, bars: vm.bars)
-                } else {
-                    showSellPopover = true
-                }
+                trading.beginVisualOrder(
+                    direction: "SELL", instrument: vm.currentInstrument, bars: vm.bars)
             }
             .buttonStyle(.borderless)
             .font(.system(size: 11, weight: .semibold))
@@ -665,20 +633,6 @@ struct ContentView: View {
             .padding(.vertical, 3)
             .background(tradingEnabled ? Color.red : Color.gray, in: RoundedRectangle(cornerRadius: 4))
             .disabled(!tradingEnabled)
-            .popover(isPresented: $showSellPopover) {
-                OrderEntryView(
-                    direction: "SELL",
-                    instrument: vm.currentInstrument,
-                    currentPrice: vm.bars.last?.close ?? 0,
-                    amount: Binding(get: { trading.amount }, set: { trading.amount = $0 })
-                ) { amt, sl, tp in
-                    Task {
-                        await trading.submitMarketOrder(
-                            instrument: vm.currentInstrument, direction: "SELL",
-                            amount: amt, stopLoss: sl, takeProfit: tp)
-                    }
-                }
-            }
         }
     }
 

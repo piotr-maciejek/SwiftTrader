@@ -170,7 +170,7 @@ struct VisualOrderStateTests {
     @Test("R:R ratio computed correctly for non-JPY pair")
     func rrRatio() {
         let order = VisualOrderState(
-            direction: "BUY", instrument: "EURUSD", entryPrice: 1.1000,
+            direction: "BUY", instrument: "EURUSD", entryPrice: 1.1000, amount: 0.001,
             stopLoss: 1.0980, takeProfit: 1.1060,
             startBarIndex: 100, endBarIndex: 110
         )
@@ -183,7 +183,7 @@ struct VisualOrderStateTests {
     @Test("R:R ratio computed correctly for JPY pair")
     func rrRatioJPY() {
         let order = VisualOrderState(
-            direction: "SELL", instrument: "USDJPY", entryPrice: 150.00,
+            direction: "SELL", instrument: "USDJPY", entryPrice: 150.00, amount: 0.001,
             stopLoss: 150.30, takeProfit: 149.10,
             startBarIndex: 50, endBarIndex: 60
         )
@@ -196,10 +196,103 @@ struct VisualOrderStateTests {
     @Test("R:R is zero when SL equals entry")
     func rrZeroWhenNoRisk() {
         let order = VisualOrderState(
-            direction: "BUY", instrument: "EURUSD", entryPrice: 1.1000,
+            direction: "BUY", instrument: "EURUSD", entryPrice: 1.1000, amount: 0.001,
             stopLoss: 1.1000, takeProfit: 1.1060,
             startBarIndex: 0, endBarIndex: 10
         )
         #expect(order.riskRewardRatio == 0)
+    }
+}
+
+@Suite("Visual Order Management")
+struct VisualOrderManagementTests {
+
+    private func makeBars(count: Int, close: Double = 1.1000) -> [CandleBar] {
+        (0..<count).map { i in
+            makeBar(time: Int64(i), open: 1.0990, high: 1.1010, low: 1.0980, close: close)
+        }
+    }
+
+    @Test("Per-instrument isolation — different instruments stored separately")
+    @MainActor func perInstrumentIsolation() {
+        let vm = TradingViewModel()
+        let bars = makeBars(count: 50)
+        vm.beginVisualOrder(direction: "BUY", instrument: "EURUSD", bars: bars)
+        vm.beginVisualOrder(direction: "SELL", instrument: "GBPUSD", bars: bars)
+
+        #expect(vm.visualOrders.count == 2)
+        #expect(vm.visualOrder(for: "EURUSD")?.direction == "BUY")
+        #expect(vm.visualOrder(for: "GBPUSD")?.direction == "SELL")
+    }
+
+    @Test("Per-instrument isolation — same instrument overwrites")
+    @MainActor func sameInstrumentOverwrites() {
+        let vm = TradingViewModel()
+        let bars = makeBars(count: 50)
+        vm.beginVisualOrder(direction: "BUY", instrument: "EURUSD", bars: bars)
+        vm.beginVisualOrder(direction: "SELL", instrument: "EURUSD", bars: bars)
+
+        #expect(vm.visualOrders.count == 1)
+        #expect(vm.visualOrder(for: "EURUSD")?.direction == "SELL")
+    }
+
+    @Test("Cancel removes only the target instrument")
+    @MainActor func cancelRemovesTarget() {
+        let vm = TradingViewModel()
+        let bars = makeBars(count: 50)
+        vm.beginVisualOrder(direction: "BUY", instrument: "EURUSD", bars: bars)
+        vm.beginVisualOrder(direction: "SELL", instrument: "GBPUSD", bars: bars)
+        vm.cancelVisualOrder(instrument: "EURUSD")
+
+        #expect(vm.visualOrder(for: "EURUSD") == nil)
+        #expect(vm.visualOrder(for: "GBPUSD") != nil)
+    }
+
+    @Test("Amount defaults to vm.amount")
+    @MainActor func amountDefault() {
+        let vm = TradingViewModel()
+        let bars = makeBars(count: 50)
+        vm.beginVisualOrder(direction: "BUY", instrument: "EURUSD", bars: bars)
+
+        #expect(vm.visualOrder(for: "EURUSD")?.amount == vm.amount)
+    }
+
+    @Test("Adjust amount increases and clamps at minimum")
+    @MainActor func adjustAmountClamping() {
+        let vm = TradingViewModel()
+        let bars = makeBars(count: 50)
+        vm.beginVisualOrder(direction: "BUY", instrument: "EURUSD", bars: bars)
+
+        vm.adjustVisualOrderAmount(instrument: "EURUSD", by: 0.001)
+        #expect(vm.visualOrder(for: "EURUSD")?.amount == 0.011)
+
+        // Try to go below minimum
+        vm.adjustVisualOrderAmount(instrument: "EURUSD", by: -0.1)
+        #expect(vm.visualOrder(for: "EURUSD")?.amount == 0.001)
+    }
+
+    @Test("Live price update refreshes entry price and bar indices")
+    @MainActor func livePriceUpdate() {
+        let vm = TradingViewModel()
+        let bars = makeBars(count: 50, close: 1.1000)
+        vm.beginVisualOrder(direction: "BUY", instrument: "EURUSD", bars: bars)
+
+        let updated = vm.visualOrderWithLivePrice(for: "EURUSD", currentPrice: 1.1050, barCount: 55)
+        #expect(updated?.entryPrice == 1.1050)
+        #expect(updated?.startBarIndex == 56)
+        #expect(updated?.endBarIndex == 66)
+    }
+
+    @Test("Live price update preserves box width")
+    @MainActor func livePricePreservesBoxWidth() {
+        let vm = TradingViewModel()
+        let bars = makeBars(count: 50)
+        vm.beginVisualOrder(direction: "BUY", instrument: "EURUSD", bars: bars)
+        let original = vm.visualOrder(for: "EURUSD")!
+        let originalWidth = original.endBarIndex - original.startBarIndex
+
+        let updated = vm.visualOrderWithLivePrice(for: "EURUSD", currentPrice: 1.1050, barCount: 60)!
+        let updatedWidth = updated.endBarIndex - updated.startBarIndex
+        #expect(updatedWidth == originalWidth)
     }
 }

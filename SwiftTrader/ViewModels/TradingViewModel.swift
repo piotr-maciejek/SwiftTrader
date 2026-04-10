@@ -9,13 +9,12 @@ final class TradingViewModel {
     var isConnected = false
     var isSubmitting = false
     var orderError: String?
-    var visualMode = true
     var visualOrders: [String: VisualOrderState] = [:]
 
     private var coordinator: TradingCoordinator
     private var wsTask: Task<Void, Never>?
 
-    var amount = 0.001
+    var amount = 0.01
 
     init(coordinator: TradingCoordinator = TradingCoordinator()) {
         self.coordinator = coordinator
@@ -68,6 +67,7 @@ final class TradingViewModel {
             direction: direction,
             instrument: instrument,
             entryPrice: currentPrice,
+            amount: amount,
             stopLoss: sl,
             takeProfit: tp,
             startBarIndex: nextIndex,
@@ -101,15 +101,36 @@ final class TradingViewModel {
         visualOrders[instrument]
     }
 
+    func visualOrderWithLivePrice(for instrument: String, currentPrice: Double?, barCount: Int) -> VisualOrderState? {
+        guard var order = visualOrders[instrument], let price = currentPrice else {
+            return visualOrders[instrument]
+        }
+        order.entryPrice = price
+        visualOrders[instrument]?.entryPrice = price
+        let boxWidth = order.endBarIndex - order.startBarIndex
+        order.startBarIndex = barCount + 1
+        order.endBarIndex = barCount + 1 + boxWidth
+        visualOrders[instrument]?.startBarIndex = order.startBarIndex
+        visualOrders[instrument]?.endBarIndex = order.endBarIndex
+        return order
+    }
+
     func confirmVisualOrder(instrument: String) async {
         guard let order = visualOrders.removeValue(forKey: instrument) else { return }
         await submitMarketOrder(
             instrument: order.instrument, direction: order.direction,
+            amount: order.amount,
             stopLoss: order.stopLoss, takeProfit: order.takeProfit)
     }
 
     func cancelVisualOrder(instrument: String) {
         visualOrders.removeValue(forKey: instrument)
+    }
+
+    func adjustVisualOrderAmount(instrument: String, by delta: Double) {
+        guard visualOrders[instrument] != nil else { return }
+        let newAmount = max(0.001, (visualOrders[instrument]?.amount ?? 0.001) + delta)
+        visualOrders[instrument]?.amount = newAmount
     }
 
     func closePosition(label: String) async {

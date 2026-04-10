@@ -45,6 +45,7 @@ struct ChartInteractionView: NSViewRepresentable {
     var onCancelVisualOrder: (() -> Void)? = nil
     var onUpdateVisualOrderSL: ((Double) -> Void)? = nil
     var onUpdateVisualOrderTP: ((Double) -> Void)? = nil
+    var onAdjustVisualOrderAmount: ((Double) -> Void)? = nil
 
     func makeNSView(context: Context) -> ChartInteractionNSView {
         let view = ChartInteractionNSView()
@@ -68,6 +69,7 @@ struct ChartInteractionView: NSViewRepresentable {
         context.coordinator.onCancelVisualOrder = onCancelVisualOrder
         context.coordinator.onUpdateVisualOrderSL = onUpdateVisualOrderSL
         context.coordinator.onUpdateVisualOrderTP = onUpdateVisualOrderTP
+        context.coordinator.onAdjustVisualOrderAmount = onAdjustVisualOrderAmount
     }
 
     func makeCoordinator() -> Coordinator {
@@ -98,6 +100,7 @@ struct ChartInteractionView: NSViewRepresentable {
         var onCancelVisualOrder: (() -> Void)?
         var onUpdateVisualOrderSL: ((Double) -> Void)?
         var onUpdateVisualOrderTP: ((Double) -> Void)?
+        var onAdjustVisualOrderAmount: ((Double) -> Void)?
         var isDraggingVisualSLTP = false
         var visualDragField: SLTPLineHit.Field?
 
@@ -167,15 +170,27 @@ struct ChartInteractionView: NSViewRepresentable {
             return nil
         }
 
-        enum VisualOrderButton { case confirm, cancel }
+        enum VisualOrderButton { case confirm, cancel, amountUp, amountDown }
 
         func hitTestVisualOrderButtons(mouseX: CGFloat, mouseY: CGFloat) -> VisualOrderButton? {
             guard let vo = visualOrder else { return nil }
             let slY = yForPrice(vo.stopLoss)
             let tpY = yForPrice(vo.takeProfit)
+            let entryY = yForPrice(vo.entryPrice)
             let bottomY = max(slY, tpY)
             let slotWidth = transform.wrappedValue.candleSlotWidth
+            let leftX = CGFloat(vo.startBarIndex) * slotWidth - transform.wrappedValue.xOffset
             let rightX = CGFloat(vo.endBarIndex) * slotWidth - transform.wrappedValue.xOffset + slotWidth
+            let midX = (leftX + rightX) / 2
+
+            // Amount +/- buttons
+            let lineHeight: CGFloat = 14
+            let amountY = entryY - lineHeight * 2.5
+            let (minusRect, plusRect) = ChartView.visualOrderAmountButtonRects(midX: midX, amountY: amountY)
+            if minusRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountDown }
+            if plusRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountUp }
+
+            // Confirm/Cancel buttons
             let (confirmRect, cancelRect) = ChartView.visualOrderButtonRects(boxRight: rightX, boxBottom: bottomY)
             if confirmRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .confirm }
             if cancelRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .cancel }
@@ -226,6 +241,8 @@ struct ChartInteractionView: NSViewRepresentable {
                 switch button {
                 case .confirm: coord.onConfirmVisualOrder?()
                 case .cancel: coord.onCancelVisualOrder?()
+                case .amountUp: coord.onAdjustVisualOrderAmount?(0.001)
+                case .amountDown: coord.onAdjustVisualOrderAmount?(-0.001)
                 }
                 return
             }

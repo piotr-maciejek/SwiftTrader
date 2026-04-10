@@ -24,6 +24,7 @@ struct ChartView: View {
     var onCancelVisualOrder: (() -> Void)? = nil
     var onUpdateVisualOrderSL: ((Double) -> Void)? = nil
     var onUpdateVisualOrderTP: ((Double) -> Void)? = nil
+    var onAdjustVisualOrderAmount: ((Double) -> Void)? = nil
     @State private var crosshair: CrosshairState? = nil
     @State private var dragPreview: DragPreviewState? = nil
     @State private var pendingSLTPEdit: PendingChartSLTPEdit? = nil
@@ -115,7 +116,8 @@ struct ChartView: View {
                         onConfirmVisualOrder: onConfirmVisualOrder,
                         onCancelVisualOrder: onCancelVisualOrder,
                         onUpdateVisualOrderSL: onUpdateVisualOrderSL,
-                        onUpdateVisualOrderTP: onUpdateVisualOrderTP
+                        onUpdateVisualOrderTP: onUpdateVisualOrderTP,
+                        onAdjustVisualOrderAmount: onAdjustVisualOrderAmount
                     )
                     .frame(width: chartWidth, height: chartHeight + volumeHeight)
                 }
@@ -143,10 +145,6 @@ struct ChartView: View {
                 }
                 .onAppear {
                     onChartWidthChanged?(chartWidth)
-                    let totalWidth = CGFloat(bars.count) * transform.candleSlotWidth
-                    if totalWidth > chartWidth {
-                        transform.xOffset = totalWidth - chartWidth
-                    }
                 }
                 .onChange(of: chartWidth) { _, newWidth in
                     onChartWidthChanged?(newWidth)
@@ -764,6 +762,16 @@ struct ChartView: View {
         return (confirmRect, cancelRect)
     }
 
+    /// Button rect positions for visual order amount +/- — shared between drawing and hit-testing.
+    static func visualOrderAmountButtonRects(midX: CGFloat, amountY: CGFloat) -> (minus: CGRect, plus: CGRect) {
+        let bw: CGFloat = 20
+        let bh: CGFloat = 16
+        let spacing: CGFloat = 52
+        let minusRect = CGRect(x: midX - spacing - bw, y: amountY - 1, width: bw, height: bh)
+        let plusRect = CGRect(x: midX + spacing, y: amountY - 1, width: bw, height: bh)
+        return (minusRect, plusRect)
+    }
+
     private func drawVisualOrderBox(context: inout GraphicsContext, chartWidth: CGFloat,
                                      chartHeight: CGFloat, priceRange: (min: Double, max: Double),
                                      order: VisualOrderState) {
@@ -821,15 +829,30 @@ struct ChartView: View {
         let midX = (leftX + rightX) / 2
         let textStyle = Font.system(size: 10, weight: .medium, design: .monospaced)
 
+        let amountText = String(format: "%g lots", order.amount)
         let rrText = String(format: "R:R  %.1f", order.riskRewardRatio)
         let riskText = String(format: "Risk  %.1f pips", order.riskPips)
         let rewardText = String(format: "Reward  %.1f pips", order.rewardPips)
 
         let lineHeight: CGFloat = 14
-        let textBlockY = entryY - lineHeight * 1.5
+        let textBlockY = entryY - lineHeight * 2.5
+
+        // Amount row with +/- buttons
+        let amountY = textBlockY
+        let resolvedAmount = context.resolve(Text(amountText).font(textStyle).foregroundStyle(.white.opacity(0.9)))
+        let amountSize = resolvedAmount.measure(in: CGSize(width: 200, height: 20))
+        context.draw(resolvedAmount, at: CGPoint(x: midX - amountSize.width / 2, y: amountY), anchor: .topLeading)
+
+        let (minusRect, plusRect) = Self.visualOrderAmountButtonRects(midX: midX, amountY: amountY)
+        context.fill(Path(roundedRect: minusRect, cornerRadius: 3), with: .color(.white.opacity(0.15)))
+        let minusSymbol = context.resolve(Text("\u{2212}").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.8)))
+        context.draw(minusSymbol, at: CGPoint(x: minusRect.midX, y: minusRect.midY), anchor: .center)
+        context.fill(Path(roundedRect: plusRect, cornerRadius: 3), with: .color(.white.opacity(0.15)))
+        let plusSymbol = context.resolve(Text("+").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.8)))
+        context.draw(plusSymbol, at: CGPoint(x: plusRect.midX, y: plusRect.midY), anchor: .center)
 
         for (i, text) in [rrText, riskText, rewardText].enumerated() {
-            let y = textBlockY + CGFloat(i) * lineHeight
+            let y = textBlockY + CGFloat(i + 1) * lineHeight
             let resolved = context.resolve(Text(text).font(textStyle).foregroundStyle(.white.opacity(0.8)))
             let textSize = resolved.measure(in: CGSize(width: 200, height: 20))
             context.draw(resolved, at: CGPoint(x: midX - textSize.width / 2, y: y), anchor: .topLeading)
