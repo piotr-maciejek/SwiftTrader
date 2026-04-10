@@ -472,18 +472,18 @@ struct ContentView: View {
             onModifyPosition: { label, sl, tp in
                 Task { await workspace.trading.modifyPosition(label: label, stopLoss: sl, takeProfit: tp) }
             },
-            visualOrder: workspace.trading.visualOrder,
+            visualOrder: workspace.trading.visualOrder(for: vm.currentInstrument),
             onConfirmVisualOrder: {
-                Task { await workspace.trading.confirmVisualOrder() }
+                Task { await workspace.trading.confirmVisualOrder(instrument: vm.currentInstrument) }
             },
             onCancelVisualOrder: {
-                workspace.trading.cancelVisualOrder()
+                workspace.trading.cancelVisualOrder(instrument: vm.currentInstrument)
             },
             onUpdateVisualOrderSL: { price in
-                workspace.trading.visualOrder?.stopLoss = price
+                workspace.trading.visualOrders[vm.currentInstrument]?.stopLoss = price
             },
             onUpdateVisualOrderTP: { price in
-                workspace.trading.visualOrder?.takeProfit = price
+                workspace.trading.visualOrders[vm.currentInstrument]?.takeProfit = price
             }
         )
         .overlay {

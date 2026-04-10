@@ -9,8 +9,8 @@ final class TradingViewModel {
     var isConnected = false
     var isSubmitting = false
     var orderError: String?
-    var visualMode = false
-    var visualOrder: VisualOrderState?
+    var visualMode = true
+    var visualOrders: [String: VisualOrderState] = [:]
 
     private var coordinator: TradingCoordinator
     private var wsTask: Task<Void, Never>?
@@ -63,15 +63,15 @@ final class TradingViewModel {
         }
 
         let (sl, tp) = Self.visualOrderSLTP(direction: direction, bars: bars, currentPrice: currentPrice)
-        let lastIndex = bars.count - 1
-        visualOrder = VisualOrderState(
+        let nextIndex = bars.count + 1
+        visualOrders[instrument] = VisualOrderState(
             direction: direction,
             instrument: instrument,
             entryPrice: currentPrice,
             stopLoss: sl,
             takeProfit: tp,
-            startBarIndex: lastIndex,
-            endBarIndex: lastIndex + 10
+            startBarIndex: nextIndex,
+            endBarIndex: nextIndex + 10
         )
     }
 
@@ -97,16 +97,19 @@ final class TradingViewModel {
         }
     }
 
-    func confirmVisualOrder() async {
-        guard let order = visualOrder else { return }
-        visualOrder = nil
+    func visualOrder(for instrument: String) -> VisualOrderState? {
+        visualOrders[instrument]
+    }
+
+    func confirmVisualOrder(instrument: String) async {
+        guard let order = visualOrders.removeValue(forKey: instrument) else { return }
         await submitMarketOrder(
             instrument: order.instrument, direction: order.direction,
             stopLoss: order.stopLoss, takeProfit: order.takeProfit)
     }
 
-    func cancelVisualOrder() {
-        visualOrder = nil
+    func cancelVisualOrder(instrument: String) {
+        visualOrders.removeValue(forKey: instrument)
     }
 
     func closePosition(label: String) async {

@@ -796,17 +796,17 @@ struct ChartView: View {
         context.stroke(Path(boxRect), with: .color(.white.opacity(0.3)),
                        style: StrokeStyle(lineWidth: 1))
 
-        // SL line
+        // SL line (full chart width)
         var slPath = Path()
-        slPath.move(to: CGPoint(x: leftX, y: slY))
-        slPath.addLine(to: CGPoint(x: rightX, y: slY))
+        slPath.move(to: CGPoint(x: 0, y: slY))
+        slPath.addLine(to: CGPoint(x: chartWidth, y: slY))
         context.stroke(slPath, with: .color(bearishColor),
                        style: StrokeStyle(lineWidth: 2, dash: [6, 3]))
 
-        // TP line
+        // TP line (full chart width)
         var tpPath = Path()
-        tpPath.move(to: CGPoint(x: leftX, y: tpY))
-        tpPath.addLine(to: CGPoint(x: rightX, y: tpY))
+        tpPath.move(to: CGPoint(x: 0, y: tpY))
+        tpPath.addLine(to: CGPoint(x: chartWidth, y: tpY))
         context.stroke(tpPath, with: .color(bullishColor),
                        style: StrokeStyle(lineWidth: 2, dash: [6, 3]))
 
