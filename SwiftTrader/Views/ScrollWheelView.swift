@@ -40,6 +40,11 @@ struct ChartInteractionView: NSViewRepresentable {
     var priceRange: (min: Double, max: Double) = (0, 1)
     @Binding var dragPreview: DragPreviewState?
     @Binding var pendingSLTPEdit: PendingChartSLTPEdit?
+    var visualOrder: VisualOrderState? = nil
+    var onConfirmVisualOrder: (() -> Void)? = nil
+    var onCancelVisualOrder: (() -> Void)? = nil
+    var onUpdateVisualOrderSL: ((Double) -> Void)? = nil
+    var onUpdateVisualOrderTP: ((Double) -> Void)? = nil
 
     func makeNSView(context: Context) -> ChartInteractionNSView {
         let view = ChartInteractionNSView()
@@ -58,6 +63,11 @@ struct ChartInteractionView: NSViewRepresentable {
         context.coordinator.priceRange = priceRange
         context.coordinator.dragPreview = $dragPreview
         context.coordinator.pendingSLTPEdit = $pendingSLTPEdit
+        context.coordinator.visualOrder = visualOrder
+        context.coordinator.onConfirmVisualOrder = onConfirmVisualOrder
+        context.coordinator.onCancelVisualOrder = onCancelVisualOrder
+        context.coordinator.onUpdateVisualOrderSL = onUpdateVisualOrderSL
+        context.coordinator.onUpdateVisualOrderTP = onUpdateVisualOrderTP
     }
 
     func makeCoordinator() -> Coordinator {
@@ -81,6 +91,15 @@ struct ChartInteractionView: NSViewRepresentable {
 
         var activeDrag: SLTPLineHit?
         var isDraggingSLTP = false
+
+        // Visual order state
+        var visualOrder: VisualOrderState?
+        var onConfirmVisualOrder: (() -> Void)?
+        var onCancelVisualOrder: (() -> Void)?
+        var onUpdateVisualOrderSL: ((Double) -> Void)?
+        var onUpdateVisualOrderTP: ((Double) -> Void)?
+        var isDraggingVisualSLTP = false
+        var visualDragField: SLTPLineHit.Field?
 
         init(transform: Binding<ChartTransform>, barCount: Int, chartWidth: CGFloat,
              onUserDrag: (() -> Void)?, crosshair: Binding<CrosshairState?>,
@@ -137,6 +156,31 @@ struct ChartInteractionView: NSViewRepresentable {
             }
             return nil
         }
+
+        func hitTestVisualOrderLine(mouseY: CGFloat) -> SLTPLineHit.Field? {
+            guard let vo = visualOrder else { return nil }
+            let threshold: CGFloat = 5.0
+            let slY = yForPrice(vo.stopLoss)
+            if abs(mouseY - slY) <= threshold { return .stopLoss }
+            let tpY = yForPrice(vo.takeProfit)
+            if abs(mouseY - tpY) <= threshold { return .takeProfit }
+            return nil
+        }
+
+        enum VisualOrderButton { case confirm, cancel }
+
+        func hitTestVisualOrderButtons(mouseX: CGFloat, mouseY: CGFloat) -> VisualOrderButton? {
+            guard let vo = visualOrder else { return nil }
+            let slY = yForPrice(vo.stopLoss)
+            let tpY = yForPrice(vo.takeProfit)
+            let bottomY = max(slY, tpY)
+            let slotWidth = transform.wrappedValue.candleSlotWidth
+            let rightX = CGFloat(vo.endBarIndex) * slotWidth - transform.wrappedValue.xOffset + slotWidth
+            let (confirmRect, cancelRect) = ChartView.visualOrderButtonRects(boxRight: rightX, boxBottom: bottomY)
+            if confirmRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .confirm }
+            if cancelRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .cancel }
+            return nil
+        }
     }
 
     class ChartInteractionNSView: NSView {
@@ -177,7 +221,24 @@ struct ChartInteractionView: NSViewRepresentable {
             let location = convert(event.locationInWindow, from: nil)
             let flippedY = bounds.height - location.y
 
-            // Check if clicking on an SL/TP line
+            // Check visual order buttons first
+            if let button = coord.hitTestVisualOrderButtons(mouseX: location.x, mouseY: flippedY) {
+                switch button {
+                case .confirm: coord.onConfirmVisualOrder?()
+                case .cancel: coord.onCancelVisualOrder?()
+                }
+                return
+            }
+
+            // Check visual order SL/TP lines
+            if let field = coord.hitTestVisualOrderLine(mouseY: flippedY) {
+                coord.isDraggingVisualSLTP = true
+                coord.visualDragField = field
+                coord.crosshair.wrappedValue = nil
+                return
+            }
+
+            // Check if clicking on an existing position SL/TP line
             let hit = coord.hitTestSLTPLine(mouseY: flippedY)
             if let hit {
                 coord.activeDrag = hit
@@ -188,11 +249,18 @@ struct ChartInteractionView: NSViewRepresentable {
 
             coord.lastDragX = event.locationInWindow.x
             coord.isDraggingSLTP = false
+            coord.isDraggingVisualSLTP = false
             coord.crosshair.wrappedValue = nil
         }
 
         override func mouseUp(with event: NSEvent) {
             guard let coord = coordinator else { return }
+
+            if coord.isDraggingVisualSLTP {
+                coord.isDraggingVisualSLTP = false
+                coord.visualDragField = nil
+                return
+            }
 
             if coord.isDraggingSLTP {
                 coord.activeDrag = nil
@@ -223,6 +291,18 @@ struct ChartInteractionView: NSViewRepresentable {
         override func mouseDragged(with event: NSEvent) {
             guard let coord = coordinator else { return }
 
+            if coord.isDraggingVisualSLTP, let field = coord.visualDragField {
+                let location = convert(event.locationInWindow, from: nil)
+                let flippedY = bounds.height - location.y
+                let clampedY = min(max(flippedY, 0), coord.chartHeight)
+                let newPrice = coord.priceForY(clampedY)
+                switch field {
+                case .stopLoss: coord.onUpdateVisualOrderSL?(newPrice)
+                case .takeProfit: coord.onUpdateVisualOrderTP?(newPrice)
+                }
+                return
+            }
+
             if coord.isDraggingSLTP, let hit = coord.activeDrag {
                 let location = convert(event.locationInWindow, from: nil)
                 let flippedY = bounds.height - location.y
@@ -251,8 +331,12 @@ struct ChartInteractionView: NSViewRepresentable {
             let location = convert(event.locationInWindow, from: nil)
             let flippedY = bounds.height - location.y
 
-            // Change cursor when near SL/TP lines
-            if coord.hitTestSLTPLine(mouseY: flippedY) != nil {
+            // Change cursor based on what's under the mouse
+            if coord.hitTestVisualOrderButtons(mouseX: location.x, mouseY: flippedY) != nil {
+                NSCursor.pointingHand.set()
+            } else if coord.hitTestVisualOrderLine(mouseY: flippedY) != nil {
+                NSCursor.resizeUpDown.set()
+            } else if coord.hitTestSLTPLine(mouseY: flippedY) != nil {
                 NSCursor.resizeUpDown.set()
             } else {
                 NSCursor.crosshair.set()
@@ -260,6 +344,21 @@ struct ChartInteractionView: NSViewRepresentable {
 
             let barIndex = coord.snappedBarIndex(mouseX: location.x)
             coord.crosshair.wrappedValue = CrosshairState(barIndex: barIndex, mouseY: flippedY)
+        }
+
+        override func keyDown(with event: NSEvent) {
+            guard let coord = coordinator, coord.visualOrder != nil else {
+                super.keyDown(with: event)
+                return
+            }
+            switch event.keyCode {
+            case 36, 76: // Return, Enter
+                coord.onConfirmVisualOrder?()
+            case 53: // Escape
+                coord.onCancelVisualOrder?()
+            default:
+                super.keyDown(with: event)
+            }
         }
 
         override func mouseEntered(with event: NSEvent) {}

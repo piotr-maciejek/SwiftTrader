@@ -471,6 +471,19 @@ struct ContentView: View {
             todayATRPercent: vm.todayATRPercent,
             onModifyPosition: { label, sl, tp in
                 Task { await workspace.trading.modifyPosition(label: label, stopLoss: sl, takeProfit: tp) }
+            },
+            visualOrder: workspace.trading.visualOrder,
+            onConfirmVisualOrder: {
+                Task { await workspace.trading.confirmVisualOrder() }
+            },
+            onCancelVisualOrder: {
+                workspace.trading.cancelVisualOrder()
+            },
+            onUpdateVisualOrderSL: { price in
+                workspace.trading.visualOrder?.stopLoss = price
+            },
+            onUpdateVisualOrderTP: { price in
+                workspace.trading.visualOrder?.takeProfit = price
             }
         )
         .overlay {
@@ -598,21 +611,19 @@ struct ContentView: View {
         HStack(spacing: 6) {
             // Mode toggle
             Toggle(isOn: Binding(
-                get: { trading.oneClickMode },
-                set: { trading.oneClickMode = $0 }
+                get: { trading.visualMode },
+                set: { trading.visualMode = $0 }
             )) {
                 Image(systemName: "bolt.fill")
                     .font(.system(size: 10))
             }
             .toggleStyle(.checkbox)
-            .help(trading.oneClickMode ? "One-click mode (auto SL/TP)" : "Manual mode")
+            .help(trading.visualMode ? "Visual mode (chart SL/TP)" : "Manual mode")
 
             Button("Buy") {
-                if trading.oneClickMode {
-                    Task {
-                        await trading.submitOneClickOrder(
-                            direction: "BUY", instrument: vm.currentInstrument, bars: vm.bars)
-                    }
+                if trading.visualMode {
+                    trading.beginVisualOrder(
+                        direction: "BUY", instrument: vm.currentInstrument, bars: vm.bars)
                 } else {
                     showBuyPopover = true
                 }
@@ -640,11 +651,9 @@ struct ContentView: View {
             }
 
             Button("Sell") {
-                if trading.oneClickMode {
-                    Task {
-                        await trading.submitOneClickOrder(
-                            direction: "SELL", instrument: vm.currentInstrument, bars: vm.bars)
-                    }
+                if trading.visualMode {
+                    trading.beginVisualOrder(
+                        direction: "SELL", instrument: vm.currentInstrument, bars: vm.bars)
                 } else {
                     showSellPopover = true
                 }

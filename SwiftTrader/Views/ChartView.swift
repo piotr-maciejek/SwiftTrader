@@ -19,6 +19,11 @@ struct ChartView: View {
     var atrPips: Double?
     var todayATRPercent: Double?
     var onModifyPosition: ((String, Double, Double) -> Void)? = nil
+    var visualOrder: VisualOrderState? = nil
+    var onConfirmVisualOrder: (() -> Void)? = nil
+    var onCancelVisualOrder: (() -> Void)? = nil
+    var onUpdateVisualOrderSL: ((Double) -> Void)? = nil
+    var onUpdateVisualOrderTP: ((Double) -> Void)? = nil
     @State private var crosshair: CrosshairState? = nil
     @State private var dragPreview: DragPreviewState? = nil
     @State private var pendingSLTPEdit: PendingChartSLTPEdit? = nil
@@ -61,6 +66,9 @@ struct ChartView: View {
                     drawCandles(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange, priceRange: priceRange)
                     drawCurrentPriceLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawSLTPLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    if let vo = visualOrder {
+                        drawVisualOrderBox(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, order: vo)
+                    }
                     if let preview = dragPreview {
                         drawDragPreviewLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, preview: preview)
                     }
@@ -102,7 +110,12 @@ struct ChartView: View {
                         chartHeight: chartHeight,
                         priceRange: priceRange(for: visibleBarRange(chartWidth: chartWidth)),
                         dragPreview: $dragPreview,
-                        pendingSLTPEdit: $pendingSLTPEdit
+                        pendingSLTPEdit: $pendingSLTPEdit,
+                        visualOrder: visualOrder,
+                        onConfirmVisualOrder: onConfirmVisualOrder,
+                        onCancelVisualOrder: onCancelVisualOrder,
+                        onUpdateVisualOrderSL: onUpdateVisualOrderSL,
+                        onUpdateVisualOrderTP: onUpdateVisualOrderTP
                     )
                     .frame(width: chartWidth, height: chartHeight + volumeHeight)
                 }
@@ -160,6 +173,11 @@ struct ChartView: View {
         for i in range {
             lo = min(lo, bars[i].low)
             hi = max(hi, bars[i].high)
+        }
+        // Include visual order SL/TP so they're always visible
+        if let vo = visualOrder {
+            lo = min(lo, min(vo.stopLoss, vo.takeProfit))
+            hi = max(hi, max(vo.stopLoss, vo.takeProfit))
         }
         // Ensure a minimum spread so grid/axis math never divides by zero
         if hi - lo < 1e-8 {
@@ -732,6 +750,116 @@ struct ChartView: View {
             else { path.addLine(to: CGPoint(x: x, y: y)) }
         }
         context.stroke(path, with: .color(volumeMA.color), lineWidth: 1.5)
+    }
+
+    // MARK: - Visual Order Box
+
+    /// Button rect positions for visual order confirm/cancel — shared between drawing and hit-testing.
+    static func visualOrderButtonRects(boxRight: CGFloat, boxBottom: CGFloat) -> (confirm: CGRect, cancel: CGRect) {
+        let bw: CGFloat = 28
+        let bh: CGFloat = 22
+        let margin: CGFloat = 6
+        let confirmRect = CGRect(x: boxRight - margin - bw * 2 - 4, y: boxBottom - margin - bh, width: bw, height: bh)
+        let cancelRect = CGRect(x: boxRight - margin - bw, y: boxBottom - margin - bh, width: bw, height: bh)
+        return (confirmRect, cancelRect)
+    }
+
+    private func drawVisualOrderBox(context: inout GraphicsContext, chartWidth: CGFloat,
+                                     chartHeight: CGFloat, priceRange: (min: Double, max: Double),
+                                     order: VisualOrderState) {
+        let slY = yForPrice(order.stopLoss, chartHeight: chartHeight, priceRange: priceRange)
+        let tpY = yForPrice(order.takeProfit, chartHeight: chartHeight, priceRange: priceRange)
+        let entryY = yForPrice(order.entryPrice, chartHeight: chartHeight, priceRange: priceRange)
+
+        let leftX = xForBar(index: order.startBarIndex) - transform.candleSlotWidth / 2
+        let rightX = xForBar(index: order.endBarIndex) + transform.candleSlotWidth / 2
+        let topY = min(slY, tpY)
+        let bottomY = max(slY, tpY)
+
+        // Split background: green for TP zone, red for SL zone
+        let isBuy = order.direction == "BUY"
+        let tpZoneTop = isBuy ? topY : entryY
+        let tpZoneBottom = isBuy ? entryY : bottomY
+        let slZoneTop = isBuy ? entryY : topY
+        let slZoneBottom = isBuy ? bottomY : entryY
+
+        // TP zone (green)
+        let tpRect = CGRect(x: leftX, y: tpZoneTop, width: rightX - leftX, height: tpZoneBottom - tpZoneTop)
+        context.fill(Path(tpRect), with: .color(bullishColor.opacity(0.10)))
+
+        // SL zone (red)
+        let slRect = CGRect(x: leftX, y: slZoneTop, width: rightX - leftX, height: slZoneBottom - slZoneTop)
+        context.fill(Path(slRect), with: .color(bearishColor.opacity(0.10)))
+
+        // Box border
+        let boxRect = CGRect(x: leftX, y: topY, width: rightX - leftX, height: bottomY - topY)
+        context.stroke(Path(boxRect), with: .color(.white.opacity(0.3)),
+                       style: StrokeStyle(lineWidth: 1))
+
+        // SL line
+        var slPath = Path()
+        slPath.move(to: CGPoint(x: leftX, y: slY))
+        slPath.addLine(to: CGPoint(x: rightX, y: slY))
+        context.stroke(slPath, with: .color(bearishColor),
+                       style: StrokeStyle(lineWidth: 2, dash: [6, 3]))
+
+        // TP line
+        var tpPath = Path()
+        tpPath.move(to: CGPoint(x: leftX, y: tpY))
+        tpPath.addLine(to: CGPoint(x: rightX, y: tpY))
+        context.stroke(tpPath, with: .color(bullishColor),
+                       style: StrokeStyle(lineWidth: 2, dash: [6, 3]))
+
+        // Entry price line (solid blue)
+        var entryPath = Path()
+        entryPath.move(to: CGPoint(x: leftX, y: entryY))
+        entryPath.addLine(to: CGPoint(x: rightX, y: entryY))
+        context.stroke(entryPath, with: .color(currentPriceColor),
+                       style: StrokeStyle(lineWidth: 1))
+
+        // Info text
+        let midX = (leftX + rightX) / 2
+        let textStyle = Font.system(size: 10, weight: .medium, design: .monospaced)
+
+        let rrText = String(format: "R:R  %.1f", order.riskRewardRatio)
+        let riskText = String(format: "Risk  %.1f pips", order.riskPips)
+        let rewardText = String(format: "Reward  %.1f pips", order.rewardPips)
+
+        let lineHeight: CGFloat = 14
+        let textBlockY = entryY - lineHeight * 1.5
+
+        for (i, text) in [rrText, riskText, rewardText].enumerated() {
+            let y = textBlockY + CGFloat(i) * lineHeight
+            let resolved = context.resolve(Text(text).font(textStyle).foregroundStyle(.white.opacity(0.8)))
+            let textSize = resolved.measure(in: CGSize(width: 200, height: 20))
+            context.draw(resolved, at: CGPoint(x: midX - textSize.width / 2, y: y), anchor: .topLeading)
+        }
+
+        // Confirm / Cancel buttons
+        let (confirmRect, cancelRect) = Self.visualOrderButtonRects(boxRight: rightX, boxBottom: bottomY)
+
+        // Confirm button (green)
+        context.fill(Path(roundedRect: confirmRect, cornerRadius: 4),
+                     with: .color(bullishColor.opacity(0.8)))
+        let checkmark = context.resolve(Text("\u{2713}").font(.system(size: 12, weight: .bold)).foregroundStyle(.white))
+        context.draw(checkmark, at: CGPoint(x: confirmRect.midX, y: confirmRect.midY), anchor: .center)
+
+        // Cancel button (red)
+        context.fill(Path(roundedRect: cancelRect, cornerRadius: 4),
+                     with: .color(bearishColor.opacity(0.8)))
+        let xmark = context.resolve(Text("\u{2717}").font(.system(size: 12, weight: .bold)).foregroundStyle(.white))
+        context.draw(xmark, at: CGPoint(x: cancelRect.midX, y: cancelRect.midY), anchor: .center)
+
+        // SL/TP price labels on right side of box
+        let labelFont = Font.system(size: 9, weight: .medium, design: .monospaced)
+        let decimalPlaces = order.instrument.contains("JPY") ? 3 : 5
+        let slLabel = context.resolve(Text(String(format: "SL %.\(decimalPlaces)f", order.stopLoss))
+            .font(labelFont).foregroundStyle(bearishColor))
+        context.draw(slLabel, at: CGPoint(x: rightX + 4, y: slY), anchor: .leading)
+
+        let tpLabel = context.resolve(Text(String(format: "TP %.\(decimalPlaces)f", order.takeProfit))
+            .font(labelFont).foregroundStyle(bullishColor))
+        context.draw(tpLabel, at: CGPoint(x: rightX + 4, y: tpY), anchor: .leading)
     }
 
     // MARK: - Helpers

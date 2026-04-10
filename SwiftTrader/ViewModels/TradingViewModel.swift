@@ -9,7 +9,8 @@ final class TradingViewModel {
     var isConnected = false
     var isSubmitting = false
     var orderError: String?
-    var oneClickMode = false
+    var visualMode = false
+    var visualOrder: VisualOrderState?
 
     private var coordinator: TradingCoordinator
     private var wsTask: Task<Void, Never>?
@@ -55,17 +56,57 @@ final class TradingViewModel {
         }
     }
 
-    func submitOneClickOrder(direction: String, instrument: String, bars: [CandleBar]) async {
-        switch Self.calculateOneClick(direction: direction, bars: bars) {
-        case .success(let params):
-            await submitMarketOrder(instrument: instrument, direction: direction,
-                                    stopLoss: params.stopLoss, takeProfit: params.takeProfit)
-        case .failure(let error):
-            switch error {
-            case .insufficientData: orderError = "Not enough candle data"
-            case .invalidRisk(let detail): orderError = "Invalid SL: \(detail)"
-            }
+    func beginVisualOrder(direction: String, instrument: String, bars: [CandleBar]) {
+        guard bars.count >= 2, let currentPrice = bars.last?.close else {
+            orderError = "Not enough candle data"
+            return
         }
+
+        let (sl, tp) = Self.visualOrderSLTP(direction: direction, bars: bars, currentPrice: currentPrice)
+        let lastIndex = bars.count - 1
+        visualOrder = VisualOrderState(
+            direction: direction,
+            instrument: instrument,
+            entryPrice: currentPrice,
+            stopLoss: sl,
+            takeProfit: tp,
+            startBarIndex: lastIndex,
+            endBarIndex: lastIndex + 10
+        )
+    }
+
+    /// Compute initial SL/TP for visual order. Always returns valid values
+    /// by scanning recent bars for a reasonable stop level.
+    nonisolated static func visualOrderSLTP(direction: String, bars: [CandleBar], currentPrice: Double) -> (stopLoss: Double, takeProfit: Double) {
+        // Look at the last few completed bars to find a reasonable SL
+        let lookback = min(5, bars.count)
+        let recentBars = bars.suffix(lookback).filter { !$0.partial }
+
+        if direction == "BUY" {
+            let lowestLow = recentBars.map(\.low).min() ?? currentPrice
+            // SL at the lowest low of recent bars, but always below current price
+            let sl = min(lowestLow, currentPrice - abs(currentPrice) * 0.001)
+            let risk = currentPrice - sl
+            return (stopLoss: sl, takeProfit: currentPrice + risk * 3)
+        } else {
+            let highestHigh = recentBars.map(\.high).max() ?? currentPrice
+            // SL at the highest high of recent bars, but always above current price
+            let sl = max(highestHigh, currentPrice + abs(currentPrice) * 0.001)
+            let risk = sl - currentPrice
+            return (stopLoss: sl, takeProfit: currentPrice - risk * 3)
+        }
+    }
+
+    func confirmVisualOrder() async {
+        guard let order = visualOrder else { return }
+        visualOrder = nil
+        await submitMarketOrder(
+            instrument: order.instrument, direction: order.direction,
+            stopLoss: order.stopLoss, takeProfit: order.takeProfit)
+    }
+
+    func cancelVisualOrder() {
+        visualOrder = nil
     }
 
     func closePosition(label: String) async {
