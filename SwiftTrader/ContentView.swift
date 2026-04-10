@@ -65,7 +65,7 @@ struct ContentView: View {
 
                 if workspace.showRightPanel {
                     Divider()
-                    RightPanel()
+                    RightPanel(newsItems: workspace.newsItems)
                 }
             }
 

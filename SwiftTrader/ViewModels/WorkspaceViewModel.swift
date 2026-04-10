@@ -15,7 +15,10 @@ final class WorkspaceViewModel {
 
     let settings = AppSettings.shared
     let trading: TradingViewModel
+    var newsItems: [NewsItem] = []
     private let candleCache = CandleCache()
+    private var newsCoordinator: NewsCoordinator
+    private var newsTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     var tabs: [Tab] = []
     var selectedTabID: UUID?
@@ -35,6 +38,7 @@ final class WorkspaceViewModel {
 
     init() {
         trading = TradingViewModel(coordinator: TradingCoordinator(port: settings.port))
+        newsCoordinator = NewsCoordinator(port: settings.port)
         // NOTE: Do NOT start tasks here. SwiftUI re-evaluates @State initializers
         // on every body evaluation, creating (and discarding) many WorkspaceViewModels.
         // Only the first instance is kept; the rest are garbage-collected — but any
@@ -57,6 +61,29 @@ final class WorkspaceViewModel {
             }
         }
         trading.start()
+        connectNews()
+    }
+
+    private func connectNews() {
+        newsTask?.cancel()
+        newsTask = Task {
+            while !Task.isCancelled {
+                do {
+                    for try await batch in newsCoordinator.streamNews() {
+                        for item in batch where !newsItems.contains(where: { $0.id == item.id }) {
+                            newsItems.insert(item, at: 0)
+                        }
+                        if newsItems.count > 100 {
+                            newsItems = Array(newsItems.prefix(100))
+                        }
+                    }
+                } catch is CancellationError {
+                    break
+                } catch {
+                    try? await Task.sleep(for: .seconds(3))
+                }
+            }
+        }
     }
 
     /// Creates a default tab without starting tasks (used by init to avoid orphaned tasks).
@@ -159,6 +186,9 @@ final class WorkspaceViewModel {
             }
         }
         trading.reconnect(port: port)
+        newsCoordinator = NewsCoordinator(port: port)
+        newsItems = []
+        connectNews()
     }
 
     func closeTab(_ id: UUID) {
