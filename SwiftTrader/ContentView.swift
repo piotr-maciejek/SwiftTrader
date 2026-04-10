@@ -24,7 +24,7 @@ struct ContentView: View {
                 VStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Connecting to server...")
+                    Text("Loading chart data...")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -478,7 +478,7 @@ struct ContentView: View {
                 VStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Connecting to server...")
+                    Text("Loading chart data...")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
