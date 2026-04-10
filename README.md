@@ -10,6 +10,14 @@ Connects to [jforex-server](https://github.com/piotr-maciejek/jforex-server) for
 
 SwiftTrader is calibrated for **price action trading**. Clean charts, no indicator bloat -- just candles, price levels, and fast order execution. If you want 47 oscillators stacked on top of each other, this isn't the tool for you.
 
+## Screenshots
+
+![Candlestick chart with market session overlays](screenshots/chart.png)
+
+![Economic calendar panel](screenshots/calendar.png)
+
+![Currency correlation grid](screenshots/correlation.png)
+
 ## Features
 
 - **Canvas-based candlestick chart** with drag-to-scroll, mouse wheel zoom, and live streaming
