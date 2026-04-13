@@ -70,8 +70,12 @@ final class WorkspaceViewModel {
             while !Task.isCancelled {
                 do {
                     for try await batch in newsCoordinator.streamNews() {
-                        for item in batch where !newsItems.contains(where: { $0.id == item.id }) {
-                            newsItems.insert(item, at: 0)
+                        for item in batch {
+                            if let idx = newsItems.firstIndex(where: { $0.id == item.id }) {
+                                newsItems[idx] = item
+                            } else {
+                                newsItems.insert(item, at: 0)
+                            }
                         }
                         if newsItems.count > 100 {
                             newsItems = Array(newsItems.prefix(100))

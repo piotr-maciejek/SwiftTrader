@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RightPanel: View {
     var newsItems: [NewsItem]
+    @State private var showHeadlines = false
+    @State private var expandedRowIDs: Set<String> = []
 
     private var rows: [(id: String, time: String, country: String, hot: Bool, event: String, previous: String, expected: String, actual: String, actualColor: Color)] {
         let calendar = Calendar.current
@@ -9,7 +11,7 @@ struct RightPanel: View {
         fmt.dateFormat = "HH:mm"
 
         return newsItems
-            .filter { calendar.isDateInToday($0.date) }
+            .filter { (showHeadlines || $0.isCalendar) && calendar.isDateInToday($0.date) }
             .sorted { $0.publishDate < $1.publishDate }
             .flatMap { item -> [(id: String, time: String, country: String, hot: Bool, event: String, previous: String, expected: String, actual: String, actualColor: Color)] in
                 let time = fmt.string(from: item.date)
@@ -28,7 +30,8 @@ struct RightPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
+            toolbar
+            Divider()
             headerRow
             Divider()
 
@@ -51,6 +54,22 @@ struct RightPanel: View {
         .frame(width: 620)
     }
 
+    private var toolbar: some View {
+        HStack(spacing: 6) {
+            Toggle(isOn: $showHeadlines) {
+                Label("Headlines", systemImage: "newspaper")
+                    .labelStyle(.titleAndIcon)
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .help(showHeadlines ? "Hide general headlines" : "Show general headlines")
+
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+
     private var headerRow: some View {
         HStack(spacing: 0) {
             Text("Time").frame(width: 44, alignment: .leading)
@@ -67,7 +86,8 @@ struct RightPanel: View {
     }
 
     private func dataRow(_ row: (id: String, time: String, country: String, hot: Bool, event: String, previous: String, expected: String, actual: String, actualColor: Color)) -> some View {
-        HStack(spacing: 0) {
+        let expanded = expandedRowIDs.contains(row.id)
+        return HStack(alignment: .top, spacing: 0) {
             Text(row.time)
                 .frame(width: 44, alignment: .leading)
                 .foregroundStyle(.secondary)
@@ -80,7 +100,7 @@ struct RightPanel: View {
             .frame(width: 26)
             Text(row.event)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .lineLimit(1)
+                .lineLimit(expanded ? nil : 1)
                 .foregroundStyle(.primary)
             Text(row.previous)
                 .frame(width: 64, alignment: .trailing)
@@ -93,9 +113,20 @@ struct RightPanel: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(row.actualColor)
         }
+        .background(expanded ? Color.secondary.opacity(0.08) : .clear)
+        .contentShape(Rectangle())
+        .onTapGesture { toggleExpanded(row.id) }
         .font(.system(size: 12, design: .monospaced))
         .padding(.horizontal, 10)
         .padding(.vertical, 3)
+    }
+
+    private func toggleExpanded(_ id: String) {
+        if expandedRowIDs.contains(id) {
+            expandedRowIDs.remove(id)
+        } else {
+            expandedRowIDs.insert(id)
+        }
     }
 
     private func colorForActual(_ actual: String, expected: String) -> Color {
