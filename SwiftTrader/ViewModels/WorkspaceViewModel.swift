@@ -261,28 +261,29 @@ final class WorkspaceViewModel {
         }
     }
 
-    /// Moves the currently selected tab one slot left or right within its own
-    /// row (chart tabs stay among chart tabs, correlation among correlation).
-    /// No-op if the tab is already at the edge of its row.
+    /// Moves the currently selected tab one or more slots left/right within its
+    /// own visual row (chart tabs stay among chart tabs, correlation among
+    /// correlation). Skips over tabs of the other type in `tabs`, which may
+    /// sit between two same-type tabs. No-op if the tab is already at the edge
+    /// of its row.
     func moveSelectedTab(offset: Int) {
         guard offset != 0, let id = selectedTabID,
-              let from = tabs.firstIndex(where: { $0.id == id }) else { return }
-        let movingIsChart = tabs[from].content.isChart
-        var to = from
-        let step = offset > 0 ? 1 : -1
-        var remaining = abs(offset)
-        var cursor = from
-        while remaining > 0 {
-            let next = cursor + step
-            guard tabs.indices.contains(next),
-                  tabs[next].content.isChart == movingIsChart else { break }
-            cursor = next
-            to = next
-            remaining -= 1
-        }
-        guard to != from else { return }
-        let tab = tabs.remove(at: from)
-        tabs.insert(tab, at: to)
+              let fromIdx = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let movingIsChart = tabs[fromIdx].content.isChart
+
+        // Indices of same-type tabs in workspace.tabs order — these form the
+        // visual row. Operate on the row, then map back to absolute indices.
+        let rowIndices = tabs.enumerated()
+            .filter { $0.element.content.isChart == movingIsChart }
+            .map { $0.offset }
+        guard let rowFrom = rowIndices.firstIndex(of: fromIdx) else { return }
+
+        let rowTo = max(0, min(rowIndices.count - 1, rowFrom + offset))
+        guard rowTo != rowFrom else { return }
+        let targetIdx = rowIndices[rowTo]
+
+        let tab = tabs.remove(at: fromIdx)
+        tabs.insert(tab, at: targetIdx)
         scheduleSave()
     }
 
