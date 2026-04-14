@@ -20,6 +20,11 @@ final class WorkspaceStateService {
     }
 
     func save(_ state: WorkspaceState) {
+        // Skip persistence under xctest so unit tests can't clobber the user's
+        // real workspace via the shared singleton.
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return
+        }
         let data: Data
         do {
             data = try JSONEncoder().encode(state)
