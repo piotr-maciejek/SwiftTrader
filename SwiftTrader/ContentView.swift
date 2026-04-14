@@ -170,6 +170,21 @@ struct ContentView: View {
                 .buttonStyle(.borderless)
                 .help("New Tab (⌘T)")
 
+                // Sort tabs by global FX turnover (BIS Triennial Survey)
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        workspace.sortTabsByVolume()
+                    }
+                }) {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Sort tabs by trading volume")
+
                 Spacer()
 
                 // Settings gear

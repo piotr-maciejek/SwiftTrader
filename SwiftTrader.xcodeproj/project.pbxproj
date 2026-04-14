@@ -50,6 +50,8 @@
 		A1000029 /* VisualOrderState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002B; };
 		A100002A /* NewsItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002C; };
 		A100002B /* NewsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002D; };
+		A100002C /* FXVolumeRank.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002E; };
+		B1000009 /* FXVolumeRankTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000009; };
 		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001; };
 		B1000002 /* CandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002; };
 		B1000003 /* ForexAPIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003; };
@@ -116,6 +118,8 @@
 		A200002B /* VisualOrderState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualOrderState.swift; sourceTree = "<group>"; };
 		A200002C /* NewsItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsItem.swift; sourceTree = "<group>"; };
 		A200002D /* NewsCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsCoordinator.swift; sourceTree = "<group>"; };
+		A200002E /* FXVolumeRank.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXVolumeRank.swift; sourceTree = "<group>"; };
+		B2000009 /* FXVolumeRankTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXVolumeRankTests.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
 		B2000002 /* CandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCacheTests.swift; sourceTree = "<group>"; };
@@ -167,6 +171,7 @@
 				A2000028 /* TradingDayATR.swift */,
 				A200002B /* VisualOrderState.swift */,
 				A200002C /* NewsItem.swift */,
+				A200002E /* FXVolumeRank.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -241,6 +246,7 @@
 				B2000006 /* OneClickOrderTests.swift */,
 				B2000007 /* TradingDayATRTests.swift */,
 				B2000008 /* TabStateBackwardCompatTests.swift */,
+				B2000009 /* FXVolumeRankTests.swift */,
 			);
 			path = SwiftTraderTests;
 			sourceTree = "<group>";
@@ -356,6 +362,7 @@
 				A1000029 /* VisualOrderState.swift in Sources */,
 				A100002A /* NewsItem.swift in Sources */,
 				A100002B /* NewsCoordinator.swift in Sources */,
+				A100002C /* FXVolumeRank.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -371,6 +378,7 @@
 				B1000006 /* OneClickOrderTests.swift in Sources */,
 				B1000007 /* TradingDayATRTests.swift in Sources */,
 				B1000008 /* TabStateBackwardCompatTests.swift in Sources */,
+				B1000009 /* FXVolumeRankTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

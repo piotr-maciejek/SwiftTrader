@@ -28,6 +28,18 @@ struct SwiftTraderApp: App {
                 .keyboardShortcut("w")
             }
 
+            CommandMenu("Tabs") {
+                Button("Move Tab Left") {
+                    workspace?.moveSelectedTab(offset: -1)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
+
+                Button("Move Tab Right") {
+                    workspace?.moveSelectedTab(offset: 1)
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
+            }
+
             CommandMenu("Panels") {
                 Button(workspace?.showBottomPanel == true ? "Hide Bottom Panel" : "Show Bottom Panel") {
                     withAnimation(.easeInOut(duration: 0.2)) {

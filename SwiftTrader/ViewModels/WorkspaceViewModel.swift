@@ -10,6 +10,11 @@ final class WorkspaceViewModel {
         enum TabContent {
             case chart(ChartViewModel)
             case correlation(CorrelationViewModel)
+
+            var isChart: Bool {
+                if case .chart = self { return true }
+                return false
+            }
         }
     }
 
@@ -223,6 +228,61 @@ final class WorkspaceViewModel {
         let tab = tabs.remove(at: tabs.firstIndex(where: { $0.id == id })!)
         let insertIndex = tabs.firstIndex(where: { $0.id == beforeID }) ?? tabs.endIndex
         tabs.insert(tab, at: insertIndex)
+        scheduleSave()
+    }
+
+    /// Sorts both tab rows left-to-right by global FX turnover (BIS 2025).
+    /// Chart tabs stay above correlation tabs; within each group, more actively
+    /// traded pairs/currencies come first. Unknown symbols fall to the end.
+    func sortTabsByVolume() {
+        tabs.sort { a, b in
+            let aChart = a.content.isChart
+            let bChart = b.content.isChart
+            if aChart != bChart { return aChart }
+            let aRank = volumeRank(for: a)
+            let bRank = volumeRank(for: b)
+            if aRank != bRank { return aRank > bRank }
+            return volumeKey(for: a) < volumeKey(for: b)
+        }
+        scheduleSave()
+    }
+
+    private func volumeRank(for tab: Tab) -> Double {
+        switch tab.content {
+        case .chart(let vm): return FXVolumeRank.rank(pair: vm.currentInstrument)
+        case .correlation(let vm): return FXVolumeRank.rank(currency: vm.currency)
+        }
+    }
+
+    private func volumeKey(for tab: Tab) -> String {
+        switch tab.content {
+        case .chart(let vm): return vm.currentInstrument
+        case .correlation(let vm): return vm.currency
+        }
+    }
+
+    /// Moves the currently selected tab one slot left or right within its own
+    /// row (chart tabs stay among chart tabs, correlation among correlation).
+    /// No-op if the tab is already at the edge of its row.
+    func moveSelectedTab(offset: Int) {
+        guard offset != 0, let id = selectedTabID,
+              let from = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let movingIsChart = tabs[from].content.isChart
+        var to = from
+        let step = offset > 0 ? 1 : -1
+        var remaining = abs(offset)
+        var cursor = from
+        while remaining > 0 {
+            let next = cursor + step
+            guard tabs.indices.contains(next),
+                  tabs[next].content.isChart == movingIsChart else { break }
+            cursor = next
+            to = next
+            remaining -= 1
+        }
+        guard to != from else { return }
+        let tab = tabs.remove(at: from)
+        tabs.insert(tab, at: to)
         scheduleSave()
     }
 
