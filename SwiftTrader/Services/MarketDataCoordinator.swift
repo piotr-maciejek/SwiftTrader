@@ -62,4 +62,8 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
     ) -> AsyncThrowingStream<CandleBar, Error> {
         ForexWebSocketService(instrument: instrument, period: period, host: host, port: port).bars()
     }
+
+    func clearServerCache(instrument: String) async throws -> Int {
+        try await apiService.clearCache(instrument: instrument)
+    }
 }

@@ -454,6 +454,24 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+
+            Divider().frame(height: 16)
+
+            Button(action: { vm.refreshCache() }) {
+                Group {
+                    if vm.isRefreshingCache {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: "arrow.clockwise.circle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.borderless)
+            .disabled(vm.isRefreshingCache)
+            .help("Refresh cache — delete server-side Dukascopy cache and reload (last resort)")
         }
         .padding(.horizontal)
         .padding(.vertical, 8)

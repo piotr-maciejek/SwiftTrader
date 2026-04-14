@@ -7,4 +7,5 @@ protocol MarketDataProviding: Sendable {
     func fetchEarlierCandles(instrument: String, period: String, count: Int) async throws -> [CandleBar]
     func cacheBar(_ bar: CandleBar, instrument: String, period: String) async
     func streamCandles(instrument: String, period: String) -> AsyncThrowingStream<CandleBar, Error>
+    func clearServerCache(instrument: String) async throws -> Int
 }

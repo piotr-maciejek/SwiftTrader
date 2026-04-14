@@ -38,4 +38,6 @@ final class MockMarketDataCoordinator: MarketDataProviding, @unchecked Sendable 
             continuation.onTermination = { _ in }
         }
     }
+
+    func clearServerCache(instrument: String) async throws -> Int { 0 }
 }

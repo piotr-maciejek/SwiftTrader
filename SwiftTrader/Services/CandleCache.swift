@@ -94,6 +94,11 @@ actor CandleCache {
         store.removeAll()
     }
 
+    /// Wipe all cached periods for one instrument. Used by the Refresh Cache button.
+    func clear(instrument: String) {
+        store = store.filter { $0.key.instrument != instrument }
+    }
+
     private func evictIfNeeded() {
         while store.count > maxKeys {
             if let lruKey = store.min(by: { $0.value.lastAccess < $1.value.lastAccess })?.key {

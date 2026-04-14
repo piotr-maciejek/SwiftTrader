@@ -37,6 +37,19 @@ actor ForexAPIService {
         return try JSONDecoder().decode([CandleBar].self, from: data)
     }
 
+    func clearCache(instrument: String) async throws -> Int {
+        var components = URLComponents(url: baseURL.appendingPathComponent("/api/v1/history/cache"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "instrument", value: instrument)]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "DELETE"
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw APIError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+        struct Resp: Decodable { let filesDeleted: Int }
+        return (try? JSONDecoder().decode(Resp.self, from: data).filesDeleted) ?? 0
+    }
+
     func fetchInstruments() async throws -> [String] {
         let url = baseURL.appendingPathComponent("/api/v1/instruments")
         let (data, response) = try await URLSession.shared.data(from: url)

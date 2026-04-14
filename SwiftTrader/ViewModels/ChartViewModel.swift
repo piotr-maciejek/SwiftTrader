@@ -54,6 +54,7 @@ final class ChartViewModel {
     var atrValue: Double?
     var atrPips: Double?
     var todayATRPercent: Double?
+    var isRefreshingCache = false
 
     var onStateChanged: (() -> Void)?
 
@@ -151,6 +152,24 @@ final class ChartViewModel {
 
     func reloadCurrentChart() {
         reloadChart()
+    }
+
+    func refreshCache() {
+        guard !isRefreshingCache else { return }
+        let instrument = currentInstrument
+        isRefreshingCache = true
+        Task {
+            defer { isRefreshingCache = false }
+            do {
+                _ = try await coordinator.clearServerCache(instrument: instrument)
+            } catch {
+                self.error = "Refresh cache: \(error.localizedDescription)"
+                return
+            }
+            guard instrument == currentInstrument else { return }
+            await coordinator.cache.clear(instrument: instrument)
+            reloadChart()
+        }
     }
 
     private func reloadChart() {
