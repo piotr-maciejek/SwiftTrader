@@ -287,6 +287,26 @@ final class WorkspaceViewModel {
         scheduleSave()
     }
 
+    /// Cycles the selected tab's timeframe one step in `ChartViewModel.availablePeriods`.
+    /// Positive offset = longer timeframe (15m → 30m). No wrap at the ends.
+    func cycleSelectedTabPeriod(offset: Int) {
+        guard offset != 0, let tab = selectedTab else { return }
+        let periods = ChartViewModel.availablePeriods.map(\.value)
+        let current: String
+        switch tab.content {
+        case .chart(let vm): current = vm.currentPeriod
+        case .correlation(let vm): current = vm.currentPeriod
+        }
+        guard let from = periods.firstIndex(of: current) else { return }
+        let to = max(0, min(periods.count - 1, from + offset))
+        guard to != from else { return }
+        let target = periods[to]
+        switch tab.content {
+        case .chart(let vm): vm.switchPeriod(target)
+        case .correlation(let vm): vm.switchPeriod(target)
+        }
+    }
+
     func moveTabToEnd(id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }),
               index != tabs.count - 1

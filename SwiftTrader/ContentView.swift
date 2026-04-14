@@ -127,6 +127,7 @@ struct ContentView: View {
     @State private var draggedTabID: UUID?
     @State private var dragOffset: CGFloat = 0
     @State private var tabFrames: [UUID: CGRect] = [:]  // in row coordinate space
+    @State private var showShortcuts = false
 
     private func reorderDuringDrag(tab: WorkspaceViewModel.Tab, rowTabs: [WorkspaceViewModel.Tab]) {
         guard let dragFrame = tabFrames[tab.id] else { return }
@@ -186,6 +187,20 @@ struct ContentView: View {
                 .help("Sort tabs by trading volume")
 
                 Spacer()
+
+                // Keyboard shortcuts help
+                Button(action: { showShortcuts = true }) {
+                    Image(systemName: "questionmark.circle")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Keyboard Shortcuts")
+                .popover(isPresented: $showShortcuts) {
+                    ShortcutsPopover()
+                }
 
                 // Settings gear
                 Button(action: { workspace.showSettings = true }) {
@@ -349,6 +364,16 @@ struct ContentView: View {
             .pickerStyle(.menu)
             .fixedSize()
 
+            Button(action: { workspace.cycleSelectedTabPeriod(offset: -1) }) {
+                Image(systemName: "minus")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help("Shorter Timeframe (⌘⌃↓)")
+
             Picker("", selection: Binding(
                 get: { vm.currentPeriod },
                 set: { vm.switchPeriod($0) }
@@ -359,6 +384,16 @@ struct ContentView: View {
             }
             .pickerStyle(.menu)
             .fixedSize()
+
+            Button(action: { workspace.cycleSelectedTabPeriod(offset: 1) }) {
+                Image(systemName: "plus")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help("Longer Timeframe (⌘⌃↑)")
 
             Divider().frame(height: 16)
 
@@ -556,6 +591,16 @@ struct ContentView: View {
             Text("\(vm.currency) Correlation")
                 .font(.system(size: 13, weight: .semibold))
 
+            Button(action: { workspace.cycleSelectedTabPeriod(offset: -1) }) {
+                Image(systemName: "minus")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help("Shorter Timeframe (⌘⌃↓)")
+
             Picker("", selection: Binding(
                 get: { vm.currentPeriod },
                 set: { vm.switchPeriod($0) }
@@ -566,6 +611,16 @@ struct ContentView: View {
             }
             .pickerStyle(.menu)
             .fixedSize()
+
+            Button(action: { workspace.cycleSelectedTabPeriod(offset: 1) }) {
+                Image(systemName: "plus")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help("Longer Timeframe (⌘⌃↑)")
 
             Button(action: { vm.showSessions.toggle() }) {
                 Image(systemName: "clock.arrow.2.circlepath")

@@ -38,6 +38,16 @@ struct SwiftTraderApp: App {
                     workspace?.moveSelectedTab(offset: 1)
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
+
+                Button("Longer Timeframe") {
+                    workspace?.cycleSelectedTabPeriod(offset: 1)
+                }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .control])
+
+                Button("Shorter Timeframe") {
+                    workspace?.cycleSelectedTabPeriod(offset: -1)
+                }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .control])
             }
 
             CommandMenu("Panels") {

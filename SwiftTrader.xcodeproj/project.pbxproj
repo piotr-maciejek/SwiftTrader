@@ -51,8 +51,10 @@
 		A100002A /* NewsItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002C; };
 		A100002B /* NewsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002D; };
 		A100002C /* FXVolumeRank.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002E; };
+		A100002D /* ShortcutsPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002F; };
 		B1000009 /* FXVolumeRankTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000009; };
 		B100000A /* WorkspaceMoveTabTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000A; };
+		B100000B /* WorkspacePeriodCycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000B; };
 		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001; };
 		B1000002 /* CandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002; };
 		B1000003 /* ForexAPIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003; };
@@ -120,8 +122,10 @@
 		A200002C /* NewsItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsItem.swift; sourceTree = "<group>"; };
 		A200002D /* NewsCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsCoordinator.swift; sourceTree = "<group>"; };
 		A200002E /* FXVolumeRank.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXVolumeRank.swift; sourceTree = "<group>"; };
+		A200002F /* ShortcutsPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsPopover.swift; sourceTree = "<group>"; };
 		B2000009 /* FXVolumeRankTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXVolumeRankTests.swift; sourceTree = "<group>"; };
 		B200000A /* WorkspaceMoveTabTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceMoveTabTests.swift; sourceTree = "<group>"; };
+		B200000B /* WorkspacePeriodCycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePeriodCycleTests.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
 		B2000002 /* CandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCacheTests.swift; sourceTree = "<group>"; };
@@ -233,6 +237,7 @@
 				A2000022 /* PinEntrySheet.swift */,
 				A2000029 /* ATRPopover.swift */,
 				A200002A /* VolumeMAPopover.swift */,
+				A200002F /* ShortcutsPopover.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -250,6 +255,7 @@
 				B2000008 /* TabStateBackwardCompatTests.swift */,
 				B2000009 /* FXVolumeRankTests.swift */,
 				B200000A /* WorkspaceMoveTabTests.swift */,
+				B200000B /* WorkspacePeriodCycleTests.swift */,
 			);
 			path = SwiftTraderTests;
 			sourceTree = "<group>";
@@ -365,6 +371,7 @@
 				A1000029 /* VisualOrderState.swift in Sources */,
 				A100002A /* NewsItem.swift in Sources */,
 				A100002B /* NewsCoordinator.swift in Sources */,
+				A100002D /* ShortcutsPopover.swift in Sources */,
 				A100002C /* FXVolumeRank.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -383,6 +390,7 @@
 				B1000008 /* TabStateBackwardCompatTests.swift in Sources */,
 				B1000009 /* FXVolumeRankTests.swift in Sources */,
 				B100000A /* WorkspaceMoveTabTests.swift in Sources */,
+				B100000B /* WorkspacePeriodCycleTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
