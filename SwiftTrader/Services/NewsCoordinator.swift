@@ -10,43 +10,10 @@ final class NewsCoordinator: Sendable {
     }
 
     func streamNews() -> AsyncThrowingStream<[NewsItem], Error> {
+        // News batches arrive infrequently (calendar releases, breaking news) but each item is
+        // an upsert to the shared client-side table — dropping any would lose an event forever.
+        // Unbounded is safe because throughput is bounded by human news cadence.
         let url = URL(string: "ws://\(host):\(port)/ws/news")!
-        return AsyncThrowingStream(bufferingPolicy: .bufferingNewest(50)) { continuation in
-            let task = URLSession.shared.webSocketTask(with: url)
-            continuation.onTermination = { _ in
-                task.cancel(with: .goingAway, reason: nil)
-            }
-            task.resume()
-
-            let pingTask = Task {
-                while !Task.isCancelled {
-                    try await Task.sleep(for: .seconds(30))
-                    task.sendPing { error in
-                        if let error { continuation.finish(throwing: error) }
-                    }
-                }
-            }
-
-            Task {
-                do {
-                    while !Task.isCancelled {
-                        let message = try await task.receive()
-                        let data: Data? = switch message {
-                        case .string(let text): text.data(using: .utf8)
-                        case .data(let d): d
-                        @unknown default: nil
-                        }
-                        if let data {
-                            let items = try JSONDecoder().decode([NewsItem].self, from: data)
-                            continuation.yield(items)
-                        }
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-                pingTask.cancel()
-            }
-        }
+        return WebSocketStreamDriver.stream(url: url, bufferingPolicy: .unbounded)
     }
 }

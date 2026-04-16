@@ -53,6 +53,8 @@
 		A100002C /* FXVolumeRank.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002E; };
 		A100002D /* ShortcutsPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002F; };
 		A100002E /* PositionSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030; };
+		A100002F /* WebSocketStreamError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031; };
+		A1000030 /* WebSocketStreamDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000032; };
 		B100000C /* PositionSizingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000C; };
 		B1000009 /* FXVolumeRankTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000009; };
 		B100000A /* WorkspaceMoveTabTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000A; };
@@ -66,6 +68,7 @@
 		B1000007 /* TradingDayATRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000007; };
 		B1000008 /* TabStateBackwardCompatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000008; };
 		B100000D /* TradingViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000D; };
+		B100000E /* WebSocketStreamDriverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000E; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -130,6 +133,8 @@
 		B200000A /* WorkspaceMoveTabTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceMoveTabTests.swift; sourceTree = "<group>"; };
 		B200000B /* WorkspacePeriodCycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePeriodCycleTests.swift; sourceTree = "<group>"; };
 		A2000030 /* PositionSizing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionSizing.swift; sourceTree = "<group>"; };
+		A2000031 /* WebSocketStreamError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketStreamError.swift; sourceTree = "<group>"; };
+		A2000032 /* WebSocketStreamDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketStreamDriver.swift; sourceTree = "<group>"; };
 		B200000C /* PositionSizingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionSizingTests.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
@@ -141,6 +146,7 @@
 		B2000007 /* TradingDayATRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingDayATRTests.swift; sourceTree = "<group>"; };
 		B2000008 /* TabStateBackwardCompatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStateBackwardCompatTests.swift; sourceTree = "<group>"; };
 		B200000D /* TradingViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingViewModelTests.swift; sourceTree = "<group>"; };
+		B200000E /* WebSocketStreamDriverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketStreamDriverTests.swift; sourceTree = "<group>"; };
 		B3000001 /* SwiftTraderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SwiftTraderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -185,6 +191,7 @@
 				A200002C /* NewsItem.swift */,
 				A200002E /* FXVolumeRank.swift */,
 				A2000030 /* PositionSizing.swift */,
+				A2000031 /* WebSocketStreamError.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -203,6 +210,7 @@
 				A2000025 /* WorkspaceStateService.swift */,
 				A2000027 /* MarketDataProviding.swift */,
 				A200002D /* NewsCoordinator.swift */,
+				A2000032 /* WebSocketStreamDriver.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -265,6 +273,7 @@
 				B200000B /* WorkspacePeriodCycleTests.swift */,
 				B200000C /* PositionSizingTests.swift */,
 				B200000D /* TradingViewModelTests.swift */,
+				B200000E /* WebSocketStreamDriverTests.swift */,
 			);
 			path = SwiftTraderTests;
 			sourceTree = "<group>";
@@ -383,6 +392,8 @@
 				A100002D /* ShortcutsPopover.swift in Sources */,
 				A100002C /* FXVolumeRank.swift in Sources */,
 				A100002E /* PositionSizing.swift in Sources */,
+				A100002F /* WebSocketStreamError.swift in Sources */,
+				A1000030 /* WebSocketStreamDriver.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -403,6 +414,7 @@
 				B100000B /* WorkspacePeriodCycleTests.swift in Sources */,
 				B100000C /* PositionSizingTests.swift in Sources */,
 				B100000D /* TradingViewModelTests.swift in Sources */,
+				B100000E /* WebSocketStreamDriverTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
