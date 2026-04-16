@@ -7,6 +7,8 @@ struct VisualOrderState: Equatable {
     var takeProfit: Double      // draggable
     var startBarIndex: Int      // left edge (ahead of current candle)
     var endBarIndex: Int        // right edge (~10 candles ahead)
+    var isAmountOverridden: Bool = false
+    var isMarginCapped: Bool = false
 
     var riskPips: Double {
         abs(entryPrice - stopLoss) * TradingDayATR.pipFactor(for: instrument)

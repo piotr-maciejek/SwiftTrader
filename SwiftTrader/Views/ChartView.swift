@@ -25,6 +25,8 @@ struct ChartView: View {
     var onUpdateVisualOrderSL: ((Double) -> Void)? = nil
     var onUpdateVisualOrderTP: ((Double) -> Void)? = nil
     var onAdjustVisualOrderAmount: ((Double) -> Void)? = nil
+    var onResetVisualOrderAmount: (() -> Void)? = nil
+    var accountEquity: Double? = nil
     @State private var crosshair: CrosshairState? = nil
     @State private var dragPreview: DragPreviewState? = nil
     @State private var pendingSLTPEdit: PendingChartSLTPEdit? = nil
@@ -117,7 +119,8 @@ struct ChartView: View {
                         onCancelVisualOrder: onCancelVisualOrder,
                         onUpdateVisualOrderSL: onUpdateVisualOrderSL,
                         onUpdateVisualOrderTP: onUpdateVisualOrderTP,
-                        onAdjustVisualOrderAmount: onAdjustVisualOrderAmount
+                        onAdjustVisualOrderAmount: onAdjustVisualOrderAmount,
+                        onResetVisualOrderAmount: onResetVisualOrderAmount
                     )
                     .frame(width: chartWidth, height: chartHeight + volumeHeight)
                 }
@@ -762,6 +765,11 @@ struct ChartView: View {
         return (confirmRect, cancelRect)
     }
 
+    /// Hit rect for the amount label text — tapping resets to auto-calculated size.
+    static func visualOrderAmountLabelRect(midX: CGFloat, amountY: CGFloat) -> CGRect {
+        CGRect(x: midX - 50, y: amountY - 1, width: 100, height: 16)
+    }
+
     /// Button rect positions for visual order amount +/- — shared between drawing and hit-testing.
     static func visualOrderAmountButtonRects(midX: CGFloat, amountY: CGFloat) -> (minus: CGRect, plus: CGRect) {
         let bw: CGFloat = 20
@@ -829,7 +837,14 @@ struct ChartView: View {
         let midX = (leftX + rightX) / 2
         let textStyle = Font.system(size: 10, weight: .medium, design: .monospaced)
 
-        let amountText = String(format: "%g lots", order.amount)
+        let amountSuffix = order.isAmountOverridden ? " (M)" : ""
+        let standardLots = order.amount * 10
+        let amountText = String(format: "%g lots%@", standardLots, amountSuffix)
+        let riskMoney = order.amount * abs(order.entryPrice - order.stopLoss) * 1_000_000
+        var riskMoneyText = String(format: "Risk  %.0f", riskMoney)
+        if let eq = accountEquity, eq > 0 {
+            riskMoneyText += String(format: "  (%.1f%%)", (riskMoney / eq) * 100)
+        }
         let rrText = String(format: "R:R  %.1f", order.riskRewardRatio)
         let riskText = String(format: "Risk  %.1f pips", order.riskPips)
         let rewardText = String(format: "Reward  %.1f pips", order.rewardPips)
@@ -851,9 +866,18 @@ struct ChartView: View {
         let plusSymbol = context.resolve(Text("+").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.8)))
         context.draw(plusSymbol, at: CGPoint(x: plusRect.midX, y: plusRect.midY), anchor: .center)
 
-        for (i, text) in [rrText, riskText, rewardText].enumerated() {
+        var infoLines: [(String, Color)] = [
+            (rrText, .white.opacity(0.8)),
+            (riskText, .white.opacity(0.8)),
+            (rewardText, .white.opacity(0.8)),
+            (riskMoneyText, .white.opacity(0.8)),
+        ]
+        if order.isMarginCapped {
+            infoLines.append(("margin limited", Color.orange))
+        }
+        for (i, (text, color)) in infoLines.enumerated() {
             let y = textBlockY + CGFloat(i + 1) * lineHeight
-            let resolved = context.resolve(Text(text).font(textStyle).foregroundStyle(.white.opacity(0.8)))
+            let resolved = context.resolve(Text(text).font(textStyle).foregroundStyle(color))
             let textSize = resolved.measure(in: CGSize(width: 200, height: 20))
             context.draw(resolved, at: CGPoint(x: midX - textSize.width / 2, y: y), anchor: .topLeading)
         }

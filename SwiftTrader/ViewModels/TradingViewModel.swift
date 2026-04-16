@@ -63,15 +63,28 @@ final class TradingViewModel {
 
         let (sl, tp) = Self.visualOrderSLTP(direction: direction, bars: bars, currentPrice: currentPrice)
         let nextIndex = bars.count + 1
+
+        var initialAmount = amount
+        var marginCapped = false
+        if let equity = account?.equity, let freeMargin = account?.freeMargin {
+            let sizing = PositionSizing.calculate(
+                equity: equity, freeMargin: freeMargin, riskFraction: 0.05,
+                entryPrice: currentPrice, stopLoss: sl)
+            initialAmount = sizing.lots
+            marginCapped = sizing.isMarginCapped
+        }
+
         visualOrders[instrument] = VisualOrderState(
             direction: direction,
             instrument: instrument,
             entryPrice: currentPrice,
-            amount: amount,
+            amount: initialAmount,
             stopLoss: sl,
             takeProfit: tp,
             startBarIndex: nextIndex,
-            endBarIndex: nextIndex + 10
+            endBarIndex: nextIndex + 10,
+            isAmountOverridden: false,
+            isMarginCapped: marginCapped
         )
     }
 
@@ -112,7 +125,8 @@ final class TradingViewModel {
         order.endBarIndex = barCount + 1 + boxWidth
         visualOrders[instrument]?.startBarIndex = order.startBarIndex
         visualOrders[instrument]?.endBarIndex = order.endBarIndex
-        return order
+        recalculateAmount(for: instrument)
+        return visualOrders[instrument]
     }
 
     func confirmVisualOrder(instrument: String) async {
@@ -131,6 +145,18 @@ final class TradingViewModel {
         guard visualOrders[instrument] != nil else { return }
         let newAmount = max(0.001, (visualOrders[instrument]?.amount ?? 0.001) + delta)
         visualOrders[instrument]?.amount = newAmount
+        visualOrders[instrument]?.isAmountOverridden = true
+    }
+
+    func updateVisualOrderSL(instrument: String, price: Double) {
+        visualOrders[instrument]?.stopLoss = price
+        recalculateAmount(for: instrument)
+    }
+
+    func resetVisualOrderAmount(instrument: String) {
+        guard visualOrders[instrument] != nil else { return }
+        visualOrders[instrument]?.isAmountOverridden = false
+        recalculateAmount(for: instrument)
     }
 
     func closePosition(label: String) async {
@@ -195,6 +221,20 @@ final class TradingViewModel {
     }
 
     // MARK: - Private
+
+    private func recalculateAmount(for instrument: String) {
+        guard var order = visualOrders[instrument],
+              !order.isAmountOverridden,
+              let equity = account?.equity,
+              let freeMargin = account?.freeMargin else { return }
+        let result = PositionSizing.calculate(
+            equity: equity, freeMargin: freeMargin,
+            riskFraction: 0.05,
+            entryPrice: order.entryPrice, stopLoss: order.stopLoss)
+        order.amount = result.lots
+        order.isMarginCapped = result.isMarginCapped
+        visualOrders[instrument] = order
+    }
 
     private func connectWebSocket() {
         wsTask?.cancel()

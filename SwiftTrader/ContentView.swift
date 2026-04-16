@@ -546,14 +546,18 @@ struct ContentView: View {
                 workspace.trading.cancelVisualOrder(instrument: vm.currentInstrument)
             },
             onUpdateVisualOrderSL: { price in
-                workspace.trading.visualOrders[vm.currentInstrument]?.stopLoss = price
+                workspace.trading.updateVisualOrderSL(instrument: vm.currentInstrument, price: price)
             },
             onUpdateVisualOrderTP: { price in
                 workspace.trading.visualOrders[vm.currentInstrument]?.takeProfit = price
             },
             onAdjustVisualOrderAmount: { delta in
                 workspace.trading.adjustVisualOrderAmount(instrument: vm.currentInstrument, by: delta)
-            }
+            },
+            onResetVisualOrderAmount: {
+                workspace.trading.resetVisualOrderAmount(instrument: vm.currentInstrument)
+            },
+            accountEquity: workspace.trading.account?.equity
         )
         .overlay {
             if vm.bars.isEmpty {

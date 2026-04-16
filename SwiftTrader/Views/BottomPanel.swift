@@ -82,7 +82,7 @@ struct BottomPanel: View {
             cell(formatInstrument(position.instrument), width: 90)
             cell(position.direction, width: 50,
                  color: position.isBuy ? .green : .red)
-            cell(String(format: "%.3f", position.amount), width: 60)
+            cell(String(format: "%.2f", position.amount * 10), width: 60)
             cell(String(format: "%.5f", position.openPrice), width: 80)
 
             // SL

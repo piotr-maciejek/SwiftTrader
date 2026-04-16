@@ -46,6 +46,7 @@ struct ChartInteractionView: NSViewRepresentable {
     var onUpdateVisualOrderSL: ((Double) -> Void)? = nil
     var onUpdateVisualOrderTP: ((Double) -> Void)? = nil
     var onAdjustVisualOrderAmount: ((Double) -> Void)? = nil
+    var onResetVisualOrderAmount: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> ChartInteractionNSView {
         let view = ChartInteractionNSView()
@@ -70,6 +71,7 @@ struct ChartInteractionView: NSViewRepresentable {
         context.coordinator.onUpdateVisualOrderSL = onUpdateVisualOrderSL
         context.coordinator.onUpdateVisualOrderTP = onUpdateVisualOrderTP
         context.coordinator.onAdjustVisualOrderAmount = onAdjustVisualOrderAmount
+        context.coordinator.onResetVisualOrderAmount = onResetVisualOrderAmount
     }
 
     func makeCoordinator() -> Coordinator {
@@ -101,6 +103,7 @@ struct ChartInteractionView: NSViewRepresentable {
         var onUpdateVisualOrderSL: ((Double) -> Void)?
         var onUpdateVisualOrderTP: ((Double) -> Void)?
         var onAdjustVisualOrderAmount: ((Double) -> Void)?
+        var onResetVisualOrderAmount: (() -> Void)?
         var isDraggingVisualSLTP = false
         var visualDragField: SLTPLineHit.Field?
 
@@ -170,7 +173,7 @@ struct ChartInteractionView: NSViewRepresentable {
             return nil
         }
 
-        enum VisualOrderButton { case confirm, cancel, amountUp, amountDown }
+        enum VisualOrderButton { case confirm, cancel, amountUp, amountDown, amountReset }
 
         func hitTestVisualOrderButtons(mouseX: CGFloat, mouseY: CGFloat) -> VisualOrderButton? {
             guard let vo = visualOrder else { return nil }
@@ -189,6 +192,10 @@ struct ChartInteractionView: NSViewRepresentable {
             let (minusRect, plusRect) = ChartView.visualOrderAmountButtonRects(midX: midX, amountY: amountY)
             if minusRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountDown }
             if plusRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountUp }
+
+            // Amount label (click to reset to auto)
+            let amountLabelRect = ChartView.visualOrderAmountLabelRect(midX: midX, amountY: amountY)
+            if amountLabelRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountReset }
 
             // Confirm/Cancel buttons
             let (confirmRect, cancelRect) = ChartView.visualOrderButtonRects(boxRight: rightX, boxBottom: bottomY)
@@ -243,6 +250,7 @@ struct ChartInteractionView: NSViewRepresentable {
                 case .cancel: coord.onCancelVisualOrder?()
                 case .amountUp: coord.onAdjustVisualOrderAmount?(0.001)
                 case .amountDown: coord.onAdjustVisualOrderAmount?(-0.001)
+                case .amountReset: coord.onResetVisualOrderAmount?()
                 }
                 return
             }
