@@ -11,12 +11,12 @@ final class TradingViewModel {
     var orderError: String?
     var visualOrders: [String: VisualOrderState] = [:]
 
-    private var coordinator: TradingCoordinator
+    private var coordinator: any TradingCoordinating
     private var wsTask: Task<Void, Never>?
 
     var amount = 0.01
 
-    init(coordinator: TradingCoordinator = TradingCoordinator()) {
+    init(coordinator: any TradingCoordinating = TradingCoordinator()) {
         self.coordinator = coordinator
     }
 
@@ -39,19 +39,21 @@ final class TradingViewModel {
 
     // MARK: - Order submission
 
+    @discardableResult
     func submitMarketOrder(instrument: String, direction: String,
-                           amount: Double? = nil, stopLoss: Double, takeProfit: Double) async {
+                           amount: Double? = nil, stopLoss: Double, takeProfit: Double) async throws -> Position {
         isSubmitting = true
         defer { isSubmitting = false }
         orderError = nil
 
         do {
-            _ = try await coordinator.submitOrder(
+            return try await coordinator.submitOrder(
                 instrument: instrument, direction: direction,
                 amount: amount ?? self.amount,
                 stopLoss: stopLoss, takeProfit: takeProfit)
         } catch {
             orderError = error.localizedDescription
+            throw error
         }
     }
 
@@ -129,15 +131,23 @@ final class TradingViewModel {
         return visualOrders[instrument]
     }
 
+    /// Keeps the visual-order state intact until the server confirms the fill.
+    /// On failure, the user sees the error and still has the box to retry or cancel.
     func confirmVisualOrder(instrument: String) async {
-        guard let order = visualOrders.removeValue(forKey: instrument) else { return }
-        await submitMarketOrder(
-            instrument: order.instrument, direction: order.direction,
-            amount: order.amount,
-            stopLoss: order.stopLoss, takeProfit: order.takeProfit)
+        guard !isSubmitting, let order = visualOrders[instrument] else { return }
+        do {
+            _ = try await submitMarketOrder(
+                instrument: order.instrument, direction: order.direction,
+                amount: order.amount,
+                stopLoss: order.stopLoss, takeProfit: order.takeProfit)
+            visualOrders.removeValue(forKey: instrument)
+        } catch {
+            // orderError is already set by submitMarketOrder; keep the visual order for retry.
+        }
     }
 
     func cancelVisualOrder(instrument: String) {
+        guard !isSubmitting else { return }
         visualOrders.removeValue(forKey: instrument)
     }
 

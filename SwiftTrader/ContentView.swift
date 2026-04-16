@@ -557,7 +557,8 @@ struct ContentView: View {
             onResetVisualOrderAmount: {
                 workspace.trading.resetVisualOrderAmount(instrument: vm.currentInstrument)
             },
-            accountEquity: workspace.trading.account?.equity
+            accountEquity: workspace.trading.account?.equity,
+            isSubmittingOrder: workspace.trading.isSubmitting
         )
         .overlay {
             if vm.bars.isEmpty {

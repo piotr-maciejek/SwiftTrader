@@ -27,6 +27,8 @@ struct ChartView: View {
     var onAdjustVisualOrderAmount: ((Double) -> Void)? = nil
     var onResetVisualOrderAmount: (() -> Void)? = nil
     var accountEquity: Double? = nil
+    /// True while a submit is in flight — disables visual-order interactions and dims the box.
+    var isSubmittingOrder: Bool = false
     @State private var crosshair: CrosshairState? = nil
     @State private var dragPreview: DragPreviewState? = nil
     @State private var pendingSLTPEdit: PendingChartSLTPEdit? = nil
@@ -70,7 +72,7 @@ struct ChartView: View {
                     drawCurrentPriceLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawSLTPLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     if let vo = visualOrder {
-                        drawVisualOrderBox(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, order: vo)
+                        drawVisualOrderBox(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, order: vo, isSubmitting: isSubmittingOrder)
                     }
                     if let preview = dragPreview {
                         drawDragPreviewLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, preview: preview)
@@ -120,7 +122,8 @@ struct ChartView: View {
                         onUpdateVisualOrderSL: onUpdateVisualOrderSL,
                         onUpdateVisualOrderTP: onUpdateVisualOrderTP,
                         onAdjustVisualOrderAmount: onAdjustVisualOrderAmount,
-                        onResetVisualOrderAmount: onResetVisualOrderAmount
+                        onResetVisualOrderAmount: onResetVisualOrderAmount,
+                        isSubmittingOrder: isSubmittingOrder
                     )
                     .frame(width: chartWidth, height: chartHeight + volumeHeight)
                 }
@@ -782,7 +785,9 @@ struct ChartView: View {
 
     private func drawVisualOrderBox(context: inout GraphicsContext, chartWidth: CGFloat,
                                      chartHeight: CGFloat, priceRange: (min: Double, max: Double),
-                                     order: VisualOrderState) {
+                                     order: VisualOrderState, isSubmitting: Bool) {
+        // Dim everything while a submit is in flight to signal the box is non-interactive.
+        let alpha: Double = isSubmitting ? 0.4 : 1.0
         let slY = yForPrice(order.stopLoss, chartHeight: chartHeight, priceRange: priceRange)
         let tpY = yForPrice(order.takeProfit, chartHeight: chartHeight, priceRange: priceRange)
         let entryY = yForPrice(order.entryPrice, chartHeight: chartHeight, priceRange: priceRange)
@@ -885,16 +890,21 @@ struct ChartView: View {
         // Confirm / Cancel buttons
         let (confirmRect, cancelRect) = Self.visualOrderButtonRects(boxRight: rightX, boxBottom: bottomY)
 
-        // Confirm button (green)
+        // Confirm button (green). If a submit is in flight, render a spinner-style progress ring instead of the checkmark.
         context.fill(Path(roundedRect: confirmRect, cornerRadius: 4),
-                     with: .color(bullishColor.opacity(0.8)))
-        let checkmark = context.resolve(Text("\u{2713}").font(.system(size: 12, weight: .bold)).foregroundStyle(.white))
-        context.draw(checkmark, at: CGPoint(x: confirmRect.midX, y: confirmRect.midY), anchor: .center)
+                     with: .color(bullishColor.opacity(0.8 * alpha)))
+        if isSubmitting {
+            let dots = context.resolve(Text("\u{2026}").font(.system(size: 14, weight: .bold)).foregroundStyle(.white))
+            context.draw(dots, at: CGPoint(x: confirmRect.midX, y: confirmRect.midY), anchor: .center)
+        } else {
+            let checkmark = context.resolve(Text("\u{2713}").font(.system(size: 12, weight: .bold)).foregroundStyle(.white))
+            context.draw(checkmark, at: CGPoint(x: confirmRect.midX, y: confirmRect.midY), anchor: .center)
+        }
 
         // Cancel button (red)
         context.fill(Path(roundedRect: cancelRect, cornerRadius: 4),
-                     with: .color(bearishColor.opacity(0.8)))
-        let xmark = context.resolve(Text("\u{2717}").font(.system(size: 12, weight: .bold)).foregroundStyle(.white))
+                     with: .color(bearishColor.opacity(0.8 * alpha)))
+        let xmark = context.resolve(Text("\u{2717}").font(.system(size: 12, weight: .bold)).foregroundStyle(.white.opacity(alpha)))
         context.draw(xmark, at: CGPoint(x: cancelRect.midX, y: cancelRect.midY), anchor: .center)
 
         // SL/TP price labels on right side of box

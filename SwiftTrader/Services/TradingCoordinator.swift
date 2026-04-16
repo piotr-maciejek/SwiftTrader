@@ -1,6 +1,16 @@
 import Foundation
 
-final class TradingCoordinator: Sendable {
+/// Protocol-driven surface of TradingCoordinator so TradingViewModel can be unit-tested
+/// with a fake (no real network, no URLSession). Production code always uses the concrete class.
+protocol TradingCoordinating: Sendable {
+    func submitOrder(instrument: String, direction: String, amount: Double,
+                     stopLoss: Double, takeProfit: Double) async throws -> Position
+    func closeOrder(label: String) async throws
+    func modifyOrder(label: String, stopLoss: Double, takeProfit: Double) async throws -> Position
+    func streamSnapshots() -> AsyncThrowingStream<TradingSnapshot, Error>
+}
+
+final class TradingCoordinator: TradingCoordinating, Sendable {
     private let apiService: TradingAPIService
     private let host: String
     private let port: Int

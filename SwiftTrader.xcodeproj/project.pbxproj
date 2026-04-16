@@ -65,6 +65,7 @@
 		B1000006 /* OneClickOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000006; };
 		B1000007 /* TradingDayATRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000007; };
 		B1000008 /* TabStateBackwardCompatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000008; };
+		B100000D /* TradingViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000D; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -139,6 +140,7 @@
 		B2000006 /* OneClickOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneClickOrderTests.swift; sourceTree = "<group>"; };
 		B2000007 /* TradingDayATRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingDayATRTests.swift; sourceTree = "<group>"; };
 		B2000008 /* TabStateBackwardCompatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStateBackwardCompatTests.swift; sourceTree = "<group>"; };
+		B200000D /* TradingViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingViewModelTests.swift; sourceTree = "<group>"; };
 		B3000001 /* SwiftTraderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SwiftTraderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -262,6 +264,7 @@
 				B200000A /* WorkspaceMoveTabTests.swift */,
 				B200000B /* WorkspacePeriodCycleTests.swift */,
 				B200000C /* PositionSizingTests.swift */,
+				B200000D /* TradingViewModelTests.swift */,
 			);
 			path = SwiftTraderTests;
 			sourceTree = "<group>";
@@ -399,6 +402,7 @@
 				B100000A /* WorkspaceMoveTabTests.swift in Sources */,
 				B100000B /* WorkspacePeriodCycleTests.swift in Sources */,
 				B100000C /* PositionSizingTests.swift in Sources */,
+				B100000D /* TradingViewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

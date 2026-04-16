@@ -47,6 +47,8 @@ struct ChartInteractionView: NSViewRepresentable {
     var onUpdateVisualOrderTP: ((Double) -> Void)? = nil
     var onAdjustVisualOrderAmount: ((Double) -> Void)? = nil
     var onResetVisualOrderAmount: (() -> Void)? = nil
+    /// While true, all visual-order mouse and key interactions are ignored.
+    var isSubmittingOrder: Bool = false
 
     func makeNSView(context: Context) -> ChartInteractionNSView {
         let view = ChartInteractionNSView()
@@ -72,6 +74,7 @@ struct ChartInteractionView: NSViewRepresentable {
         context.coordinator.onUpdateVisualOrderTP = onUpdateVisualOrderTP
         context.coordinator.onAdjustVisualOrderAmount = onAdjustVisualOrderAmount
         context.coordinator.onResetVisualOrderAmount = onResetVisualOrderAmount
+        context.coordinator.isSubmittingOrder = isSubmittingOrder
     }
 
     func makeCoordinator() -> Coordinator {
@@ -106,6 +109,7 @@ struct ChartInteractionView: NSViewRepresentable {
         var onResetVisualOrderAmount: (() -> Void)?
         var isDraggingVisualSLTP = false
         var visualDragField: SLTPLineHit.Field?
+        var isSubmittingOrder: Bool = false
 
         init(transform: Binding<ChartTransform>, barCount: Int, chartWidth: CGFloat,
              onUserDrag: (() -> Void)?, crosshair: Binding<CrosshairState?>,
@@ -243,8 +247,10 @@ struct ChartInteractionView: NSViewRepresentable {
             let location = convert(event.locationInWindow, from: nil)
             let flippedY = bounds.height - location.y
 
-            // Check visual order buttons first
+            // Check visual order buttons first. Swallow clicks while a submit is in flight
+            // so users cannot fire confirm/cancel/amount mutations on a frozen box.
             if let button = coord.hitTestVisualOrderButtons(mouseX: location.x, mouseY: flippedY) {
+                if coord.isSubmittingOrder { return }
                 switch button {
                 case .confirm: coord.onConfirmVisualOrder?()
                 case .cancel: coord.onCancelVisualOrder?()
@@ -257,6 +263,7 @@ struct ChartInteractionView: NSViewRepresentable {
 
             // Check visual order SL/TP lines
             if let field = coord.hitTestVisualOrderLine(mouseY: flippedY) {
+                if coord.isSubmittingOrder { return }
                 coord.isDraggingVisualSLTP = true
                 coord.visualDragField = field
                 coord.crosshair.wrappedValue = nil
@@ -376,6 +383,7 @@ struct ChartInteractionView: NSViewRepresentable {
                 super.keyDown(with: event)
                 return
             }
+            if coord.isSubmittingOrder { return }
             switch event.keyCode {
             case 36, 76: // Return, Enter
                 coord.onConfirmVisualOrder?()
