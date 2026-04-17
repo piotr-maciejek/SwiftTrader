@@ -514,11 +514,15 @@ struct ChartView: View {
 
     // MARK: - Crosshair
 
-    private static let crosshairTimeFormatter: DateFormatter = {
+    private static func crosshairTimeFormatter(for period: String) -> DateFormatter {
         let f = DateFormatter()
-        f.dateFormat = "HH:mm"
+        switch period {
+        case "DAILY", "WEEKLY": f.dateFormat = "dd MMM yyyy"
+        case "FOUR_HOURS":      f.dateFormat = "dd MMM HH:mm"
+        default:                f.dateFormat = "HH:mm"
+        }
         return f
-    }()
+    }
 
     private func priceForY(_ y: CGFloat, chartHeight: CGFloat, priceRange: (min: Double, max: Double)) -> Double {
         let normalized = 1.0 - Double(y / chartHeight)
@@ -580,7 +584,7 @@ struct ChartView: View {
 
         // Time label on bottom axis
         let bar = bars[crosshair.barIndex]
-        let timeStr = Self.crosshairTimeFormatter.string(from: bar.date)
+        let timeStr = Self.crosshairTimeFormatter(for: currentPeriod).string(from: bar.date)
         let timeText = Text(timeStr)
             .font(.system(size: 9, weight: .medium, design: .monospaced))
             .foregroundColor(.white)

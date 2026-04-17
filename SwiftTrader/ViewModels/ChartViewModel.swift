@@ -409,6 +409,7 @@ final class ChartViewModel {
     /// Bar count scaled to the timeframe — avoids multi-year CDN downloads for larger periods.
     private static func barCount(for period: String) -> Int {
         switch period {
+        case "WEEKLY":     return 260  // ~5 years
         case "DAILY":      return 250  // ~1 year of trading days
         case "FOUR_HOURS": return 500  // ~3 months
         case "ONE_HOUR":   return 500  // ~3 weeks
