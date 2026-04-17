@@ -155,9 +155,62 @@ struct ChartView: View {
                 .onChange(of: chartWidth) { _, newWidth in
                     onChartWidthChanged?(newWidth)
                 }
+
+                if let ch = crosshair,
+                   ch.barIndex >= 0, ch.barIndex < bars.count {
+                    ohlcOverlay(bar: bars[ch.barIndex])
+                        .padding(.leading, 8)
+                        .padding(.top, 6)
+                }
             }
         }
     }
+
+    @ViewBuilder
+    private func ohlcOverlay(bar: CandleBar) -> some View {
+        let color = bar.isBullish ? bullishColor : bearishColor
+        let change = bar.close - bar.open
+        let changePct = bar.open != 0 ? (change / bar.open) * 100 : 0
+        HStack(spacing: 10) {
+            Text(Self.ohlcTimeFormatter.string(from: bar.date))
+                .foregroundColor(.secondary)
+            ohlcField(label: "O", value: bar.open, color: color)
+            ohlcField(label: "H", value: bar.high, color: color)
+            ohlcField(label: "L", value: bar.low, color: color)
+            ohlcField(label: "C", value: bar.close, color: color)
+            Text(String(format: "%+.5f (%+.2f%%)", change, changePct))
+                .foregroundColor(color)
+            if bar.partial {
+                Text("LIVE")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.orange)
+                    .cornerRadius(3)
+            }
+        }
+        .font(.system(size: 11, weight: .medium, design: .monospaced))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.black.opacity(0.55))
+        .cornerRadius(4)
+    }
+
+    @ViewBuilder
+    private func ohlcField(label: String, value: Double, color: Color) -> some View {
+        HStack(spacing: 2) {
+            Text(label).foregroundColor(.secondary)
+            Text(String(format: "%.5f", value)).foregroundColor(color)
+        }
+    }
+
+    private static let ohlcTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        f.timeZone = .current
+        return f
+    }()
 
     // MARK: - Visible range calculation
 
