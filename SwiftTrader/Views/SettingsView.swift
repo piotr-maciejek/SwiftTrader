@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var settings: AppSettings
     var onPortChanged: ((Int) -> Void)?
+    var onRebucketingChanged: (() -> Void)?
 
     @State private var portText: String = ""
     @State private var errorMessage: String?
@@ -21,6 +22,24 @@ struct SettingsView: View {
                     .onSubmit { applyPort() }
             }
 
+            Toggle(isOn: Binding(
+                get: { settings.clientSideRebucketing },
+                set: { newValue in
+                    let changed = newValue != settings.clientSideRebucketing
+                    settings.clientSideRebucketing = newValue
+                    if changed { onRebucketingChanged?() }
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Client-side 4H/DAILY aggregation")
+                    Text("Aggregate from 1H bars with NY-close alignment. Removes the spurious Sunday daily bar.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+
             if let errorMessage {
                 Text(errorMessage)
                     .font(.caption)
@@ -36,7 +55,7 @@ struct SettingsView: View {
             }
         }
         .padding(20)
-        .frame(width: 280)
+        .frame(width: 320)
         .onAppear {
             portText = String(settings.port)
         }

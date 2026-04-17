@@ -55,6 +55,12 @@ final class ChartViewModel {
     var atrPips: Double?
     var todayATRPercent: Double?
     var isRefreshingCache = false
+    var loadingStatus: LoadingStatus?
+
+    /// Snapshot of the rebucketing toggle for current Tasks. Read-through to
+    /// `AppSettings` at reload time so flipping the toggle takes effect on the
+    /// next chart reload.
+    private var clientSideRebucketing: Bool = AppSettings.shared.clientSideRebucketing
 
     var onStateChanged: (() -> Void)?
 
@@ -117,6 +123,7 @@ final class ChartViewModel {
         hasStarted = true
 
         // Retry initial connection until the server is reachable
+        loadingStatus = .connecting()
         while !Task.isCancelled {
             if let instruments = try? await coordinator.fetchInstruments(), !instruments.isEmpty {
                 availableInstruments = instruments
@@ -154,19 +161,31 @@ final class ChartViewModel {
         reloadChart()
     }
 
+    /// Called from Settings when the rebucketing toggle flips; re-snapshots
+    /// and reloads so the new source variant takes effect immediately.
+    func applyRebucketingChange() {
+        clientSideRebucketing = AppSettings.shared.clientSideRebucketing
+        reloadChart()
+    }
+
     func refreshCache() {
         guard !isRefreshingCache else { return }
         let instrument = currentInstrument
         isRefreshingCache = true
+        loadingStatus = .refreshing()
         Task {
             defer { isRefreshingCache = false }
             do {
                 _ = try await coordinator.clearServerCache(instrument: instrument)
             } catch {
                 self.error = "Refresh cache: \(error.localizedDescription)"
+                loadingStatus = nil
                 return
             }
-            guard instrument == currentInstrument else { return }
+            guard instrument == currentInstrument else {
+                loadingStatus = nil
+                return
+            }
             await coordinator.cache.clear(instrument: instrument)
             reloadChart()
         }
@@ -185,7 +204,11 @@ final class ChartViewModel {
         transform = ChartTransform()
         error = nil
 
-        let key = CandleCache.CacheKey(instrument: currentInstrument, period: currentPeriod)
+        let key = CandleCache.CacheKey.forDisplay(
+            instrument: currentInstrument,
+            period: currentPeriod,
+            clientSideRebucketing: clientSideRebucketing
+        )
         reloadTask = Task {
             let cached = await coordinator.cache.getBars(for: key)
             if !cached.isEmpty {
@@ -202,9 +225,12 @@ final class ChartViewModel {
     private func loadHistoryWithRetry() async {
         let instrument = currentInstrument
         let period = currentPeriod
+        let rebucketing = clientSideRebucketing
 
         // Show cached bars immediately while waiting for server
-        let key = CandleCache.CacheKey(instrument: instrument, period: period)
+        let key = CandleCache.CacheKey.forDisplay(
+            instrument: instrument, period: period, clientSideRebucketing: rebucketing
+        )
         let cached = await coordinator.cache.getBars(for: key)
         if Task.isCancelled { return }
         if !cached.isEmpty {
@@ -212,10 +238,21 @@ final class ChartViewModel {
             scrollToEnd()
         }
 
+        var attempt = 1
+        var lastError: String?
+        defer { if !Task.isCancelled { loadingStatus = nil } }
         while !Task.isCancelled {
             guard instrument == currentInstrument, period == currentPeriod else { return }
+            loadingStatus = .loadingHistory(
+                attempt: attempt, period: period, rebucketing: rebucketing,
+                coldCache: cached.isEmpty, lastError: lastError
+            )
             do {
-                let history = try await coordinator.fetchCandles(instrument: instrument, period: period, count: Self.barCount(for: period))
+                let history = try await coordinator.fetchCandles(
+                    instrument: instrument, period: period,
+                    count: Self.barCount(for: period),
+                    rebucketing: rebucketing
+                )
                 if Task.isCancelled { return }
                 guard instrument == currentInstrument, period == currentPeriod else { return }
                 if !history.isEmpty {
@@ -224,11 +261,14 @@ final class ChartViewModel {
                     scrollToEnd()
                     return
                 }
+                lastError = "Server returned no bars."
             } catch is CancellationError {
                 return
             } catch let e {
+                lastError = e.localizedDescription
                 error = "History: \(e.localizedDescription)"
             }
+            attempt += 1
             try? await Task.sleep(for: .seconds(3))
         }
     }
@@ -237,8 +277,13 @@ final class ChartViewModel {
     private func loadHistory() async {
         let instrument = currentInstrument
         let period = currentPeriod
+        let rebucketing = clientSideRebucketing
         do {
-            let history = try await coordinator.fetchCandles(instrument: instrument, period: period, count: Self.barCount(for: period))
+            let history = try await coordinator.fetchCandles(
+                instrument: instrument, period: period,
+                count: Self.barCount(for: period),
+                rebucketing: rebucketing
+            )
             guard instrument == currentInstrument, period == currentPeriod else { return }
             bars = history
             error = nil
@@ -321,10 +366,13 @@ final class ChartViewModel {
         wsTask?.cancel()
         let instrument = currentInstrument
         let period = currentPeriod
+        let rebucketing = clientSideRebucketing
         wsTask = Task {
             while !Task.isCancelled {
                 do {
-                    for try await bar in coordinator.streamCandles(instrument: instrument, period: period) {
+                    for try await bar in coordinator.streamCandles(
+                        instrument: instrument, period: period, rebucketing: rebucketing
+                    ) {
                         if !isConnected { isConnected = true }
                         handleBar(bar, expectedInstrument: instrument, expectedPeriod: period)
                     }
@@ -358,7 +406,13 @@ final class ChartViewModel {
                 bars.append(bar)
                 if autoScroll { advanceByOneCandle() }
             }
-            Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod) }
+            // For the aggregated derived path the coordinator already writes into the
+            // `.aggregated` cache itself; the outer write would target the wrong key.
+            let rebucketing = clientSideRebucketing
+            let isDerivedAggregated = rebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY")
+            if !isDerivedAggregated {
+                Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod) }
+            }
         }
         updateATRFromBar(bar)
     }
@@ -369,6 +423,7 @@ final class ChartViewModel {
 
         // If bars don't fill the screen, fetch earlier bars automatically
         if totalWidth < chartWidth && !isLoadingEarlier && !bars.isEmpty {
+            isLoadingEarlier = true
             Task { await loadEarlierBars() }
         }
     }
@@ -402,6 +457,12 @@ final class ChartViewModel {
         // Scroll-back: load earlier bars when near the left edge
         let startIndex = Int(floor(transform.xOffset / transform.candleSlotWidth))
         if startIndex < 50 && !isLoadingEarlier && !bars.isEmpty {
+            // Flip the guard synchronously — otherwise the Task's `isLoadingEarlier = true`
+            // doesn't run until the MainActor actually picks it up, and a burst of scroll
+            // events queues many overlapping fetches that each compute `addedCount` off
+            // the same stale `oldCount`, compounding the xOffset shift until the chart
+            // slams back to the live edge.
+            isLoadingEarlier = true
             Task { await loadEarlierBars() }
         }
     }
@@ -409,7 +470,7 @@ final class ChartViewModel {
     /// Bar count scaled to the timeframe — avoids multi-year CDN downloads for larger periods.
     private static func barCount(for period: String) -> Int {
         switch period {
-        case "WEEKLY":     return 260  // ~5 years
+        case "WEEKLY":     return 150  // ~3 years
         case "DAILY":      return 250  // ~1 year of trading days
         case "FOUR_HOURS": return 500  // ~3 months
         case "ONE_HOUR":   return 500  // ~3 weeks
@@ -417,30 +478,63 @@ final class ChartViewModel {
         }
     }
 
+    /// Scroll-back batch size. Smaller than the initial load for larger timeframes
+    /// because each page hits Dukascopy's CDN — and under rebucketing a DAILY page
+    /// expands to count*24 1H bars.
+    private static func earlierBarCount(for period: String) -> Int {
+        switch period {
+        case "WEEKLY":     return 100
+        case "DAILY":      return 100
+        default:           return barCount(for: period)
+        }
+    }
+
     private func loadEarlierBars() async {
-        isLoadingEarlier = true
+        // Callers must flip `isLoadingEarlier = true` synchronously before scheduling
+        // the Task so duplicate onUserScroll ticks don't enqueue overlapping fetches.
+        defer { isLoadingEarlier = false }
         let instrument = currentInstrument
         let period = currentPeriod
+        let rebucketing = clientSideRebucketing
         let oldCount = bars.count
+        let maxAttempts = 3
 
-        do {
-            let allBars = try await coordinator.fetchEarlierCandles(
-                instrument: instrument, period: period, count: Self.barCount(for: period)
+        var attempt = 1
+        var lastError: String?
+        defer { loadingStatus = nil }
+        while attempt <= maxAttempts {
+            guard instrument == currentInstrument, period == currentPeriod else { return }
+            loadingStatus = LoadingStatus(
+                stage: .loadingEarlier,
+                message: attempt == 1 ? "Loading earlier history…" : "Retrying (attempt \(attempt) of \(maxAttempts))…",
+                detail: nil,
+                lastError: lastError
             )
-            guard instrument == currentInstrument, period == currentPeriod else {
-                isLoadingEarlier = false
+            do {
+                let allBars = try await coordinator.fetchEarlierCandles(
+                    instrument: instrument, period: period,
+                    count: Self.earlierBarCount(for: period),
+                    rebucketing: rebucketing
+                )
+                guard instrument == currentInstrument, period == currentPeriod else { return }
+                let addedCount = allBars.count - oldCount
+                if addedCount > 0 {
+                    bars = allBars
+                    transform.xOffset += CGFloat(addedCount) * transform.candleSlotWidth
+                }
                 return
+            } catch is CancellationError {
+                return
+            } catch let e {
+                lastError = e.localizedDescription
             }
-            let addedCount = allBars.count - oldCount
-            if addedCount > 0 {
-                bars = allBars
-                // Shift scroll offset so the same candles stay in view
-                transform.xOffset += CGFloat(addedCount) * transform.candleSlotWidth
+            attempt += 1
+            if attempt <= maxAttempts {
+                try? await Task.sleep(for: .seconds(2))
             }
-        } catch {
-            self.error = "Earlier bars: \(error.localizedDescription)"
         }
-
-        isLoadingEarlier = false
+        if let lastError {
+            self.error = "Earlier bars: \(lastError)"
+        }
     }
 }

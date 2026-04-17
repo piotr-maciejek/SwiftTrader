@@ -283,4 +283,38 @@ struct ChartViewModelTests {
         #expect(mock.fetchCandlesCalls.count == 1) // only called once
         vm.stop()
     }
+
+    // MARK: - Loading status
+
+    @Test("loadingStatus clears after a successful history load")
+    func loadingStatusClearsAfterSuccess() async {
+        let mock = MockMarketDataCoordinator()
+        mock.instrumentsResult = .success(["EURUSD"])
+        mock.fetchCandlesResult = .success([makeBar(time: 100)])
+        let vm = ChartViewModel(coordinator: mock)
+
+        await vm.start()
+        #expect(vm.loadingStatus == nil)
+        vm.stop()
+    }
+
+    @Test("loadingStatus carries attempt + lastError on retry")
+    func loadingStatusRetryShape() {
+        let s = LoadingStatus.loadingHistory(
+            attempt: 3, period: "DAILY", rebucketing: true,
+            coldCache: true, lastError: "timeout"
+        )
+        #expect(s.message.contains("attempt 3"))
+        #expect(s.lastError == "timeout")
+        #expect(s.detail?.contains("6000") == true)
+    }
+
+    @Test("loadingStatus.detail nil on warm cache")
+    func loadingStatusWarmCacheNoDetail() {
+        let s = LoadingStatus.loadingHistory(
+            attempt: 1, period: "DAILY", rebucketing: true,
+            coldCache: false, lastError: nil
+        )
+        #expect(s.detail == nil)
+    }
 }

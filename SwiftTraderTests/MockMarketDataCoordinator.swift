@@ -19,20 +19,20 @@ final class MockMarketDataCoordinator: MarketDataProviding, @unchecked Sendable 
         return try instrumentsResult.get()
     }
 
-    func fetchCandles(instrument: String, period: String, count: Int) async throws -> [CandleBar] {
+    func fetchCandles(instrument: String, period: String, count: Int, rebucketing: Bool) async throws -> [CandleBar] {
         fetchCandlesCalls.append((instrument, period, count))
         return try fetchCandlesResult.get()
     }
 
-    func fetchEarlierCandles(instrument: String, period: String, count: Int) async throws -> [CandleBar] {
+    func fetchEarlierCandles(instrument: String, period: String, count: Int, rebucketing: Bool) async throws -> [CandleBar] {
         return try fetchEarlierResult.get()
     }
 
-    func cacheBar(_ bar: CandleBar, instrument: String, period: String) async {
+    func cacheBar(_ bar: CandleBar, instrument: String, period: String, rebucketing: Bool) async {
         cachedBars.append((bar, instrument, period))
     }
 
-    func streamCandles(instrument: String, period: String) -> AsyncThrowingStream<CandleBar, Error> {
+    func streamCandles(instrument: String, period: String, rebucketing: Bool) -> AsyncThrowingStream<CandleBar, Error> {
         // Return a stream that never yields — tests call handleBar directly
         AsyncThrowingStream { continuation in
             continuation.onTermination = { _ in }

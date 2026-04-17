@@ -234,12 +234,18 @@ struct ChartInteractionView: NSViewRepresentable {
             let zoomDelta = event.scrollingDeltaY * 0.02
             let oldScale = coord.transform.wrappedValue.xScale
             let newScale = max(0.3, min(5.0, oldScale + zoomDelta))
-
-            let visibleEnd = coord.transform.wrappedValue.xOffset + coord.chartWidth
             let ratio = newScale / oldScale
+            // Anchor the zoom at the cursor so the bar under the mouse stays under
+            // the mouse — otherwise zoom pinned to the right edge drifts the view
+            // forward on each scroll, eventually snapping to the live end.
+            let location = convert(event.locationInWindow, from: nil)
+            let mouseX = min(max(location.x, 0), coord.chartWidth)
+            let anchor = coord.transform.wrappedValue.xOffset + mouseX
 
             coord.transform.wrappedValue.xScale = newScale
-            coord.transform.wrappedValue.xOffset = coord.clampOffset(visibleEnd * ratio - coord.chartWidth)
+            coord.transform.wrappedValue.xOffset = coord.clampOffset(anchor * ratio - mouseX)
+            // Re-evaluate autoScroll and left-edge loadEarlier the same way a drag does.
+            coord.onUserDrag?()
         }
 
         override func mouseDown(with event: NSEvent) {

@@ -21,7 +21,8 @@ final class WorkspaceViewModel {
     let settings = AppSettings.shared
     let trading: TradingViewModel
     var newsItems: [NewsItem] = []
-    private let candleCache = CandleCache()
+    private let diskCache = DiskCandleCache()
+    private let candleCache: CandleCache
     private var newsCoordinator: NewsCoordinator
     private var newsTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
@@ -42,6 +43,7 @@ final class WorkspaceViewModel {
     private var hasStarted = false
 
     init() {
+        candleCache = CandleCache(diskCache: diskCache)
         trading = TradingViewModel(coordinator: TradingCoordinator(port: settings.port))
         newsCoordinator = NewsCoordinator(port: settings.port)
         // NOTE: Do NOT start tasks here. SwiftUI re-evaluates @State initializers
@@ -59,10 +61,13 @@ final class WorkspaceViewModel {
     func startAll() {
         guard !hasStarted else { return }
         hasStarted = true
-        for tab in tabs {
-            switch tab.content {
-            case .chart(let vm): vm.startAsync()
-            case .correlation(let vm): Task { await vm.startAll() }
+        Task {
+            await candleCache.hydrate()
+            for tab in tabs {
+                switch tab.content {
+                case .chart(let vm): vm.startAsync()
+                case .correlation(let vm): await vm.startAll()
+                }
             }
         }
         trading.start()
@@ -185,6 +190,16 @@ final class WorkspaceViewModel {
         selectedTabID = tab.id
         Task { await vm.startAll() }
         scheduleSave()
+    }
+
+    /// Reload every chart tab so the rebucketing toggle change takes effect.
+    /// Correlation tabs don't consume 4H/DAILY today, so they don't need a reload.
+    func applyRebucketingChange() {
+        for tab in tabs {
+            if case .chart(let vm) = tab.content {
+                vm.applyRebucketingChange()
+            }
+        }
     }
 
     func reconnectAll(port: Int) {

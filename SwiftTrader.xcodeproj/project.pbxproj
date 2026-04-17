@@ -55,6 +55,15 @@
 		A100002E /* PositionSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030; };
 		A100002F /* WebSocketStreamError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031; };
 		A1000030 /* WebSocketStreamDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000032; };
+		A1000031 /* NYTradingCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000033; };
+		A1000032 /* BarAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000034; };
+		A1000033 /* DiskCandleCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000035; };
+		A1000034 /* LoadingStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000036; };
+		A1000035 /* ChartLoadingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000037; };
+		B100000F /* NYTradingCalendarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000F; };
+		B1000010 /* BarAggregatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000010; };
+		B1000011 /* DiskCandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000011; };
+		B1000012 /* BarAggregatorEndToEndTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000012; };
 		B100000C /* PositionSizingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000C; };
 		B1000009 /* FXVolumeRankTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000009; };
 		B100000A /* WorkspaceMoveTabTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000A; };
@@ -135,6 +144,15 @@
 		A2000030 /* PositionSizing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionSizing.swift; sourceTree = "<group>"; };
 		A2000031 /* WebSocketStreamError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketStreamError.swift; sourceTree = "<group>"; };
 		A2000032 /* WebSocketStreamDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketStreamDriver.swift; sourceTree = "<group>"; };
+		A2000033 /* NYTradingCalendar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NYTradingCalendar.swift; sourceTree = "<group>"; };
+		A2000034 /* BarAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarAggregator.swift; sourceTree = "<group>"; };
+		A2000035 /* DiskCandleCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskCandleCache.swift; sourceTree = "<group>"; };
+		A2000036 /* LoadingStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingStatus.swift; sourceTree = "<group>"; };
+		A2000037 /* ChartLoadingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartLoadingCard.swift; sourceTree = "<group>"; };
+		B200000F /* NYTradingCalendarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NYTradingCalendarTests.swift; sourceTree = "<group>"; };
+		B2000010 /* BarAggregatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarAggregatorTests.swift; sourceTree = "<group>"; };
+		B2000011 /* DiskCandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskCandleCacheTests.swift; sourceTree = "<group>"; };
+		B2000012 /* BarAggregatorEndToEndTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarAggregatorEndToEndTests.swift; sourceTree = "<group>"; };
 		B200000C /* PositionSizingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionSizingTests.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
@@ -192,6 +210,7 @@
 				A200002E /* FXVolumeRank.swift */,
 				A2000030 /* PositionSizing.swift */,
 				A2000031 /* WebSocketStreamError.swift */,
+				A2000036 /* LoadingStatus.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -211,6 +230,9 @@
 				A2000027 /* MarketDataProviding.swift */,
 				A200002D /* NewsCoordinator.swift */,
 				A2000032 /* WebSocketStreamDriver.swift */,
+				A2000033 /* NYTradingCalendar.swift */,
+				A2000034 /* BarAggregator.swift */,
+				A2000035 /* DiskCandleCache.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -253,6 +275,7 @@
 				A2000029 /* ATRPopover.swift */,
 				A200002A /* VolumeMAPopover.swift */,
 				A200002F /* ShortcutsPopover.swift */,
+				A2000037 /* ChartLoadingCard.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -274,6 +297,10 @@
 				B200000C /* PositionSizingTests.swift */,
 				B200000D /* TradingViewModelTests.swift */,
 				B200000E /* WebSocketStreamDriverTests.swift */,
+				B200000F /* NYTradingCalendarTests.swift */,
+				B2000010 /* BarAggregatorTests.swift */,
+				B2000011 /* DiskCandleCacheTests.swift */,
+				B2000012 /* BarAggregatorEndToEndTests.swift */,
 			);
 			path = SwiftTraderTests;
 			sourceTree = "<group>";
@@ -394,6 +421,11 @@
 				A100002E /* PositionSizing.swift in Sources */,
 				A100002F /* WebSocketStreamError.swift in Sources */,
 				A1000030 /* WebSocketStreamDriver.swift in Sources */,
+				A1000031 /* NYTradingCalendar.swift in Sources */,
+				A1000032 /* BarAggregator.swift in Sources */,
+				A1000033 /* DiskCandleCache.swift in Sources */,
+				A1000034 /* LoadingStatus.swift in Sources */,
+				A1000035 /* ChartLoadingCard.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -415,6 +447,10 @@
 				B100000C /* PositionSizingTests.swift in Sources */,
 				B100000D /* TradingViewModelTests.swift in Sources */,
 				B100000E /* WebSocketStreamDriverTests.swift in Sources */,
+				B100000F /* NYTradingCalendarTests.swift in Sources */,
+				B1000010 /* BarAggregatorTests.swift in Sources */,
+				B1000011 /* DiskCandleCacheTests.swift in Sources */,
+				B1000012 /* BarAggregatorEndToEndTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

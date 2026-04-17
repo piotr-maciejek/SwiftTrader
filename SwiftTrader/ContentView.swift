@@ -213,10 +213,16 @@ struct ContentView: View {
                 .buttonStyle(.borderless)
                 .help("Settings")
                 .popover(isPresented: $workspace.showSettings) {
-                    SettingsView(settings: workspace.settings) { port in
-                        workspace.reconnectAll(port: port)
-                        auth.updatePort(port)
-                    }
+                    SettingsView(
+                        settings: workspace.settings,
+                        onPortChanged: { port in
+                            workspace.reconnectAll(port: port)
+                            auth.updatePort(port)
+                        },
+                        onRebucketingChanged: {
+                            workspace.applyRebucketingChange()
+                        }
+                    )
                 }
 
                 // Panel toggle buttons
@@ -561,15 +567,13 @@ struct ContentView: View {
             isSubmittingOrder: workspace.trading.isSubmitting
         )
         .overlay {
-            if vm.bars.isEmpty {
-                VStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading chart data...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else if let err = vm.error {
+            if let status = vm.loadingStatus, vm.bars.isEmpty {
+                ChartLoadingCard(status: status)
+            } else if let status = vm.loadingStatus, case .loadingEarlier = status.stage {
+                ChartLoadingCard(status: status)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(8)
+            } else if let err = vm.error, vm.loadingStatus == nil {
                 VStack(spacing: 4) {
                     ProgressView()
                         .controlSize(.mini)
