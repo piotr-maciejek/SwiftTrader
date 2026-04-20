@@ -20,19 +20,24 @@ actor TradingAPIService {
     }
 
     func submitOrder(instrument: String, direction: String, amount: Double,
-                     stopLoss: Double, takeProfit: Double) async throws -> Position {
+                     stopLoss: Double, takeProfit: Double,
+                     orderType: String = "MARKET", entryPrice: Double? = nil) async throws -> Position {
         let url = ordersCollectionURL
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "instrument": instrument,
             "direction": direction,
             "amount": amount,
             "stopLoss": stopLoss,
             "takeProfit": takeProfit,
+            "orderType": orderType,
         ]
+        if let entryPrice {
+            body["entryPrice"] = entryPrice
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)

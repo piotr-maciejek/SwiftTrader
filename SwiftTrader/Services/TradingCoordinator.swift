@@ -4,10 +4,23 @@ import Foundation
 /// with a fake (no real network, no URLSession). Production code always uses the concrete class.
 protocol TradingCoordinating: Sendable {
     func submitOrder(instrument: String, direction: String, amount: Double,
-                     stopLoss: Double, takeProfit: Double) async throws -> Position
+                     stopLoss: Double, takeProfit: Double,
+                     orderType: String, entryPrice: Double?) async throws -> Position
     func closeOrder(label: String) async throws
     func modifyOrder(label: String, stopLoss: Double, takeProfit: Double) async throws -> Position
     func streamSnapshots() -> AsyncThrowingStream<TradingSnapshot, Error>
+    func streamPendingOrders() -> AsyncThrowingStream<PendingOrdersSnapshot, Error>
+}
+
+extension TradingCoordinating {
+    /// Back-compat for market-order callers (tests, existing code).
+    func submitOrder(instrument: String, direction: String, amount: Double,
+                     stopLoss: Double, takeProfit: Double) async throws -> Position {
+        try await submitOrder(
+            instrument: instrument, direction: direction, amount: amount,
+            stopLoss: stopLoss, takeProfit: takeProfit,
+            orderType: "MARKET", entryPrice: nil)
+    }
 }
 
 final class TradingCoordinator: TradingCoordinating, Sendable {
@@ -22,10 +35,12 @@ final class TradingCoordinator: TradingCoordinating, Sendable {
     }
 
     func submitOrder(instrument: String, direction: String, amount: Double,
-                     stopLoss: Double, takeProfit: Double) async throws -> Position {
+                     stopLoss: Double, takeProfit: Double,
+                     orderType: String, entryPrice: Double?) async throws -> Position {
         try await apiService.submitOrder(
             instrument: instrument, direction: direction, amount: amount,
-            stopLoss: stopLoss, takeProfit: takeProfit)
+            stopLoss: stopLoss, takeProfit: takeProfit,
+            orderType: orderType, entryPrice: entryPrice)
     }
 
     func closeOrder(label: String) async throws {
@@ -42,5 +57,9 @@ final class TradingCoordinator: TradingCoordinating, Sendable {
 
     func streamSnapshots() -> AsyncThrowingStream<TradingSnapshot, Error> {
         TradingWebSocketService(host: host, port: port).snapshots()
+    }
+
+    func streamPendingOrders() -> AsyncThrowingStream<PendingOrdersSnapshot, Error> {
+        PendingOrdersWebSocketService(host: host, port: port).snapshots()
     }
 }

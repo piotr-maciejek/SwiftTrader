@@ -170,7 +170,7 @@ struct VisualOrderStateTests {
     @Test("R:R ratio computed correctly for non-JPY pair")
     func rrRatio() {
         let order = VisualOrderState(
-            direction: "BUY", instrument: "EURUSD", entryPrice: 1.1000, amount: 0.001,
+            direction: "BUY", instrument: "EURUSD", entryPrice: 1.1000, marketPrice: 1.1000, amount: 0.001,
             stopLoss: 1.0980, takeProfit: 1.1060,
             startBarIndex: 100, endBarIndex: 110
         )
@@ -183,7 +183,7 @@ struct VisualOrderStateTests {
     @Test("R:R ratio computed correctly for JPY pair")
     func rrRatioJPY() {
         let order = VisualOrderState(
-            direction: "SELL", instrument: "USDJPY", entryPrice: 150.00, amount: 0.001,
+            direction: "SELL", instrument: "USDJPY", entryPrice: 150.00, marketPrice: 150.00, amount: 0.001,
             stopLoss: 150.30, takeProfit: 149.10,
             startBarIndex: 50, endBarIndex: 60
         )
@@ -196,7 +196,7 @@ struct VisualOrderStateTests {
     @Test("R:R is zero when SL equals entry")
     func rrZeroWhenNoRisk() {
         let order = VisualOrderState(
-            direction: "BUY", instrument: "EURUSD", entryPrice: 1.1000, amount: 0.001,
+            direction: "BUY", instrument: "EURUSD", entryPrice: 1.1000, marketPrice: 1.1000, amount: 0.001,
             stopLoss: 1.1000, takeProfit: 1.1060,
             startBarIndex: 0, endBarIndex: 10
         )

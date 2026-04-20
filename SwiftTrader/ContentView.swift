@@ -557,6 +557,9 @@ struct ContentView: View {
             onUpdateVisualOrderTP: { price in
                 workspace.trading.visualOrders[vm.currentInstrument]?.takeProfit = price
             },
+            onUpdateVisualOrderEntry: { price in
+                workspace.trading.updateVisualOrderEntry(instrument: vm.currentInstrument, price: price)
+            },
             onAdjustVisualOrderAmount: { delta in
                 workspace.trading.adjustVisualOrderAmount(instrument: vm.currentInstrument, by: delta)
             },

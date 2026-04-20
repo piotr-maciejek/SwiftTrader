@@ -60,6 +60,8 @@
 		A1000033 /* DiskCandleCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000035; };
 		A1000034 /* LoadingStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000036; };
 		A1000035 /* ChartLoadingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000037; };
+		A1000036 /* PendingOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000038; };
+		A1000037 /* PendingOrdersWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000039; };
 		B100000F /* NYTradingCalendarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000F; };
 		B1000010 /* BarAggregatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000010; };
 		B1000011 /* DiskCandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000011; };
@@ -149,6 +151,8 @@
 		A2000035 /* DiskCandleCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskCandleCache.swift; sourceTree = "<group>"; };
 		A2000036 /* LoadingStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingStatus.swift; sourceTree = "<group>"; };
 		A2000037 /* ChartLoadingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartLoadingCard.swift; sourceTree = "<group>"; };
+		A2000038 /* PendingOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrder.swift; sourceTree = "<group>"; };
+		A2000039 /* PendingOrdersWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersWebSocketService.swift; sourceTree = "<group>"; };
 		B200000F /* NYTradingCalendarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NYTradingCalendarTests.swift; sourceTree = "<group>"; };
 		B2000010 /* BarAggregatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarAggregatorTests.swift; sourceTree = "<group>"; };
 		B2000011 /* DiskCandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskCandleCacheTests.swift; sourceTree = "<group>"; };
@@ -198,6 +202,7 @@
 				A2000003 /* CandleBar.swift */,
 				A2000010 /* AppSettings.swift */,
 				A2000012 /* Position.swift */,
+				A2000038 /* PendingOrder.swift */,
 				A2000023 /* Account.swift */,
 				A2000019 /* CurrencyCorrelation.swift */,
 				A200001C /* MarketSession.swift */,
@@ -223,6 +228,7 @@
 				A200000B /* MarketDataCoordinator.swift */,
 				A2000013 /* TradingAPIService.swift */,
 				A2000014 /* TradingWebSocketService.swift */,
+				A2000039 /* PendingOrdersWebSocketService.swift */,
 				A2000015 /* TradingCoordinator.swift */,
 				A2000018 /* CandleCache.swift */,
 				A2000020 /* AuthService.swift */,
@@ -426,6 +432,8 @@
 				A1000033 /* DiskCandleCache.swift in Sources */,
 				A1000034 /* LoadingStatus.swift in Sources */,
 				A1000035 /* ChartLoadingCard.swift in Sources */,
+				A1000036 /* PendingOrder.swift in Sources */,
+				A1000037 /* PendingOrdersWebSocketService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

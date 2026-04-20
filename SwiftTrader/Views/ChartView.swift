@@ -24,6 +24,7 @@ struct ChartView: View {
     var onCancelVisualOrder: (() -> Void)? = nil
     var onUpdateVisualOrderSL: ((Double) -> Void)? = nil
     var onUpdateVisualOrderTP: ((Double) -> Void)? = nil
+    var onUpdateVisualOrderEntry: ((Double) -> Void)? = nil
     var onAdjustVisualOrderAmount: ((Double) -> Void)? = nil
     var onResetVisualOrderAmount: (() -> Void)? = nil
     var accountEquity: Double? = nil
@@ -118,6 +119,7 @@ struct ChartView: View {
                         onCancelVisualOrder: onCancelVisualOrder,
                         onUpdateVisualOrderSL: onUpdateVisualOrderSL,
                         onUpdateVisualOrderTP: onUpdateVisualOrderTP,
+                        onUpdateVisualOrderEntry: onUpdateVisualOrderEntry,
                         onAdjustVisualOrderAmount: onAdjustVisualOrderAmount,
                         onResetVisualOrderAmount: onResetVisualOrderAmount,
                         isSubmittingOrder: isSubmittingOrder
@@ -880,12 +882,20 @@ struct ChartView: View {
         context.stroke(tpPath, with: .color(bullishColor),
                        style: StrokeStyle(lineWidth: 2, dash: [6, 3]))
 
-        // Entry price line (solid blue)
+        // Entry price line — thicker and full-width when user has dragged it off market,
+        // so the pending-order entry is as visible as SL/TP.
         var entryPath = Path()
-        entryPath.move(to: CGPoint(x: leftX, y: entryY))
-        entryPath.addLine(to: CGPoint(x: rightX, y: entryY))
-        context.stroke(entryPath, with: .color(currentPriceColor),
-                       style: StrokeStyle(lineWidth: 1))
+        if order.isEntryOverridden {
+            entryPath.move(to: CGPoint(x: 0, y: entryY))
+            entryPath.addLine(to: CGPoint(x: chartWidth, y: entryY))
+            context.stroke(entryPath, with: .color(currentPriceColor),
+                           style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+        } else {
+            entryPath.move(to: CGPoint(x: leftX, y: entryY))
+            entryPath.addLine(to: CGPoint(x: rightX, y: entryY))
+            context.stroke(entryPath, with: .color(currentPriceColor),
+                           style: StrokeStyle(lineWidth: 1))
+        }
 
         // Info text
         let midX = (leftX + rightX) / 2
@@ -926,6 +936,13 @@ struct ChartView: View {
             (rewardText, .white.opacity(0.8)),
             (riskMoneyText, .white.opacity(0.8)),
         ]
+        if order.isEntryOverridden {
+            let typeLabel = order.orderType.replacingOccurrences(of: "_", with: " ")
+            let entryText = String(
+                format: "%@  %.\(order.instrument.contains("JPY") ? 3 : 5)f  (%+.1f pips)",
+                typeLabel, order.entryPrice, order.entryOffsetPips)
+            infoLines.append((entryText, Color.orange))
+        }
         if order.isMarginCapped {
             infoLines.append(("margin limited", Color.orange))
         }

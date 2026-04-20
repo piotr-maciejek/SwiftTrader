@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class TradingViewModel {
     var positions: [Position] = []
+    var pendingOrders: [PendingOrder] = []
     var account: Account?
     var isConnected = false
     var isSubmitting = false
@@ -13,6 +14,7 @@ final class TradingViewModel {
 
     private var coordinator: any TradingCoordinating
     private var wsTask: Task<Void, Never>?
+    private var pendingWsTask: Task<Void, Never>?
 
     var amount = 0.01
 
@@ -22,11 +24,14 @@ final class TradingViewModel {
 
     func start() {
         connectWebSocket()
+        connectPendingOrdersWebSocket()
     }
 
     func stop() {
         wsTask?.cancel()
         wsTask = nil
+        pendingWsTask?.cancel()
+        pendingWsTask = nil
         isConnected = false
     }
 
@@ -34,6 +39,7 @@ final class TradingViewModel {
         stop()
         coordinator = TradingCoordinator(port: port)
         positions = []
+        pendingOrders = []
         start()
     }
 
@@ -80,13 +86,15 @@ final class TradingViewModel {
             direction: direction,
             instrument: instrument,
             entryPrice: currentPrice,
+            marketPrice: currentPrice,
             amount: initialAmount,
             stopLoss: sl,
             takeProfit: tp,
             startBarIndex: nextIndex,
             endBarIndex: nextIndex + 10,
             isAmountOverridden: false,
-            isMarginCapped: marginCapped
+            isMarginCapped: marginCapped,
+            isEntryOverridden: false
         )
     }
 
@@ -120,8 +128,14 @@ final class TradingViewModel {
         guard var order = visualOrders[instrument], let price = currentPrice else {
             return visualOrders[instrument]
         }
-        order.entryPrice = price
-        visualOrders[instrument]?.entryPrice = price
+        order.marketPrice = price
+        visualOrders[instrument]?.marketPrice = price
+        // Only keep entryPrice pinned to market while the user hasn't dragged it.
+        // Once overridden the entry becomes a limit/stop target and must stay put.
+        if !order.isEntryOverridden {
+            order.entryPrice = price
+            visualOrders[instrument]?.entryPrice = price
+        }
         let boxWidth = order.endBarIndex - order.startBarIndex
         order.startBarIndex = barCount + 1
         order.endBarIndex = barCount + 1 + boxWidth
@@ -131,18 +145,34 @@ final class TradingViewModel {
         return visualOrders[instrument]
     }
 
+    func updateVisualOrderEntry(instrument: String, price: Double) {
+        guard var order = visualOrders[instrument] else { return }
+        order.entryPrice = price
+        order.isEntryOverridden = true
+        visualOrders[instrument] = order
+        recalculateAmount(for: instrument)
+    }
+
     /// Keeps the visual-order state intact until the server confirms the fill.
     /// On failure, the user sees the error and still has the box to retry or cancel.
     func confirmVisualOrder(instrument: String) async {
         guard !isSubmitting, let order = visualOrders[instrument] else { return }
+        isSubmitting = true
+        defer { isSubmitting = false }
+        orderError = nil
         do {
-            _ = try await submitMarketOrder(
-                instrument: order.instrument, direction: order.direction,
+            _ = try await coordinator.submitOrder(
+                instrument: order.instrument,
+                direction: order.direction,
                 amount: order.amount,
-                stopLoss: order.stopLoss, takeProfit: order.takeProfit)
+                stopLoss: order.stopLoss,
+                takeProfit: order.takeProfit,
+                orderType: order.orderType,
+                entryPrice: order.orderType == "MARKET" ? nil : order.entryPrice)
             visualOrders.removeValue(forKey: instrument)
         } catch {
-            // orderError is already set by submitMarketOrder; keep the visual order for retry.
+            orderError = error.localizedDescription
+            // keep the visual order for retry.
         }
     }
 
@@ -264,6 +294,23 @@ final class TradingViewModel {
                 }
             }
             isConnected = false
+        }
+    }
+
+    private func connectPendingOrdersWebSocket() {
+        pendingWsTask?.cancel()
+        pendingWsTask = Task {
+            while !Task.isCancelled {
+                do {
+                    for try await snapshot in coordinator.streamPendingOrders() {
+                        pendingOrders = snapshot.pendingOrders
+                    }
+                } catch is CancellationError {
+                    break
+                } catch {
+                    try? await Task.sleep(for: .seconds(3))
+                }
+            }
         }
     }
 }

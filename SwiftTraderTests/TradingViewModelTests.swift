@@ -15,9 +15,15 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
     /// If non-nil, submit will await this continuation before returning — used to inspect mid-flight state.
     var submitGate: AsyncStream<Void>.Iterator?
 
+    var lastSubmitOrderType: String?
+    var lastSubmitEntryPrice: Double?
+
     func submitOrder(instrument: String, direction: String, amount: Double,
-                     stopLoss: Double, takeProfit: Double) async throws -> Position {
+                     stopLoss: Double, takeProfit: Double,
+                     orderType: String, entryPrice: Double?) async throws -> Position {
         submitCallCount += 1
+        lastSubmitOrderType = orderType
+        lastSubmitEntryPrice = entryPrice
         if var iterator = submitGate {
             _ = await iterator.next()
             submitGate = iterator
@@ -32,6 +38,10 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
     }
 
     func streamSnapshots() -> AsyncThrowingStream<TradingSnapshot, Error> {
+        AsyncThrowingStream { continuation in continuation.onTermination = { _ in } }
+    }
+
+    func streamPendingOrders() -> AsyncThrowingStream<PendingOrdersSnapshot, Error> {
         AsyncThrowingStream { continuation in continuation.onTermination = { _ in } }
     }
 }

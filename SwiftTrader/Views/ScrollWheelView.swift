@@ -14,6 +14,8 @@ struct SLTPLineHit {
     enum Field: Equatable { case stopLoss, takeProfit }
 }
 
+enum VisualOrderDragField: Equatable { case stopLoss, takeProfit, entry }
+
 struct DragPreviewState: Equatable {
     let positionLabel: String
     let field: SLTPLineHit.Field
@@ -45,6 +47,7 @@ struct ChartInteractionView: NSViewRepresentable {
     var onCancelVisualOrder: (() -> Void)? = nil
     var onUpdateVisualOrderSL: ((Double) -> Void)? = nil
     var onUpdateVisualOrderTP: ((Double) -> Void)? = nil
+    var onUpdateVisualOrderEntry: ((Double) -> Void)? = nil
     var onAdjustVisualOrderAmount: ((Double) -> Void)? = nil
     var onResetVisualOrderAmount: (() -> Void)? = nil
     /// While true, all visual-order mouse and key interactions are ignored.
@@ -72,6 +75,7 @@ struct ChartInteractionView: NSViewRepresentable {
         context.coordinator.onCancelVisualOrder = onCancelVisualOrder
         context.coordinator.onUpdateVisualOrderSL = onUpdateVisualOrderSL
         context.coordinator.onUpdateVisualOrderTP = onUpdateVisualOrderTP
+        context.coordinator.onUpdateVisualOrderEntry = onUpdateVisualOrderEntry
         context.coordinator.onAdjustVisualOrderAmount = onAdjustVisualOrderAmount
         context.coordinator.onResetVisualOrderAmount = onResetVisualOrderAmount
         context.coordinator.isSubmittingOrder = isSubmittingOrder
@@ -105,10 +109,11 @@ struct ChartInteractionView: NSViewRepresentable {
         var onCancelVisualOrder: (() -> Void)?
         var onUpdateVisualOrderSL: ((Double) -> Void)?
         var onUpdateVisualOrderTP: ((Double) -> Void)?
+        var onUpdateVisualOrderEntry: ((Double) -> Void)?
         var onAdjustVisualOrderAmount: ((Double) -> Void)?
         var onResetVisualOrderAmount: (() -> Void)?
         var isDraggingVisualSLTP = false
-        var visualDragField: SLTPLineHit.Field?
+        var visualDragField: VisualOrderDragField?
         var isSubmittingOrder: Bool = false
 
         init(transform: Binding<ChartTransform>, barCount: Int, chartWidth: CGFloat,
@@ -169,13 +174,15 @@ struct ChartInteractionView: NSViewRepresentable {
             return nil
         }
 
-        func hitTestVisualOrderLine(mouseY: CGFloat) -> SLTPLineHit.Field? {
+        func hitTestVisualOrderLine(mouseY: CGFloat) -> VisualOrderDragField? {
             guard let vo = visualOrder else { return nil }
             let threshold: CGFloat = 5.0
             let slY = yForPrice(vo.stopLoss)
             if abs(mouseY - slY) <= threshold { return .stopLoss }
             let tpY = yForPrice(vo.takeProfit)
             if abs(mouseY - tpY) <= threshold { return .takeProfit }
+            let entryY = yForPrice(vo.entryPrice)
+            if abs(mouseY - entryY) <= threshold { return .entry }
             return nil
         }
 
@@ -339,6 +346,7 @@ struct ChartInteractionView: NSViewRepresentable {
                 switch field {
                 case .stopLoss: coord.onUpdateVisualOrderSL?(newPrice)
                 case .takeProfit: coord.onUpdateVisualOrderTP?(newPrice)
+                case .entry: coord.onUpdateVisualOrderEntry?(newPrice)
                 }
                 return
             }
