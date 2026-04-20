@@ -2,22 +2,37 @@ import SwiftUI
 
 struct BottomPanel: View {
     let trading: TradingViewModel
+    @Bindable var tradeHistory: TradeHistoryViewModel
+    @State private var tab: Tab = .open
     @State private var editingLabel: String?
     @State private var editingField: EditField?
     @State private var editText = ""
 
     private enum EditField { case stopLoss, takeProfit }
+    private enum Tab: String, CaseIterable { case open, history
+        var label: String { self == .open ? "Open Positions" : "History" }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Open Positions")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                Picker("", selection: $tab) {
+                    ForEach(Tab.allCases, id: \.self) { t in
+                        Text(t.label).tag(t)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 260)
+                .onChange(of: tab) { _, new in
+                    if new == .history && tradeHistory.trades.isEmpty {
+                        Task { await tradeHistory.reload() }
+                    }
+                }
 
                 Spacer()
 
-                if let error = trading.orderError {
+                if tab == .open, let error = trading.orderError {
                     Text(error)
                         .font(.system(size: 10))
                         .foregroundStyle(.red)
@@ -29,16 +44,21 @@ struct BottomPanel: View {
 
             Divider()
 
-            if trading.positions.isEmpty {
-                Text("No open positions")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                positionsList
+            switch tab {
+            case .open:
+                if trading.positions.isEmpty {
+                    Text("No open positions")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    positionsList
+                }
+            case .history:
+                TradeHistoryView(vm: tradeHistory)
             }
         }
-        .frame(height: 180)
+        .frame(height: 240)
     }
 
     private var positionsList: some View {

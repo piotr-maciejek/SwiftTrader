@@ -20,6 +20,7 @@ final class WorkspaceViewModel {
 
     let settings = AppSettings.shared
     let trading: TradingViewModel
+    let tradeHistory: TradeHistoryViewModel
     var newsItems: [NewsItem] = []
     private let diskCache = DiskCandleCache()
     private let candleCache: CandleCache
@@ -45,6 +46,9 @@ final class WorkspaceViewModel {
     init() {
         candleCache = CandleCache(diskCache: diskCache)
         trading = TradingViewModel(coordinator: TradingCoordinator(port: settings.port))
+        tradeHistory = TradeHistoryViewModel(
+            service: TradeHistoryService(
+                baseURL: URL(string: "http://localhost:\(settings.port)")!))
         newsCoordinator = NewsCoordinator(port: settings.port)
         // NOTE: Do NOT start tasks here. SwiftUI re-evaluates @State initializers
         // on every body evaluation, creating (and discarding) many WorkspaceViewModels.
@@ -210,6 +214,7 @@ final class WorkspaceViewModel {
             }
         }
         trading.reconnect(port: port)
+        tradeHistory.reconnect(port: port)
         newsCoordinator = NewsCoordinator(port: port)
         newsItems = []
         connectNews()

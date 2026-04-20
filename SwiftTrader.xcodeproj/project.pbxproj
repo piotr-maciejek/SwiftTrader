@@ -62,10 +62,16 @@
 		A1000035 /* ChartLoadingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000037; };
 		A1000036 /* PendingOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000038; };
 		A1000037 /* PendingOrdersWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000039; };
+		A1000038 /* TradeRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003A; };
+		A1000039 /* DateRangePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003B; };
+		A100003A /* TradeHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003C; };
+		A100003B /* TradeHistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003D; };
+		A100003C /* TradeHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003E; };
 		B100000F /* NYTradingCalendarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000F; };
 		B1000010 /* BarAggregatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000010; };
 		B1000011 /* DiskCandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000011; };
 		B1000012 /* BarAggregatorEndToEndTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000012; };
+		B1000013 /* TradeHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000013; };
 		B100000C /* PositionSizingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000C; };
 		B1000009 /* FXVolumeRankTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000009; };
 		B100000A /* WorkspaceMoveTabTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000A; };
@@ -153,10 +159,16 @@
 		A2000037 /* ChartLoadingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartLoadingCard.swift; sourceTree = "<group>"; };
 		A2000038 /* PendingOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrder.swift; sourceTree = "<group>"; };
 		A2000039 /* PendingOrdersWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersWebSocketService.swift; sourceTree = "<group>"; };
+		A200003A /* TradeRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeRecord.swift; sourceTree = "<group>"; };
+		A200003B /* DateRangePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateRangePreset.swift; sourceTree = "<group>"; };
+		A200003C /* TradeHistoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeHistoryService.swift; sourceTree = "<group>"; };
+		A200003D /* TradeHistoryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeHistoryViewModel.swift; sourceTree = "<group>"; };
+		A200003E /* TradeHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeHistoryView.swift; sourceTree = "<group>"; };
 		B200000F /* NYTradingCalendarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NYTradingCalendarTests.swift; sourceTree = "<group>"; };
 		B2000010 /* BarAggregatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarAggregatorTests.swift; sourceTree = "<group>"; };
 		B2000011 /* DiskCandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskCandleCacheTests.swift; sourceTree = "<group>"; };
 		B2000012 /* BarAggregatorEndToEndTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarAggregatorEndToEndTests.swift; sourceTree = "<group>"; };
+		B2000013 /* TradeHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeHistoryTests.swift; sourceTree = "<group>"; };
 		B200000C /* PositionSizingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionSizingTests.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
@@ -203,6 +215,8 @@
 				A2000010 /* AppSettings.swift */,
 				A2000012 /* Position.swift */,
 				A2000038 /* PendingOrder.swift */,
+				A200003A /* TradeRecord.swift */,
+				A200003B /* DateRangePreset.swift */,
 				A2000023 /* Account.swift */,
 				A2000019 /* CurrencyCorrelation.swift */,
 				A200001C /* MarketSession.swift */,
@@ -229,6 +243,7 @@
 				A2000013 /* TradingAPIService.swift */,
 				A2000014 /* TradingWebSocketService.swift */,
 				A2000039 /* PendingOrdersWebSocketService.swift */,
+				A200003C /* TradeHistoryService.swift */,
 				A2000015 /* TradingCoordinator.swift */,
 				A2000018 /* CandleCache.swift */,
 				A2000020 /* AuthService.swift */,
@@ -249,6 +264,7 @@
 				A2000006 /* ChartViewModel.swift */,
 				A200000C /* WorkspaceViewModel.swift */,
 				A2000016 /* TradingViewModel.swift */,
+				A200003D /* TradeHistoryViewModel.swift */,
 				A200001A /* CorrelationViewModel.swift */,
 				A2000021 /* AuthViewModel.swift */,
 			);
@@ -282,6 +298,7 @@
 				A200002A /* VolumeMAPopover.swift */,
 				A200002F /* ShortcutsPopover.swift */,
 				A2000037 /* ChartLoadingCard.swift */,
+				A200003E /* TradeHistoryView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -307,6 +324,7 @@
 				B2000010 /* BarAggregatorTests.swift */,
 				B2000011 /* DiskCandleCacheTests.swift */,
 				B2000012 /* BarAggregatorEndToEndTests.swift */,
+				B2000013 /* TradeHistoryTests.swift */,
 			);
 			path = SwiftTraderTests;
 			sourceTree = "<group>";
@@ -434,6 +452,11 @@
 				A1000035 /* ChartLoadingCard.swift in Sources */,
 				A1000036 /* PendingOrder.swift in Sources */,
 				A1000037 /* PendingOrdersWebSocketService.swift in Sources */,
+				A1000038 /* TradeRecord.swift in Sources */,
+				A1000039 /* DateRangePreset.swift in Sources */,
+				A100003A /* TradeHistoryService.swift in Sources */,
+				A100003B /* TradeHistoryViewModel.swift in Sources */,
+				A100003C /* TradeHistoryView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -459,6 +482,7 @@
 				B1000010 /* BarAggregatorTests.swift in Sources */,
 				B1000011 /* DiskCandleCacheTests.swift in Sources */,
 				B1000012 /* BarAggregatorEndToEndTests.swift in Sources */,
+				B1000013 /* TradeHistoryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

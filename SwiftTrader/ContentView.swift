@@ -59,7 +59,7 @@ struct ContentView: View {
 
                     if workspace.showBottomPanel {
                         Divider()
-                        BottomPanel(trading: workspace.trading)
+                        BottomPanel(trading: workspace.trading, tradeHistory: workspace.tradeHistory)
                     }
                 }
 
