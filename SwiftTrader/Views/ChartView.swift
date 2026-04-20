@@ -99,9 +99,6 @@ struct ChartView: View {
                     if let ch = crosshair, !bars.isEmpty {
                         drawCrosshairLabels(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, crosshair: ch)
                     }
-                    if showATR, let pips = atrPips, let percent = todayATRPercent {
-                        drawATROverlay(context: &context, chartWidth: chartWidth, atrPeriod: atrPeriod, atrPips: pips, todayPercent: percent)
-                    }
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
                 .overlay(alignment: .topLeading) {
@@ -156,12 +153,17 @@ struct ChartView: View {
                     onChartWidthChanged?(newWidth)
                 }
 
-                if let ch = crosshair,
-                   ch.barIndex >= 0, ch.barIndex < bars.count {
-                    ohlcOverlay(bar: bars[ch.barIndex])
-                        .padding(.leading, 8)
-                        .padding(.top, 6)
+                VStack(alignment: .leading, spacing: 4) {
+                    if showATR, let pips = atrPips, let percent = todayATRPercent {
+                        atrOverlay(atrPeriod: atrPeriod, atrPips: pips, todayPercent: percent)
+                    }
+                    if let ch = crosshair,
+                       ch.barIndex >= 0, ch.barIndex < bars.count {
+                        ohlcOverlay(bar: bars[ch.barIndex])
+                    }
                 }
+                .padding(.leading, 8)
+                .padding(.top, 6)
             }
         }
     }
@@ -195,6 +197,17 @@ struct ChartView: View {
         .padding(.vertical, 4)
         .background(Color.black.opacity(0.55))
         .cornerRadius(4)
+    }
+
+    @ViewBuilder
+    private func atrOverlay(atrPeriod: Int, atrPips: Double, todayPercent: Double) -> some View {
+        Text(String(format: "ATR(%d): %.1f pips  |  Today: %.0f%%", atrPeriod, atrPips, todayPercent))
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.black.opacity(0.55))
+            .cornerRadius(4)
     }
 
     @ViewBuilder
@@ -706,27 +719,6 @@ struct ChartView: View {
             }
             context.stroke(path, with: .color(config.color), lineWidth: 1.5)
         }
-    }
-
-    // MARK: - ATR overlay
-
-    private func drawATROverlay(
-        context: inout GraphicsContext,
-        chartWidth: CGFloat,
-        atrPeriod: Int,
-        atrPips: Double,
-        todayPercent: Double
-    ) {
-        let text = String(format: "ATR(%d): %.1f pips  |  Today: %.0f%%", atrPeriod, atrPips, todayPercent)
-        let resolved = context.resolve(
-            Text(text)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(Color.secondary.opacity(0.8))
-        )
-        let size = resolved.measure(in: CGSize(width: chartWidth, height: .infinity))
-        // Top-left corner with padding
-        context.draw(resolved, at: CGPoint(x: 8, y: 8), anchor: .topLeading)
-        _ = size // suppress unused warning
     }
 
     // MARK: - Volume

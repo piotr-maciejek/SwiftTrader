@@ -133,7 +133,9 @@ struct ChartInteractionView: NSViewRepresentable {
         func snappedBarIndex(mouseX: CGFloat) -> Int {
             let slotWidth = transform.wrappedValue.candleSlotWidth
             let rawIndex = (mouseX + transform.wrappedValue.xOffset - slotWidth / 2) / slotWidth
-            return max(0, min(barCount - 1, Int(round(rawIndex))))
+            let rounded = Int(round(rawIndex))
+            guard rounded >= 0, rounded < barCount else { return -1 }
+            return rounded
         }
 
         func yForPrice(_ price: Double) -> CGFloat {
@@ -381,7 +383,11 @@ struct ChartInteractionView: NSViewRepresentable {
             }
 
             let barIndex = coord.snappedBarIndex(mouseX: location.x)
-            coord.crosshair.wrappedValue = CrosshairState(barIndex: barIndex, mouseY: flippedY)
+            if barIndex < 0 {
+                coord.crosshair.wrappedValue = nil
+            } else {
+                coord.crosshair.wrappedValue = CrosshairState(barIndex: barIndex, mouseY: flippedY)
+            }
         }
 
         override func keyDown(with event: NSEvent) {
