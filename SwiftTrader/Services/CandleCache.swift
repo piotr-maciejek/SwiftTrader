@@ -35,7 +35,10 @@ actor CandleCache {
     }
 
     private var store: [CacheKey: CacheEntry] = [:]
-    private let maxBarsPerKey = 5000
+    // Scroll-back pagination adds bars to the OLD end; `suffix(maxBarsPerKey)` keeps
+    // newest, so a too-small cap silently discards every newly-fetched earlier page
+    // once the cap is hit. 20k × ~80B ≈ 1.6MB/key, 50 keys ≈ 80MB worst case.
+    private let maxBarsPerKey = 20000
     private let maxKeys = 50
     private let diskCache: DiskCandleCache?
     private var hydrated = false

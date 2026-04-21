@@ -159,9 +159,21 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
                             await cache.appendBar(hourBar, for: hourlyKey)
                         }
                         let cachedHourly = await cache.getBars(for: hourlyKey)
+                        // Partial bars fire at tick rate; re-aggregating the entire hourly
+                        // history per tick pegs the ICU timezone lock. Only the tail can
+                        // affect the live bucket — take a window large enough to cover it.
+                        // Completed hourly bars (≤1/hr) still get a full aggregation so the
+                        // aggregated cache stays complete.
+                        let inputs: [CandleBar]
+                        if hourBar.partial {
+                            let tail = target == .daily ? 30 : 6
+                            inputs = Array(cachedHourly.suffix(tail))
+                        } else {
+                            inputs = cachedHourly
+                        }
                         let partial = hourBar.partial ? hourBar : nil
                         let aggregated = BarAggregator.aggregate(
-                            hourly: cachedHourly, openPartial: partial, target: target
+                            hourly: inputs, openPartial: partial, target: target
                         )
                         let aggKey = CandleCache.CacheKey(
                             instrument: instrument, period: target.periodCode, source: .aggregated

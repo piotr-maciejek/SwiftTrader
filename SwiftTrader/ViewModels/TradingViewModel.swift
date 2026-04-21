@@ -129,20 +129,23 @@ final class TradingViewModel {
             return visualOrders[instrument]
         }
         order.marketPrice = price
-        visualOrders[instrument]?.marketPrice = price
-        // Only keep entryPrice pinned to market while the user hasn't dragged it.
-        // Once overridden the entry becomes a limit/stop target and must stay put.
         if !order.isEntryOverridden {
             order.entryPrice = price
-            visualOrders[instrument]?.entryPrice = price
         }
         let boxWidth = order.endBarIndex - order.startBarIndex
         order.startBarIndex = barCount + 1
         order.endBarIndex = barCount + 1 + boxWidth
-        visualOrders[instrument]?.startBarIndex = order.startBarIndex
-        visualOrders[instrument]?.endBarIndex = order.endBarIndex
-        recalculateAmount(for: instrument)
-        return visualOrders[instrument]
+        if !order.isAmountOverridden,
+           let equity = account?.equity,
+           let freeMargin = account?.freeMargin {
+            let result = PositionSizing.calculate(
+                equity: equity, freeMargin: freeMargin,
+                riskFraction: 0.05,
+                entryPrice: order.entryPrice, stopLoss: order.stopLoss)
+            order.amount = result.lots
+            order.isMarginCapped = result.isMarginCapped
+        }
+        return order
     }
 
     func updateVisualOrderEntry(instrument: String, price: Double) {

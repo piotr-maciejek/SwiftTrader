@@ -8,11 +8,11 @@ enum AggregatedPeriod: String, Codable, Sendable {
 enum NYTradingCalendar {
     static let nyTZ = TimeZone(identifier: "America/New_York")!
 
-    static var calendar: Calendar {
+    static let calendar: Calendar = {
         var c = Calendar(identifier: .gregorian)
         c.timeZone = nyTZ
         return c
-    }
+    }()
 
     /// Start of the forex trading day containing `at`.
     /// Trading day runs 17:00 ET → 17:00 ET next day. A date exactly at 17:00 ET
