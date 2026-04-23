@@ -13,6 +13,7 @@ struct ChartView: View {
     var showEMA: Bool = true
     var emaConfigs: [EMALine] = []
     var positions: [Position] = []
+    var pendingOrders: [PendingOrder] = []
     var currentInstrument: String = ""
     var showATR: Bool = true
     var atrPeriod: Int = 14
@@ -72,6 +73,7 @@ struct ChartView: View {
                     drawCandles(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange, priceRange: priceRange)
                     drawCurrentPriceLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawSLTPLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    drawPendingOrderLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     if let vo = visualOrder {
                         drawVisualOrderBox(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, order: vo, isSubmitting: isSubmittingOrder)
                     }
@@ -96,6 +98,7 @@ struct ChartView: View {
                     drawPriceAxis(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawCurrentPriceLabel(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawSLTPLabels(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    drawPendingOrderLabels(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawTimeAxis(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, visibleRange: visibleRange)
                     if let ch = crosshair, !bars.isEmpty {
                         drawCrosshairLabels(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, crosshair: ch)
@@ -664,6 +667,79 @@ struct ChartView: View {
             for (price, color, tag) in [
                 (position.stopLoss, bearishColor, "SL"),
                 (position.takeProfit, bullishColor, "TP"),
+            ] where price != 0 {
+                let y = yForPrice(price, chartHeight: chartHeight, priceRange: priceRange)
+                guard y >= 0 && y <= chartHeight else { continue }
+
+                let label = Text("\(tag) \(String(format: "%.5f", price))")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white)
+                let resolved = context.resolve(label)
+                let labelSize = resolved.measure(in: CGSize(width: 200, height: 20))
+
+                let pillRect = CGRect(
+                    x: chartWidth + 2,
+                    y: y - labelSize.height / 2 - 2,
+                    width: labelSize.width + 8,
+                    height: labelSize.height + 4
+                )
+                context.fill(Path(roundedRect: pillRect, cornerRadius: 3), with: .color(color))
+                context.draw(resolved, at: CGPoint(x: chartWidth + 6, y: y), anchor: .leading)
+            }
+        }
+    }
+
+    // MARK: - Pending Orders
+
+    private var relevantPendingOrders: [PendingOrder] {
+        pendingOrders.filter { $0.instrument == currentInstrument }
+    }
+
+    private let pendingEntryColor = Color(red: 0.95, green: 0.75, blue: 0.25) // amber
+
+    private func drawPendingOrderLines(context: inout GraphicsContext, chartWidth: CGFloat,
+                                        chartHeight: CGFloat, priceRange: (min: Double, max: Double)) {
+        for order in relevantPendingOrders {
+            // Entry trigger line
+            let entryY = yForPrice(order.openPrice, chartHeight: chartHeight, priceRange: priceRange)
+            if entryY >= 0 && entryY <= chartHeight {
+                var path = Path()
+                path.move(to: CGPoint(x: 0, y: entryY))
+                path.addLine(to: CGPoint(x: chartWidth, y: entryY))
+                context.stroke(path, with: .color(pendingEntryColor),
+                               style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            }
+            if order.stopLoss != 0 {
+                let y = yForPrice(order.stopLoss, chartHeight: chartHeight, priceRange: priceRange)
+                if y >= 0 && y <= chartHeight {
+                    var path = Path()
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: chartWidth, y: y))
+                    context.stroke(path, with: .color(bearishColor.opacity(0.7)),
+                                   style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                }
+            }
+            if order.takeProfit != 0 {
+                let y = yForPrice(order.takeProfit, chartHeight: chartHeight, priceRange: priceRange)
+                if y >= 0 && y <= chartHeight {
+                    var path = Path()
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: chartWidth, y: y))
+                    context.stroke(path, with: .color(bullishColor.opacity(0.7)),
+                                   style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                }
+            }
+        }
+    }
+
+    private func drawPendingOrderLabels(context: inout GraphicsContext, chartWidth: CGFloat,
+                                         chartHeight: CGFloat, priceRange: (min: Double, max: Double)) {
+        for order in relevantPendingOrders {
+            let typeTag = order.orderType.replacingOccurrences(of: "_", with: " ")
+            for (price, color, tag) in [
+                (order.openPrice, pendingEntryColor, typeTag),
+                (order.stopLoss, bearishColor, "SL"),
+                (order.takeProfit, bullishColor, "TP"),
             ] where price != 0 {
                 let y = yForPrice(price, chartHeight: chartHeight, priceRange: priceRange)
                 guard y >= 0 && y <= chartHeight else { continue }

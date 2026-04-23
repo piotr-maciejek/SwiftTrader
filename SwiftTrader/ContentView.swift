@@ -40,6 +40,10 @@ struct ContentView: View {
 
     private var mainContent: some View {
         VStack(spacing: 0) {
+            if let account = workspace.trading.account, account.isHealthStale {
+                connectionBanner(account: account)
+            }
+
             // Tab bar
             tabBar
 
@@ -75,6 +79,26 @@ struct ContentView: View {
         .frame(minWidth: 800, minHeight: 500)
         .background(WindowAccessor())
         .focusedSceneValue(\.workspace, workspace)
+    }
+
+    // MARK: - Connection health banner
+
+    private func connectionBanner(account: Account) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+            if !account.connected {
+                Text("Dukascopy transport disconnected — positions, P&L and order actions may be stale or rejected.")
+            } else {
+                let seconds = Double(account.lastTickAgeMs) / 1000.0
+                Text(String(format: "No price updates for %.0fs — connection may be degraded.", seconds))
+            }
+            Spacer()
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.red.opacity(0.85))
     }
 
     // MARK: - Account status bar
@@ -536,6 +560,7 @@ struct ContentView: View {
             showEMA: vm.showEMA,
             emaConfigs: vm.emaConfigs,
             positions: workspace.trading.positions,
+            pendingOrders: workspace.trading.pendingOrders,
             currentInstrument: vm.currentInstrument,
             showATR: vm.showATR,
             atrPeriod: vm.atrPeriod,

@@ -77,7 +77,8 @@ final class TradingViewModel {
         if let equity = account?.equity, let freeMargin = account?.freeMargin {
             let sizing = PositionSizing.calculate(
                 equity: equity, freeMargin: freeMargin, riskFraction: 0.05,
-                entryPrice: currentPrice, stopLoss: sl)
+                entryPrice: currentPrice, stopLoss: sl,
+                leverage: account?.leverage ?? 30)
             initialAmount = sizing.lots
             marginCapped = sizing.isMarginCapped
         }
@@ -141,7 +142,8 @@ final class TradingViewModel {
             let result = PositionSizing.calculate(
                 equity: equity, freeMargin: freeMargin,
                 riskFraction: 0.05,
-                entryPrice: order.entryPrice, stopLoss: order.stopLoss)
+                entryPrice: order.entryPrice, stopLoss: order.stopLoss,
+                leverage: account?.leverage ?? 30)
             order.amount = result.lots
             order.isMarginCapped = result.isMarginCapped
         }
@@ -273,7 +275,8 @@ final class TradingViewModel {
         let result = PositionSizing.calculate(
             equity: equity, freeMargin: freeMargin,
             riskFraction: 0.05,
-            entryPrice: order.entryPrice, stopLoss: order.stopLoss)
+            entryPrice: order.entryPrice, stopLoss: order.stopLoss,
+            leverage: account?.leverage ?? 30)
         order.amount = result.lots
         order.isMarginCapped = result.isMarginCapped
         visualOrders[instrument] = order

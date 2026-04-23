@@ -18,6 +18,9 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
     var lastSubmitOrderType: String?
     var lastSubmitEntryPrice: Double?
 
+    /// Captured on the first call to streamPendingOrders so tests can push snapshots.
+    var pendingOrdersContinuation: AsyncThrowingStream<PendingOrdersSnapshot, Error>.Continuation?
+
     func submitOrder(instrument: String, direction: String, amount: Double,
                      stopLoss: Double, takeProfit: Double,
                      orderType: String, entryPrice: Double?) async throws -> Position {
@@ -42,7 +45,10 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
     }
 
     func streamPendingOrders() -> AsyncThrowingStream<PendingOrdersSnapshot, Error> {
-        AsyncThrowingStream { continuation in continuation.onTermination = { _ in } }
+        AsyncThrowingStream { continuation in
+            self.pendingOrdersContinuation = continuation
+            continuation.onTermination = { _ in }
+        }
     }
 }
 
@@ -196,5 +202,42 @@ struct VisualOrderSubmitRaceTests {
 
         #expect(fake.submitCallCount == 0)
         #expect(vm.orderError == nil)
+    }
+}
+
+@Suite("Pending Orders Stream")
+@MainActor
+struct PendingOrdersStreamTests {
+
+    @Test("Pending orders snapshot propagates to view model")
+    func pendingOrdersPopulateOnSnapshot() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        vm.start()
+
+        // Wait for the VM to subscribe and capture the continuation.
+        for _ in 0..<50 {
+            if fake.pendingOrdersContinuation != nil { break }
+            await Task.yield()
+        }
+        #expect(fake.pendingOrdersContinuation != nil)
+
+        let order = PendingOrder(label: "ST_EURUSD_123", instrument: "EURUSD",
+                                 direction: "BUY", amount: 0.01, openPrice: 1.1200,
+                                 stopLoss: 1.1100, takeProfit: 1.1400,
+                                 state: "OPENED", orderType: "BUY_STOP")
+        fake.pendingOrdersContinuation?.yield(PendingOrdersSnapshot(pendingOrders: [order]))
+
+        // Let the VM handle the yield.
+        for _ in 0..<50 {
+            if !vm.pendingOrders.isEmpty { break }
+            await Task.yield()
+        }
+
+        #expect(vm.pendingOrders.count == 1)
+        #expect(vm.pendingOrders.first?.label == "ST_EURUSD_123")
+        #expect(vm.pendingOrders.first?.orderType == "BUY_STOP")
+
+        vm.stop()
     }
 }
