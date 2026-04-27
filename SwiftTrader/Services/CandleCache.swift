@@ -77,6 +77,11 @@ actor CandleCache {
         store[key]?.bars.first?.time
     }
 
+    /// Returns the latest cached timestamp for the key, used to build `after` parameter for gap-fill.
+    func latestTime(for key: CacheKey) -> Int64? {
+        store[key]?.bars.last?.time
+    }
+
     /// Merge fetched bars into cache. Only stores bars where partial == false.
     /// Returns the full merged array (cached + new).
     @discardableResult

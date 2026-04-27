@@ -108,6 +108,39 @@ struct CandleCacheTests {
         #expect(result == 100)
     }
 
+    @Test("latestTime returns nil for unknown key")
+    func latestTimeUnknown() async {
+        let cache = CandleCache()
+        let result = await cache.latestTime(for: testKey)
+        #expect(result == nil)
+    }
+
+    @Test("latestTime returns correct value after sorted merge")
+    func latestTimeCorrect() async {
+        let cache = CandleCache()
+        _ = await cache.merge([makeBar(time: 200), makeBar(time: 100), makeBar(time: 300)], for: testKey)
+        let result = await cache.latestTime(for: testKey)
+        #expect(result == 300)
+    }
+
+    @Test("latestTime updates after appendBar")
+    func latestTimeAfterAppend() async {
+        let cache = CandleCache()
+        _ = await cache.merge([makeBar(time: 100)], for: testKey)
+        await cache.appendBar(makeBar(time: 200), for: testKey)
+        let result = await cache.latestTime(for: testKey)
+        #expect(result == 200)
+    }
+
+    @Test("latestTime ignores partial bars stored via merge")
+    func latestTimeIgnoresPartial() async {
+        let cache = CandleCache()
+        // Partial bars are filtered by merge, so latestTime reflects only completed bars.
+        _ = await cache.merge([makeBar(time: 100), makeBar(time: 200, partial: true)], for: testKey)
+        let result = await cache.latestTime(for: testKey)
+        #expect(result == 100)
+    }
+
     @Test("Multiple keys stored independently")
     func multipleKeys() async {
         let cache = CandleCache()

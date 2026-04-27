@@ -1,6 +1,11 @@
 import Foundation
 
 final class MarketDataCoordinator: MarketDataProviding, Sendable {
+    /// Per-request bar limit when gap-filling. Matches the server's MAX_FORWARD_GAP_BARS.
+    static let gapBarLimit = 5000
+    /// Max gap-fill iterations to bound runaway pagination on years-stale caches.
+    static let maxGapFillIterations = 4
+
     private let apiService: ForexAPIService
     private let host: String
     private let port: Int
@@ -27,14 +32,56 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
             return try await fetchAggregated(instrument: instrument, target: target, count: count)
         }
 
-        let fetched = try await apiService.fetchHistory(instrument: instrument, period: period, count: count)
         let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server)
+        if let latest = await cache.latestTime(for: key),
+           !Self.isStale(latest: latest, period: period) {
+            // Warm cache: fetch only the gap. The live partial bar will arrive shortly
+            // via the WebSocket — no need for a separate tail request here.
+            try await gapFill(serverKey: key, instrument: instrument, period: period, latest: latest)
+            return await cache.getBars(for: key)
+        }
+
+        let fetched = try await apiService.fetchHistory(instrument: instrument, period: period, count: count)
         let cached = await cache.merge(fetched, for: key)
 
         if let last = fetched.last, last.partial {
             return cached + [last]
         }
         return cached
+    }
+
+    /// Loop fetching forward from `latest` until the server stops returning full pages
+    /// or we hit `maxGapFillIterations`. Each iteration merges into `serverKey`.
+    private func gapFill(
+        serverKey: CandleCache.CacheKey, instrument: String, period: String, latest initialLatest: Int64
+    ) async throws {
+        var latest = initialLatest
+        for _ in 0..<Self.maxGapFillIterations {
+            // Subtract 1 ms so the boundary bar is re-emitted; merge dedupes by timestamp
+            // and lets server-side bar corrections propagate.
+            let fetched = try await apiService.fetchHistory(
+                instrument: instrument, period: period, count: Self.gapBarLimit, after: latest - 1
+            )
+            if fetched.isEmpty { return }
+            await cache.merge(fetched, for: serverKey)
+            if fetched.count < Self.gapBarLimit { return }
+            guard let newLatest = await cache.latestTime(for: serverKey), newLatest > latest else { return }
+            latest = newLatest
+        }
+    }
+
+    /// Period-aware staleness threshold. If the cache's latest bar is older than this,
+    /// fall back to a fresh full-N fetch instead of a (potentially huge) gap-fill loop.
+    private static func isStale(latest: Int64, period: String) -> Bool {
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let ageMs = nowMs - latest
+        let thresholdMs: Int64 = switch period {
+        case "FOUR_HOURS", "DAILY", "WEEKLY", "MONTHLY":
+            365 * 24 * 60 * 60 * 1000
+        default:
+            30 * 24 * 60 * 60 * 1000
+        }
+        return ageMs > thresholdMs
     }
 
     /// Fetch bars older than the earliest cached bar for this key.
@@ -92,11 +139,30 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
     private func fetchAggregated(
         instrument: String, target: AggregatedPeriod, count: Int
     ) async throws -> [CandleBar] {
+        let hourlyKey = CandleCache.CacheKey(instrument: instrument, period: "ONE_HOUR", source: .server)
+
+        // Warm-cache path: gap-fill the underlying ONE_HOUR cache instead of re-fetching
+        // `count * hourlySpan` bars. Re-aggregate the full merged hourly array as before
+        // so the .aggregated cache stays consistent.
+        if let latest = await cache.latestTime(for: hourlyKey),
+           !Self.isStale(latest: latest, period: "ONE_HOUR") {
+            try await gapFill(
+                serverKey: hourlyKey, instrument: instrument, period: "ONE_HOUR", latest: latest
+            )
+            let merged = await cache.getBars(for: hourlyKey)
+            let aggregated = BarAggregator.aggregate(
+                hourly: merged, openPartial: nil, target: target
+            )
+            let aggKey = CandleCache.CacheKey(
+                instrument: instrument, period: target.periodCode, source: .aggregated
+            )
+            return await cache.merge(aggregated, for: aggKey)
+        }
+
         let hourlyCount = count * target.hourlySpan
         let fetched = try await apiService.fetchHistory(
             instrument: instrument, period: "ONE_HOUR", count: hourlyCount
         )
-        let hourlyKey = CandleCache.CacheKey(instrument: instrument, period: "ONE_HOUR", source: .server)
         let merged = await cache.merge(fetched, for: hourlyKey)
         let partial = fetched.last.flatMap { $0.partial ? $0 : nil }
 

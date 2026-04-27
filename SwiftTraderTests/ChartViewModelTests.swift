@@ -317,4 +317,60 @@ struct ChartViewModelTests {
         )
         #expect(s.detail == nil)
     }
+
+    // MARK: - Warm-cache cold start
+
+    @Test("start() with warm cache paints bars before fetchInstruments resolves")
+    func startWarmCachePaintsImmediately() async {
+        let mock = MockMarketDataCoordinator()
+        // Pre-seed the cache as if disk hydration just finished.
+        let cached = [makeBar(time: 100), makeBar(time: 200), makeBar(time: 300)]
+        let key = CandleCache.CacheKey(instrument: "EURUSD", period: "FIFTEEN_MINS", source: .server)
+        _ = await mock.cache.merge(cached, for: key)
+
+        // Simulate a sluggish server: instruments call fails forever, fetchCandles never returns
+        // useful data. Even so, start() should paint the cached bars from disk.
+        struct NeverError: Error {}
+        mock.instrumentsResult = .failure(NeverError())
+        mock.fetchCandlesResult = .success([])
+
+        let vm = ChartViewModel(coordinator: mock)
+        // Run start() in a background Task so we can observe state mid-flight.
+        let startTask = Task { await vm.start() }
+        // Give the cache-paint a chance to run before the fetchInstruments retry kicks in.
+        for _ in 0..<20 {
+            if !vm.bars.isEmpty { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(vm.bars.count == 3)
+        #expect(vm.bars.map(\.time) == [100, 200, 300])
+        // No overlay over warm bars — ContentView keys off bars.isEmpty so the loading card
+        // is hidden when bars are populated.
+        #expect(vm.loadingStatus == nil || vm.loadingStatus?.stage != .connecting)
+
+        startTask.cancel()
+        vm.stop()
+    }
+
+    @Test("start() with cold cache shows .connecting status")
+    func startColdCacheShowsConnecting() async {
+        let mock = MockMarketDataCoordinator()
+        // Empty cache; failing instruments call so we stay in the connect-retry loop.
+        struct NeverError: Error {}
+        mock.instrumentsResult = .failure(NeverError())
+
+        let vm = ChartViewModel(coordinator: mock)
+        let startTask = Task { await vm.start() }
+        for _ in 0..<20 {
+            if vm.loadingStatus != nil { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(vm.bars.isEmpty)
+        #expect(vm.loadingStatus?.stage == .connecting)
+
+        startTask.cancel()
+        vm.stop()
+    }
 }

@@ -122,8 +122,23 @@ final class ChartViewModel {
         guard !hasStarted else { return }
         hasStarted = true
 
-        // Retry initial connection until the server is reachable
-        loadingStatus = .connecting()
+        // Paint cached bars first so the user sees data immediately on cold start —
+        // before fetchInstruments() finishes its server roundtrip. Mirrors reloadChart().
+        let displayKey = CandleCache.CacheKey.forDisplay(
+            instrument: currentInstrument,
+            period: currentPeriod,
+            clientSideRebucketing: clientSideRebucketing
+        )
+        let cached = await coordinator.cache.getBars(for: displayKey)
+        if !cached.isEmpty {
+            bars = cached
+            scrollToEnd()
+            // ContentView hides ChartLoadingCard when bars are non-empty, so no
+            // overlay is shown over the cached bars while we refresh in the background.
+        } else {
+            loadingStatus = .connecting()
+        }
+
         while !Task.isCancelled {
             if let instruments = try? await coordinator.fetchInstruments(), !instruments.isEmpty {
                 availableInstruments = instruments
@@ -139,7 +154,9 @@ final class ChartViewModel {
         }
 
         // Load history first so the REST call isn't starved by WebSocket
-        // callbacks competing for MainActor time.
+        // callbacks competing for MainActor time. Also: WS must open AFTER
+        // loadHistoryWithRetry so a stale REST snapshot can't overwrite a fresher
+        // WS-pushed completed bar via timestamp-keyed merge.
         await loadHistoryWithRetry()
         loadATR()
         connectWebSocket()
@@ -227,16 +244,9 @@ final class ChartViewModel {
         let period = currentPeriod
         let rebucketing = clientSideRebucketing
 
-        // Show cached bars immediately while waiting for server
-        let key = CandleCache.CacheKey.forDisplay(
-            instrument: instrument, period: period, clientSideRebucketing: rebucketing
-        )
-        let cached = await coordinator.cache.getBars(for: key)
-        if Task.isCancelled { return }
-        if !cached.isEmpty {
-            bars = cached
-            scrollToEnd()
-        }
+        // Cache paint is done by the caller (start / reloadChart). `bars.isEmpty` here
+        // tells us whether we have a warm or cold cache — drives the loading-card detail.
+        let coldCache = bars.isEmpty
 
         var attempt = 1
         var lastError: String?
@@ -245,7 +255,7 @@ final class ChartViewModel {
             guard instrument == currentInstrument, period == currentPeriod else { return }
             loadingStatus = .loadingHistory(
                 attempt: attempt, period: period, rebucketing: rebucketing,
-                coldCache: cached.isEmpty, lastError: lastError
+                coldCache: coldCache, lastError: lastError
             )
             do {
                 let history = try await coordinator.fetchCandles(

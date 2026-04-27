@@ -16,7 +16,8 @@ actor ForexAPIService {
         self.baseURL = baseURL
     }
 
-    func fetchHistory(instrument: String = "EURUSD", period: String = "ONE_MIN", count: Int = 200, before: Int64? = nil) async throws -> [CandleBar] {
+    func fetchHistory(instrument: String = "EURUSD", period: String = "ONE_MIN", count: Int = 200, before: Int64? = nil, after: Int64? = nil) async throws -> [CandleBar] {
+        precondition(before == nil || after == nil, "before and after are mutually exclusive")
         var components = URLComponents(url: baseURL.appendingPathComponent("/api/v1/history"), resolvingAgainstBaseURL: false)!
         var queryItems = [
             URLQueryItem(name: "instrument", value: instrument),
@@ -25,6 +26,9 @@ actor ForexAPIService {
         ]
         if let before {
             queryItems.append(URLQueryItem(name: "before", value: String(before)))
+        }
+        if let after {
+            queryItems.append(URLQueryItem(name: "after", value: String(after)))
         }
         components.queryItems = queryItems
 
