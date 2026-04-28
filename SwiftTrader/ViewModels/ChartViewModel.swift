@@ -300,9 +300,11 @@ final class ChartViewModel {
                 loadingStatus = nil
                 return
             }
-            // Give the server a moment to begin its reconnect cycle before we
-            // start firing fresh requests at it.
-            try? await Task.sleep(for: .seconds(2))
+            // The server's scheduleReconnect uses a ~10s delay, plus a few
+            // seconds for the LIVE direct-connect handshake and strategy init.
+            // Sleeping past that window means the chart's first history
+            // request hits a ready strategy instead of cycling through 503s.
+            try? await Task.sleep(for: .seconds(12))
             reloadChart()
         }
     }
