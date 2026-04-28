@@ -144,18 +144,21 @@ actor CandleCache {
     }
 
     /// Wipe all entries (e.g. on full reconnect with different server config).
-    func clear() {
+    /// Awaits the disk wipe so the caller's next merge/scheduleDiskWrite can't
+    /// race ahead and have its freshly-written data deleted by a delayed wipe.
+    func clear() async {
         store.removeAll()
         if let diskCache {
-            Task { await diskCache.clearAll() }
+            await diskCache.clearAll()
         }
     }
 
-    /// Wipe all cached periods for one instrument. Used by the Refresh Cache button.
-    func clear(instrument: String) {
+    /// Wipe all cached periods for one instrument. Used by the Refresh Cache
+    /// button. Awaits the disk wipe — see `clear()` above for the race rationale.
+    func clear(instrument: String) async {
         store = store.filter { $0.key.instrument != instrument }
         if let diskCache {
-            Task { await diskCache.clear(instrument: instrument) }
+            await diskCache.clear(instrument: instrument)
         }
     }
 

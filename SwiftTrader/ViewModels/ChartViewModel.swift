@@ -270,6 +270,43 @@ final class ChartViewModel {
         }
     }
 
+    /// Like `refreshCache`, but also force-reconnects the JForex session so
+    /// any in-memory bars that JForex has already cached get re-fetched from
+    /// Dukascopy. Heavier than `refreshCache` (5–30s outage hitting all
+    /// charts), so it's a separate explicit user action.
+    func hardRefresh() {
+        guard !isRefreshingCache else { return }
+        let instrument = currentInstrument
+        isRefreshingCache = true
+        loadingStatus = .reconnectingServer()
+        Task {
+            defer { isRefreshingCache = false }
+            do {
+                _ = try await coordinator.clearServerCache(instrument: instrument)
+            } catch {
+                self.error = "Hard refresh: \(error.localizedDescription)"
+                loadingStatus = nil
+                return
+            }
+            guard instrument == currentInstrument else {
+                loadingStatus = nil
+                return
+            }
+            await coordinator.cache.clear(instrument: instrument)
+            do {
+                try await coordinator.forceReconnect()
+            } catch {
+                self.error = "Hard refresh: force reconnect failed: \(error.localizedDescription)"
+                loadingStatus = nil
+                return
+            }
+            // Give the server a moment to begin its reconnect cycle before we
+            // start firing fresh requests at it.
+            try? await Task.sleep(for: .seconds(2))
+            reloadChart()
+        }
+    }
+
     private func reloadChart() {
         startTask?.cancel()
         reloadTask?.cancel()

@@ -537,6 +537,16 @@ struct ContentView: View {
             .buttonStyle(.borderless)
             .disabled(vm.isRefreshingCache)
             .help("Refresh cache — delete server-side Dukascopy cache and reload (last resort)")
+
+            Button(action: { vm.hardRefresh() }) {
+                Image(systemName: "arrow.clockwise.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.borderless)
+            .disabled(vm.isRefreshingCache)
+            .help("Hard refresh — purge server cache AND force JForex to reconnect (~5–30s outage on all charts)")
         }
         .padding(.horizontal)
         .padding(.vertical, 8)

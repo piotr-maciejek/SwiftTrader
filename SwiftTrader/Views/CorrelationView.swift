@@ -47,6 +47,32 @@ struct CorrelationView: View {
 
                 Spacer()
 
+                Button(action: { vm.refreshCache() }) {
+                    Group {
+                        if vm.isRefreshingCache {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "arrow.clockwise.circle")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .frame(width: 12, height: 12)
+                }
+                .buttonStyle(.borderless)
+                .disabled(vm.isRefreshingCache)
+                .help("Refresh cache for \(formatInstrument(instrument))")
+
+                Button(action: { vm.hardRefresh() }) {
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.orange)
+                        .frame(width: 12, height: 12)
+                }
+                .buttonStyle(.borderless)
+                .disabled(vm.isRefreshingCache)
+                .help("Hard refresh — purge cache AND reconnect (~5–30s outage)")
+
                 Circle()
                     .fill(vm.isConnected ? .green : (vm.bars.isEmpty ? .red : .yellow))
                     .frame(width: 5, height: 5)
