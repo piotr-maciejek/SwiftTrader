@@ -532,7 +532,13 @@ final class ChartViewModel {
                 if autoScroll { advanceByOneCandle() }
             }
         } else {
-            // Completed bar: replace partial or append
+            // Mirror the partial-branch guard: don't paint a lone completed bar
+            // on an empty chart (rule 3). History either failed (the exhausted
+            // banner is up) or is still loading — either way a single candle in
+            // isolation is misleading. Skipping the cacheBar call too is fine:
+            // the next successful history fetch will return this bar and merge
+            // it into the cache anyway.
+            guard !bars.isEmpty else { return }
             if let lastIndex = bars.indices.last, bars[lastIndex].time == bar.time {
                 bars[lastIndex] = bar
             } else {
