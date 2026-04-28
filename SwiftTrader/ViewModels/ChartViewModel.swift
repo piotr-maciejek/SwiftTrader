@@ -64,6 +64,12 @@ final class ChartViewModel {
 
     var onStateChanged: (() -> Void)?
 
+    /// Bounded retry caps. Past these the user sees an "exhausted" banner with
+    /// Retry / Force-reconnect buttons instead of more silent retries.
+    private static let maxInstrumentAttempts = 5
+    private static let maxHistoryAttempts = 6
+    private static let maxWebSocketAttempts = 6
+
     static let availablePeriods: [(value: String, label: String)] = [
         ("ONE_SEC", "1s"),
         ("TEN_SECS", "10s"),
@@ -139,18 +145,39 @@ final class ChartViewModel {
             loadingStatus = .connecting()
         }
 
-        while !Task.isCancelled {
-            if let instruments = try? await coordinator.fetchInstruments(), !instruments.isEmpty {
-                availableInstruments = instruments
-                // Re-add currentInstrument if it's not in the server's list (e.g.
-                // restored from saved state with an instrument the server doesn't
-                // subscribe to for live data, but can still serve history for).
-                if !availableInstruments.contains(currentInstrument) {
-                    availableInstruments.append(currentInstrument)
+        var instrumentAttempt = 1
+        var instrumentLastError: String?
+        var fetchedInstruments: [String]?
+        while !Task.isCancelled, instrumentAttempt <= Self.maxInstrumentAttempts {
+            do {
+                let instruments = try await coordinator.fetchInstruments()
+                if !instruments.isEmpty {
+                    fetchedInstruments = instruments
+                    break
                 }
-                break
+                instrumentLastError = "Server returned no instruments."
+            } catch is CancellationError {
+                return
+            } catch {
+                instrumentLastError = error.localizedDescription
             }
-            try? await Task.sleep(for: .seconds(2))
+            instrumentAttempt += 1
+            if instrumentAttempt <= Self.maxInstrumentAttempts {
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+        if Task.isCancelled { return }
+        if let instruments = fetchedInstruments {
+            availableInstruments = instruments
+            // Re-add currentInstrument if it's not in the server's list (e.g.
+            // restored from saved state with an instrument the server doesn't
+            // subscribe to for live data, but can still serve history for).
+            if !availableInstruments.contains(currentInstrument) {
+                availableInstruments.append(currentInstrument)
+            }
+        } else {
+            loadingStatus = .exhausted(.serverUnreachable, lastError: instrumentLastError)
+            return
         }
 
         // Load history first so the REST call isn't starved by WebSocket
@@ -187,6 +214,37 @@ final class ChartViewModel {
     func applyRebucketingChange() {
         clientSideRebucketing = AppSettings.shared.clientSideRebucketing
         reloadChart()
+    }
+
+    /// Called from the exhausted-banner "Retry" button. Clears the exhausted
+    /// status and re-enters the full reload pipeline (history + WS).
+    func retryFromExhausted() {
+        loadingStatus = nil
+        error = nil
+        hasStarted = false
+        startAsync()
+    }
+
+    /// Called from the exhausted-banner "Force reconnect" button. Asks the
+    /// server to drop and re-establish its Dukascopy session, then reloads.
+    func forceReconnectAndRetry() {
+        loadingStatus = .reconnectingServer()
+        error = nil
+        Task {
+            do {
+                try await coordinator.forceReconnect()
+            } catch {
+                self.error = "Force reconnect: \(error.localizedDescription)"
+                loadingStatus = .exhausted(.serverUnreachable, lastError: error.localizedDescription)
+                return
+            }
+            // Give the server a moment to flip back to CONNECTING after
+            // forceReconnect() returns. The new connect cycle starts on a
+            // 10s scheduled task on the server side.
+            try? await Task.sleep(for: .seconds(2))
+            hasStarted = false
+            startAsync()
+        }
     }
 
     func refreshCache() {
@@ -245,7 +303,10 @@ final class ChartViewModel {
         }
     }
 
-    /// Load history, retrying until we get non-empty bars or the instrument/period changes.
+    /// Load history, retrying up to `maxHistoryAttempts` times. Surfaces an
+    /// `.exhausted` status afterwards so the user can choose to retry or
+    /// force-reconnect the server. Non-retryable errors (e.g. 4xx) break the
+    /// loop on the first attempt — no point in retrying a bad request.
     private func loadHistoryWithRetry() async {
         let instrument = currentInstrument
         let period = currentPeriod
@@ -257,8 +318,10 @@ final class ChartViewModel {
 
         var attempt = 1
         var lastError: String?
-        defer { if !Task.isCancelled { loadingStatus = nil } }
-        while !Task.isCancelled {
+        var serverHintMs: Int?
+        var nonRetryable = false
+        // Clear loadingStatus only on success; exhaustion overwrites it explicitly.
+        while !Task.isCancelled, attempt <= Self.maxHistoryAttempts, !nonRetryable {
             guard instrument == currentInstrument, period == currentPeriod else { return }
             loadingStatus = .loadingHistory(
                 attempt: attempt, period: period, rebucketing: rebucketing,
@@ -275,22 +338,43 @@ final class ChartViewModel {
                 if !history.isEmpty {
                     bars = history
                     error = nil
+                    loadingStatus = nil
                     scrollToEnd()
                     return
                 }
                 lastError = "Server returned no bars."
+                serverHintMs = nil
             } catch is CancellationError {
                 return
             } catch let e {
                 lastError = e.localizedDescription
                 error = "History: \(e.localizedDescription)"
+                if let api = e as? ForexAPIService.APIError {
+                    serverHintMs = api.retryAfterMs
+                    if !api.isRetryable { nonRetryable = true }
+                } else {
+                    serverHintMs = nil
+                }
             }
             attempt += 1
-            // Exponential backoff capped at 30s. A persistent server-side error
-            // (e.g., the JForex feed wedging) shouldn't produce 1000+ retries/hour.
-            let backoffSeconds = min(30, 3 * (1 << min(attempt - 1, 4)))
-            try? await Task.sleep(for: .seconds(backoffSeconds))
+            if attempt <= Self.maxHistoryAttempts && !nonRetryable {
+                let backoffSeconds: Int
+                if let hint = serverHintMs {
+                    backoffSeconds = min(60, max(1, hint / 1_000))
+                } else {
+                    backoffSeconds = min(30, 3 * (1 << min(attempt - 1, 4)))
+                }
+                try? await Task.sleep(for: .seconds(backoffSeconds))
+            }
         }
+        if Task.isCancelled { return }
+        if !bars.isEmpty {
+            // Warm cache already painted — exhaustion shouldn't blank it. Surface
+            // via the inline error string only.
+            loadingStatus = nil
+            return
+        }
+        loadingStatus = .exhausted(.historyUnavailable, lastError: lastError)
     }
 
     /// Load history once (used by reloadChart where the server/data is already known to be available).
@@ -388,22 +472,46 @@ final class ChartViewModel {
         let period = currentPeriod
         let rebucketing = clientSideRebucketing
         wsTask = Task {
-            while !Task.isCancelled {
+            var attempt = 1
+            var lastError: String?
+            while !Task.isCancelled, attempt <= Self.maxWebSocketAttempts {
                 do {
                     for try await bar in coordinator.streamCandles(
                         instrument: instrument, period: period, rebucketing: rebucketing
                     ) {
                         if !isConnected { isConnected = true }
+                        // Reset retry budget once we've successfully received bars —
+                        // future drops should get the full retry window again.
+                        attempt = 1
+                        lastError = nil
                         handleBar(bar, expectedInstrument: instrument, expectedPeriod: period)
                     }
+                    // Stream ended cleanly without an error — treat as a transient
+                    // disconnect and try to reconnect within the same retry budget.
                 } catch is CancellationError {
                     break
                 } catch {
                     isConnected = false
-                    try? await Task.sleep(for: .seconds(3))
+                    lastError = error.localizedDescription
+                }
+                attempt += 1
+                if attempt <= Self.maxWebSocketAttempts {
+                    let backoffSeconds = min(30, 3 * (1 << min(attempt - 1, 4)))
+                    try? await Task.sleep(for: .seconds(backoffSeconds))
                 }
             }
             isConnected = false
+            if Task.isCancelled { return }
+            // Exhausted: if we never got bars at all, surface the full-overlay
+            // exhausted state. If bars are already loaded, keep the chart and
+            // surface the failure via the inline `error` string per the user's
+            // chosen UX so they don't lose visual context.
+            if bars.isEmpty {
+                loadingStatus = .exhausted(.liveFeedDisconnected, lastError: lastError)
+            } else {
+                let suffix = lastError.map { ": \($0)" } ?? ""
+                error = "Live feed disconnected after \(Self.maxWebSocketAttempts) attempts. Click Retry or Force reconnect\(suffix)"
+            }
         }
     }
 

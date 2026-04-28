@@ -134,6 +134,10 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
         try await apiService.clearCache(instrument: instrument)
     }
 
+    func forceReconnect() async throws {
+        try await apiService.forceReconnect()
+    }
+
     // MARK: - Aggregation helpers
 
     private func fetchAggregated(

@@ -596,7 +596,11 @@ struct ContentView: View {
         )
         .overlay {
             if let status = vm.loadingStatus, vm.bars.isEmpty {
-                ChartLoadingCard(status: status)
+                ChartLoadingCard(
+                    status: status,
+                    onRetry: { vm.retryFromExhausted() },
+                    onForceReconnect: { vm.forceReconnectAndRetry() }
+                )
             } else if let status = vm.loadingStatus, case .loadingEarlier = status.stage {
                 ChartLoadingCard(status: status)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

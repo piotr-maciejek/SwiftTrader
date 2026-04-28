@@ -8,6 +8,7 @@ protocol MarketDataProviding: Sendable {
     func cacheBar(_ bar: CandleBar, instrument: String, period: String, rebucketing: Bool) async
     func streamCandles(instrument: String, period: String, rebucketing: Bool) -> AsyncThrowingStream<CandleBar, Error>
     func clearServerCache(instrument: String) async throws -> Int
+    func forceReconnect() async throws
 }
 
 extension MarketDataProviding {

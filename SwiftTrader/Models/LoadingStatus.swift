@@ -5,6 +5,14 @@ enum LoadingStage: Equatable {
     case loadingHistory(attempt: Int)
     case loadingEarlier
     case refreshing
+    case reconnectingServer
+    case exhausted(reason: ExhaustionReason)
+}
+
+enum ExhaustionReason: Equatable {
+    case serverUnreachable
+    case historyUnavailable
+    case liveFeedDisconnected
 }
 
 struct LoadingStatus: Equatable {
@@ -36,6 +44,33 @@ struct LoadingStatus: Equatable {
         LoadingStatus(
             stage: .refreshing, message: "Refreshing cache…",
             detail: "Clearing server-side CDN cache and reloading.", lastError: nil
+        )
+    }
+
+    static func reconnectingServer() -> LoadingStatus {
+        LoadingStatus(
+            stage: .reconnectingServer,
+            message: "Reconnecting server…",
+            detail: "Asking jforex-server to drop its Dukascopy session and reconnect.",
+            lastError: nil
+        )
+    }
+
+    static func exhausted(_ reason: ExhaustionReason, lastError: String?) -> LoadingStatus {
+        let (message, detail): (String, String) = switch reason {
+        case .serverUnreachable:
+            ("Can't reach jforex-server",
+             "Tried 5 times. Is the server running on this port?")
+        case .historyUnavailable:
+            ("History unavailable",
+             "The server is up but isn't returning bars. It may need a force reconnect.")
+        case .liveFeedDisconnected:
+            ("Live feed disconnected",
+             "Lost the WebSocket and couldn't recover. Force reconnect or retry.")
+        }
+        return LoadingStatus(
+            stage: .exhausted(reason: reason),
+            message: message, detail: detail, lastError: lastError
         )
     }
 

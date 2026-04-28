@@ -33,11 +33,7 @@ actor ForexAPIService {
         components.queryItems = queryItems
 
         let (data, response) = try await historySession.data(from: components.url!)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
-
+        try Self.checkSuccess(response: response, body: data)
         return try JSONDecoder().decode([CandleBar].self, from: data)
     }
 
@@ -47,9 +43,7 @@ actor ForexAPIService {
         var request = URLRequest(url: components.url!)
         request.httpMethod = "DELETE"
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
+        try Self.checkSuccess(response: response, body: data)
         struct Resp: Decodable { let filesDeleted: Int }
         return (try? JSONDecoder().decode(Resp.self, from: data).filesDeleted) ?? 0
     }
@@ -57,24 +51,65 @@ actor ForexAPIService {
     func fetchInstruments() async throws -> [String] {
         let url = baseURL.appendingPathComponent("/api/v1/instruments")
         let (data, response) = try await URLSession.shared.data(from: url)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
+        try Self.checkSuccess(response: response, body: data)
         return try JSONDecoder().decode([String].self, from: data)
     }
 
+    func forceReconnect() async throws {
+        let url = baseURL.appendingPathComponent("/api/v1/admin/force-reconnect")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try Self.checkSuccess(response: response, body: data)
+    }
+
+    /// Throws `APIError.serverError` for any non-2xx response. Parses `Retry-After`
+    /// header (seconds) and JSON body's `retryAfterMs` (preferring header), clamped
+    /// to [1s, 60s].
+    private static func checkSuccess(response: URLResponse, body: Data) throws {
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.serverError(statusCode: -1, retryAfterMs: nil)
+        }
+        guard !(200..<300).contains(http.statusCode) else { return }
+        let retryAfterMs = parseRetryAfter(headers: http.allHeaderFields, body: body)
+        throw APIError.serverError(statusCode: http.statusCode, retryAfterMs: retryAfterMs)
+    }
+
+    private static func parseRetryAfter(headers: [AnyHashable: Any], body: Data) -> Int? {
+        let raw: Int?
+        if let header = headers["Retry-After"] as? String, let seconds = Int(header) {
+            raw = seconds * 1_000
+        } else if let parsed = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  let ms = parsed["retryAfterMs"] as? Int {
+            raw = ms
+        } else {
+            raw = nil
+        }
+        return raw.map { min(60_000, max(1_000, $0)) }
+    }
+
     enum APIError: Error, LocalizedError {
-        case serverError(statusCode: Int)
+        case serverError(statusCode: Int, retryAfterMs: Int?)
+
+        var statusCode: Int {
+            if case .serverError(let code, _) = self { return code }
+            return -1
+        }
+
+        var retryAfterMs: Int? {
+            if case .serverError(_, let ms) = self { return ms }
+            return nil
+        }
 
         var errorDescription: String? {
             switch self {
-            case .serverError(let code): return "Server error (HTTP \(code))"
+            case .serverError(let code, _): return "Server error (HTTP \(code))"
             }
         }
 
         var isRetryable: Bool {
             switch self {
-            case .serverError(let code): return code >= 500 || code == -1
+            case .serverError(let code, _): return code >= 500 || code == -1
             }
         }
     }

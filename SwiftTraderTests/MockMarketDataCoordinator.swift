@@ -40,4 +40,11 @@ final class MockMarketDataCoordinator: MarketDataProviding, @unchecked Sendable 
     }
 
     func clearServerCache(instrument: String) async throws -> Int { 0 }
+
+    var forceReconnectCalled = false
+    var forceReconnectResult: Result<Void, Error> = .success(())
+    func forceReconnect() async throws {
+        forceReconnectCalled = true
+        try forceReconnectResult.get()
+    }
 }
