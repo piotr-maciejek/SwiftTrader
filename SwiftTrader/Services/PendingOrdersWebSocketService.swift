@@ -8,6 +8,8 @@ final class PendingOrdersWebSocketService: Sendable {
     }
 
     func snapshots() -> AsyncThrowingStream<PendingOrdersSnapshot, Error> {
-        WebSocketStreamDriver.stream(url: url, bufferingPolicy: .bufferingNewest(1))
+        // Pending-order changes are user-driven and can be silent for long stretches —
+        // disable the data-staleness watchdog; pings still kill a dead peer.
+        WebSocketStreamDriver.stream(url: url, bufferingPolicy: .bufferingNewest(1), stalenessTimeout: nil)
     }
 }

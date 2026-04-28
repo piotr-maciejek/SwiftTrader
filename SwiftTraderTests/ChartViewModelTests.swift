@@ -38,15 +38,18 @@ struct ChartViewModelTests {
         #expect(vm.bars[1].time == 2000)
     }
 
-    @Test("Partial bar appends to empty bars array")
-    func handleBarPartialAppendsToEmpty() {
+    @Test("Partial bar dropped when bars is empty (history not loaded yet)")
+    func handleBarPartialDroppedWhenEmpty() {
+        // Showing a single live candle with no historical context is misleading,
+        // and dismisses the ChartLoadingCard overlay (gated on bars.isEmpty).
+        // Partials are only meaningful as the right edge of a populated chart.
         let mock = MockMarketDataCoordinator()
         let vm = ChartViewModel(coordinator: mock)
 
         vm.handleBar(makeBar(time: 1000, partial: true),
                      expectedInstrument: "EURUSD", expectedPeriod: "FIFTEEN_MINS")
 
-        #expect(vm.bars.count == 1)
+        #expect(vm.bars.isEmpty)
     }
 
     // MARK: - handleBar: completed bars

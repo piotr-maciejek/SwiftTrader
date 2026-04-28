@@ -14,6 +14,8 @@ final class NewsCoordinator: Sendable {
         // an upsert to the shared client-side table — dropping any would lose an event forever.
         // Unbounded is safe because throughput is bounded by human news cadence.
         let url = URL(string: "ws://\(host):\(port)/ws/news")!
-        return WebSocketStreamDriver.stream(url: url, bufferingPolicy: .unbounded)
+        // News cadence is human-driven and bursty — disable the data-staleness watchdog;
+        // pings still kill the stream if the peer goes dead.
+        return WebSocketStreamDriver.stream(url: url, bufferingPolicy: .unbounded, stalenessTimeout: nil)
     }
 }

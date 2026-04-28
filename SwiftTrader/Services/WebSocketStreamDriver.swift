@@ -4,10 +4,14 @@ import Foundation
 ///
 /// Responsibilities:
 /// - Connect, receive messages, JSON-decode each frame into `T`, yield to the continuation.
-/// - Send periodic client-side pings so the server notices a dead peer promptly.
-/// - Run a watchdog that fails the stream with `WebSocketStreamError.stale` when no server
-///   activity has been observed for `stalenessTimeout` — protects against paths that silently
-///   black-hole packets where `receive()` would otherwise hang forever.
+/// - Send periodic client-side pings as a liveness probe — a ping that errors fails the stream.
+/// - Run a watchdog that fails the stream with `WebSocketStreamError.stale` when no *data*
+///   frame has arrived for `stalenessTimeout`. Pings deliberately do NOT count as activity:
+///   a server that ack's pings while silently dropping the data subscription would otherwise
+///   leave `receive()` parked forever and the chart frozen.
+///
+/// Pass `stalenessTimeout: nil` for streams whose data cadence is genuinely sparse (news,
+/// pending orders) — pings still detect a dead peer.
 ///
 /// Caller picks `bufferingPolicy` based on how it consumes the stream:
 /// - Positions: `.bufferingNewest(1)` — only the latest snapshot matters; drop stale ones.
@@ -19,18 +23,18 @@ enum WebSocketStreamDriver {
         url: URL,
         bufferingPolicy: AsyncThrowingStream<T, Error>.Continuation.BufferingPolicy,
         pingInterval: Duration = .seconds(30),
-        stalenessTimeout: Duration = .seconds(90)
+        stalenessTimeout: Duration? = .seconds(90)
     ) -> AsyncThrowingStream<T, Error> {
         AsyncThrowingStream(bufferingPolicy: bufferingPolicy) { continuation in
             let task = URLSession.shared.webSocketTask(with: url)
-            let activity = LastActivity()
+            let dataActivity = LastActivity()
 
             continuation.onTermination = { _ in
                 task.cancel(with: .goingAway, reason: nil)
             }
 
             task.resume()
-            activity.touch()
+            dataActivity.touch()
 
             let pingTask = Task {
                 while !Task.isCancelled {
@@ -39,37 +43,40 @@ enum WebSocketStreamDriver {
                     task.sendPing { error in
                         if let error {
                             continuation.finish(throwing: error)
-                        } else {
-                            activity.touch()
                         }
                     }
                 }
             }
 
-            let watchdog = Task {
-                // Poll every 5s rather than sleeping the full timeout — keeps shutdown snappy
-                // and lets us surface a precise elapsed-seconds number in the error.
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(5))
-                    if Task.isCancelled { break }
-                    let silent = activity.elapsedSeconds
-                    let timeoutSeconds = Int(stalenessTimeout.components.seconds)
-                    if silent >= timeoutSeconds {
-                        continuation.finish(throwing: WebSocketStreamError.stale(secondsSilent: silent))
-                        return
+            let watchdog: Task<Void, Never>?
+            if let timeout = stalenessTimeout {
+                watchdog = Task {
+                    // Poll every 5s rather than sleeping the full timeout — keeps shutdown snappy
+                    // and lets us surface a precise elapsed-seconds number in the error.
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(5))
+                        if Task.isCancelled { break }
+                        let silent = dataActivity.elapsedSeconds
+                        let timeoutSeconds = Int(timeout.components.seconds)
+                        if silent >= timeoutSeconds {
+                            continuation.finish(throwing: WebSocketStreamError.stale(secondsSilent: silent))
+                            return
+                        }
                     }
                 }
+            } else {
+                watchdog = nil
             }
 
             Task {
                 defer {
                     pingTask.cancel()
-                    watchdog.cancel()
+                    watchdog?.cancel()
                 }
                 do {
                     while !Task.isCancelled {
                         let message = try await task.receive()
-                        activity.touch()
+                        dataActivity.touch()
                         let payload: Data? = switch message {
                         case .string(let text): text.data(using: .utf8)
                         case .data(let data): data

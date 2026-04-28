@@ -158,6 +158,10 @@ final class ChartViewModel {
         // loadHistoryWithRetry so a stale REST snapshot can't overwrite a fresher
         // WS-pushed completed bar via timestamp-keyed merge.
         await loadHistoryWithRetry()
+        // loadHistoryWithRetry returns on Task.isCancelled too — without this guard
+        // a switchInstrument/switchPeriod that fires mid-retry would let this OLD
+        // task spawn a wsTask using the NEW currentPeriod, racing the new reloadTask.
+        if Task.isCancelled { return }
         loadATR()
         connectWebSocket()
     }
@@ -233,6 +237,9 @@ final class ChartViewModel {
                 scrollToEnd()
             }
             await loadHistoryWithRetry()
+            // See start(): guard against a cancelled-but-still-executing outer Task
+            // racing the new reloadTask's WebSocket subscription.
+            if Task.isCancelled { return }
             loadATR()
             connectWebSocket()
         }
@@ -279,7 +286,10 @@ final class ChartViewModel {
                 error = "History: \(e.localizedDescription)"
             }
             attempt += 1
-            try? await Task.sleep(for: .seconds(3))
+            // Exponential backoff capped at 30s. A persistent server-side error
+            // (e.g., the JForex feed wedging) shouldn't produce 1000+ retries/hour.
+            let backoffSeconds = min(30, 3 * (1 << min(attempt - 1, 4)))
+            try? await Task.sleep(for: .seconds(backoffSeconds))
         }
     }
 
@@ -401,10 +411,15 @@ final class ChartViewModel {
         // Discard bars from a stale WebSocket that hasn't been cancelled yet
         guard expectedInstrument == currentInstrument, expectedPeriod == currentPeriod else { return }
         if bar.partial {
+            // Drop a forming bar when no history is loaded yet — a chart showing a
+            // single live candle and nothing else is misleading. The ChartLoadingCard
+            // overlay is bound to bars.isEmpty, so accepting the partial here would
+            // also dismiss the overlay prematurely.
+            guard !bars.isEmpty else { return }
             // Update the last bar if it has the same timestamp, otherwise append
             if let lastIndex = bars.indices.last, bars[lastIndex].time == bar.time {
                 bars[lastIndex] = bar
-            } else if bars.isEmpty || bar.time > bars[bars.count - 1].time {
+            } else if bar.time > bars[bars.count - 1].time {
                 bars.append(bar)
                 if autoScroll { advanceByOneCandle() }
             }
