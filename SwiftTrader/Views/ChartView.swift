@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct ChartView: View {
+    /// Darker background used behind the main chart and non-inverse correlation cells.
+    /// Inverse correlation cells keep their distinct purple-tint marker.
+    static let chartBackground = Color(red: 0.08, green: 0.08, blue: 0.10)
+
     let bars: [CandleBar]
     @Binding var transform: ChartTransform
     var onChartWidthChanged: ((CGFloat) -> Void)?

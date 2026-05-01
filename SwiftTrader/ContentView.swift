@@ -604,6 +604,7 @@ struct ContentView: View {
             accountEquity: workspace.trading.account?.equity,
             isSubmittingOrder: workspace.trading.isSubmitting
         )
+        .background(ChartView.chartBackground)
         .overlay {
             if let status = vm.loadingStatus, vm.bars.isEmpty {
                 ChartLoadingCard(

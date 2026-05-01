@@ -109,7 +109,7 @@ struct CorrelationView: View {
         }
         .background(inverse
             ? Color(red: 0.15, green: 0.15, blue: 0.25)
-            : Color(nsColor: .controlBackgroundColor)
+            : ChartView.chartBackground
         )
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.primary.opacity(0.12)))
