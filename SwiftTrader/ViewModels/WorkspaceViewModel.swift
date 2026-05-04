@@ -24,6 +24,10 @@ final class WorkspaceViewModel {
     var newsItems: [NewsItem] = []
     private let diskCache = DiskCandleCache()
     private let candleCache: CandleCache
+    /// Shared by every ChartViewModel (regular tabs + correlation cells). One
+    /// URLSession + connection pool instead of N + 6M, so a startup fan-out
+    /// doesn't fragment HTTP traffic into separate per-tab pools.
+    private var marketData: MarketDataCoordinator
     private var newsCoordinator: NewsCoordinator
     private var newsTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
@@ -45,6 +49,7 @@ final class WorkspaceViewModel {
 
     init() {
         candleCache = CandleCache(diskCache: diskCache)
+        marketData = MarketDataCoordinator(port: settings.port, cache: candleCache)
         trading = TradingViewModel(coordinator: TradingCoordinator(port: settings.port))
         tradeHistory = TradeHistoryViewModel(
             service: TradeHistoryService(
@@ -106,7 +111,7 @@ final class WorkspaceViewModel {
 
     /// Creates a default tab without starting tasks (used by init to avoid orphaned tasks).
     private func addTabWithoutStarting() {
-        let vm = ChartViewModel(coordinator: MarketDataCoordinator(port: settings.port, cache: candleCache))
+        let vm = ChartViewModel(coordinator: marketData)
         wireStateChanged(vm)
         let tab = Tab(content: .chart(vm))
         tabs.append(tab)
@@ -114,7 +119,7 @@ final class WorkspaceViewModel {
     }
 
     func addTab() {
-        let vm = ChartViewModel(coordinator: MarketDataCoordinator(port: settings.port, cache: candleCache))
+        let vm = ChartViewModel(coordinator: marketData)
         wireStateChanged(vm)
         if let current = selectedTab {
             switch current.content {
@@ -151,7 +156,7 @@ final class WorkspaceViewModel {
             period = "ONE_MIN"
         }
 
-        let vm = ChartViewModel(coordinator: MarketDataCoordinator(port: settings.port, cache: candleCache))
+        let vm = ChartViewModel(coordinator: marketData)
         wireStateChanged(vm)
         vm.currentInstrument = instrument
         vm.currentPeriod = period
@@ -185,8 +190,7 @@ final class WorkspaceViewModel {
         let vm = CorrelationViewModel(
             currency: currency,
             period: period,
-            port: settings.port,
-            cache: candleCache
+            coordinator: marketData
         )
         wireStateChanged(vm)
         let tab = Tab(content: .correlation(vm))
@@ -207,10 +211,14 @@ final class WorkspaceViewModel {
     }
 
     func reconnectAll(port: Int) {
+        // Build one fresh MarketDataCoordinator for the new port and broadcast it.
+        // All tabs swap to it atomically — no stale per-tab coordinators clinging
+        // to the old endpoint, and they all share one URLSession again.
+        marketData = MarketDataCoordinator(port: port, cache: candleCache)
         for tab in tabs {
             switch tab.content {
-            case .chart(let vm): vm.reconnect(port: port)
-            case .correlation(let vm): vm.reconnect(port: port)
+            case .chart(let vm): vm.reconnect(coordinator: marketData)
+            case .correlation(let vm): vm.reconnect(coordinator: marketData)
             }
         }
         trading.reconnect(port: port)
@@ -395,9 +403,7 @@ final class WorkspaceViewModel {
         for tabState in state.tabs {
             switch tabState.content {
             case .chart(let chartState):
-                let vm = ChartViewModel(
-                    coordinator: MarketDataCoordinator(port: settings.port, cache: candleCache)
-                )
+                let vm = ChartViewModel(coordinator: marketData)
                 vm.currentInstrument = chartState.instrument
                 vm.currentPeriod = chartState.period
                 vm.showSessions = chartState.showSessions
@@ -415,8 +421,7 @@ final class WorkspaceViewModel {
                 let vm = CorrelationViewModel(
                     currency: corrState.currency,
                     period: corrState.period,
-                    port: settings.port,
-                    cache: candleCache
+                    coordinator: marketData
                 )
                 vm.showSessions = corrState.showSessions
                 vm.showVolume = corrState.showVolume

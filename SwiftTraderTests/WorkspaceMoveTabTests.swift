@@ -11,7 +11,7 @@ struct WorkspaceMoveTabTests {
     }
 
     private func makeCorrelationTab() -> WorkspaceViewModel.Tab {
-        let vm = CorrelationViewModel(currency: "USD", period: "FIFTEEN_MINS", port: 8080, cache: CandleCache())
+        let vm = CorrelationViewModel(currency: "USD", period: "FIFTEEN_MINS", coordinator: MockMarketDataCoordinator())
         return WorkspaceViewModel.Tab(content: .correlation(vm))
     }
 

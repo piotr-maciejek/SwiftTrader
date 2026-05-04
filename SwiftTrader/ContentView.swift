@@ -3,6 +3,12 @@ import SwiftUI
 struct ContentView: View {
     @State private var workspace = WorkspaceViewModel()
     @State private var auth = AuthViewModel(port: AppSettings.shared.port)
+
+    private var isAuthReady: Bool {
+        if case .ready = auth.phase { return true }
+        return false
+    }
+
     @State private var showEMAPopover = false
     @State private var showVolumeMAPopover = false
     @State private var showATRPopover = false
@@ -30,8 +36,15 @@ struct ContentView: View {
             }
         }
         .task {
-            workspace.startAll()
             await auth.start()
+        }
+        // Server returns 503 for /history until the strategy is ready, so any
+        // history fetches that fire during the auth handshake are wasted retries
+        // that count against `maxHistoryAttempts`. Defer startAll() until auth
+        // reaches .ready (works for both cold-connect and post-PIN flows).
+        // startAll() is idempotent — guarded by hasStarted internally.
+        .onChange(of: isAuthReady, initial: true) { _, ready in
+            if ready { workspace.startAll() }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             workspace.saveNow()

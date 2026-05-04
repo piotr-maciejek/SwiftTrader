@@ -58,15 +58,13 @@ final class CorrelationViewModel {
 
     var onStateChanged: (() -> Void)?
 
-    init(currency: String, period: String, port: Int, cache: CandleCache) {
+    init(currency: String, period: String, coordinator: any MarketDataProviding) {
         self.currency = currency
         self.currentPeriod = period
         let pairs = CurrencyCorrelation.pairs[currency] ?? []
         self.instruments = pairs
         self.chartViewModels = pairs.map { instrument in
-            let vm = ChartViewModel(
-                coordinator: MarketDataCoordinator(port: port, cache: cache)
-            )
+            let vm = ChartViewModel(coordinator: coordinator)
             vm.currentInstrument = instrument
             vm.currentPeriod = period
             return vm
@@ -102,9 +100,9 @@ final class CorrelationViewModel {
         }
     }
 
-    func reconnect(port: Int) {
+    func reconnect(coordinator: any MarketDataProviding) {
         for vm in chartViewModels {
-            vm.reconnect(port: port)
+            vm.reconnect(coordinator: coordinator)
         }
     }
 }

@@ -6,9 +6,16 @@ actor ForexAPIService {
     /// cold-loading chunks. Use a generous timeout so the server has time to
     /// complete the JForex `getBars()` call instead of the client retrying in a
     /// loop and never letting it finish.
-    private let historySession: URLSession = {
+    ///
+    /// Static so every `ForexAPIService` instance shares one connection pool —
+    /// `URLSessionConfiguration.default` caps `httpMaximumConnectionsPerHost` at
+    /// 6, which silently queues requests when many tabs/cells fetch at once.
+    /// Bumping to 32 lets the server's virtual-thread fetcher actually run them
+    /// concurrently.
+    private static let historySession: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 120
+        config.httpMaximumConnectionsPerHost = 32
         return URLSession(configuration: config)
     }()
 
@@ -32,7 +39,7 @@ actor ForexAPIService {
         }
         components.queryItems = queryItems
 
-        let (data, response) = try await historySession.data(from: components.url!)
+        let (data, response) = try await Self.historySession.data(from: components.url!)
         try Self.checkSuccess(response: response, body: data)
         return try JSONDecoder().decode([CandleBar].self, from: data)
     }

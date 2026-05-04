@@ -20,7 +20,7 @@ struct WorkspacePeriodCycleTests {
     private func makeWorkspaceWithCorrelationTab(period: String = "FIFTEEN_MINS")
         -> (WorkspaceViewModel, CorrelationViewModel) {
         let ws = WorkspaceViewModel()
-        let vm = CorrelationViewModel(currency: "USD", period: period, port: 8080, cache: CandleCache())
+        let vm = CorrelationViewModel(currency: "USD", period: period, coordinator: MockMarketDataCoordinator())
         let tab = WorkspaceViewModel.Tab(content: .correlation(vm))
         ws.tabs = [tab]
         ws.selectedTabID = tab.id

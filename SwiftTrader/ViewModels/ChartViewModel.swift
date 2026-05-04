@@ -98,7 +98,7 @@ final class ChartViewModel {
     private var hasStarted = false
     private var isLoadingEarlier = false
 
-    init(coordinator: any MarketDataProviding = MarketDataCoordinator()) {
+    init(coordinator: any MarketDataProviding) {
         self.coordinator = coordinator
     }
 
@@ -109,9 +109,11 @@ final class ChartViewModel {
         todayLow = low
     }
 
-    func reconnect(port: Int) {
+    /// Adopt a fresh coordinator (port change). The workspace builds one new
+    /// coordinator and broadcasts it so every tab swaps atomically.
+    func reconnect(coordinator: any MarketDataProviding) {
         stop()
-        coordinator = MarketDataCoordinator(port: port, cache: coordinator.cache)
+        self.coordinator = coordinator
         hasStarted = false
         bars = []
         transform = ChartTransform()
