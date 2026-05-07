@@ -18,4 +18,5 @@ struct Account: Codable, Equatable {
 struct TradingSnapshot: Codable {
     let positions: [Position]
     let account: Account
+    let spreads: [String: Double]?
 }

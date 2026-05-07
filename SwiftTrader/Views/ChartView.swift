@@ -33,6 +33,9 @@ struct ChartView: View {
     var onAdjustVisualOrderAmount: ((Double) -> Void)? = nil
     var onResetVisualOrderAmount: (() -> Void)? = nil
     var accountEquity: Double? = nil
+    /// Live bid-ask spread (price units) for the visual order's instrument. Padded into
+    /// the displayed risk so the % matches the realized loss after the broker takes spread.
+    var visualOrderSpread: Double = 0
     /// True while a submit is in flight — disables visual-order interactions and dims the box.
     var isSubmittingOrder: Bool = false
     @State private var crosshair: CrosshairState? = nil
@@ -984,7 +987,9 @@ struct ChartView: View {
         let amountSuffix = order.isAmountOverridden ? " (M)" : ""
         let standardLots = order.amount * 10
         let amountText = String(format: "%g lots%@", standardLots, amountSuffix)
-        let riskMoney = order.amount * abs(order.entryPrice - order.stopLoss) * 1_000_000
+        // Realized loss when SL hits ≈ chart distance + spread (open at ask, close at bid for BUY).
+        let realizedDistance = abs(order.entryPrice - order.stopLoss) + max(0, visualOrderSpread)
+        let riskMoney = order.amount * realizedDistance * 1_000_000
         var riskMoneyText = String(format: "Risk  %.0f", riskMoney)
         if let eq = accountEquity, eq > 0 {
             riskMoneyText += String(format: "  (%.1f%%)", (riskMoney / eq) * 100)

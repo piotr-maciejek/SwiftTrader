@@ -121,14 +121,37 @@ struct PositionSizingTests {
         #expect(result.lots == 0.001)
     }
 
-    @Test("Margin buffer reduces available lots by 10%")
+    @Test("Spread inflates stopDistance for risk calc")
+    func spreadInflatesStop() {
+        // 5% of 10k = 500 risk. stop=20 pips, spread=5 pips → realized=25 pips.
+        // riskLots = 500 / (0.0025 * 1_000_000) = 0.20
+        let result = PositionSizing.calculate(
+            equity: 10_000, freeMargin: 100_000, riskFraction: 0.05,
+            entryPrice: 1.1000, stopLoss: 1.0980,
+            spread: 0.0005)
+        #expect(result.lots == 0.20)
+        #expect(result.isMarginCapped == false)
+    }
+
+    @Test("Spread of zero matches no-spread call")
+    func spreadZeroIsTransparent() {
+        let withZero = PositionSizing.calculate(
+            equity: 10_000, freeMargin: 100_000, riskFraction: 0.05,
+            entryPrice: 1.1000, stopLoss: 1.0980, spread: 0)
+        let baseline = PositionSizing.calculate(
+            equity: 10_000, freeMargin: 100_000, riskFraction: 0.05,
+            entryPrice: 1.1000, stopLoss: 1.0980)
+        #expect(withZero == baseline)
+    }
+
+    @Test("Margin buffer reduces available lots by 20%")
     func marginBufferReducesLots() {
         // Without buffer: marginLots = (1000 * 30) / (1_000_000 * 1.0) = 0.03
-        // With 90% buffer: marginLots = (1000 * 0.90 * 30) / (1_000_000 * 1.0) = 0.027
+        // With 80% buffer: marginLots = (1000 * 0.80 * 30) / (1_000_000 * 1.0) = 0.024
         let result = PositionSizing.calculate(
             equity: 100_000, freeMargin: 1_000, riskFraction: 0.05,
             entryPrice: 1.0000, stopLoss: 0.9990)
-        #expect(result.lots == 0.027)
+        #expect(result.lots == 0.024)
         #expect(result.isMarginCapped == true)
 
         // Same scenario with no buffer

@@ -17,7 +17,9 @@ enum PositionSizing {
     ///   - leverage: Account leverage (default 30 for EU retail)
     ///   - minLot: Minimum tradeable lot size
     ///   - lotStep: Lot size granularity
-    ///   - marginBuffer: Fraction of free margin to use (0.90 = 10% safety cushion)
+    ///   - marginBuffer: Fraction of free margin to use (0.80 = 20% safety cushion)
+    ///   - spread: Bid-ask spread (in price units) at entry. Padded onto stopDistance for
+    ///     the risk calc because realized loss = entry-side - exit-side ≈ displayedDistance + spread.
     static func calculate(
         equity: Double,
         freeMargin: Double,
@@ -27,7 +29,8 @@ enum PositionSizing {
         leverage: Double = 30,
         minLot: Double = 0.001,
         lotStep: Double = 0.001,
-        marginBuffer: Double = 0.90
+        marginBuffer: Double = 0.80,
+        spread: Double = 0
     ) -> Result {
         let stopDistance = abs(entryPrice - stopLoss)
         guard stopDistance > 0, equity > 0, entryPrice > 0 else {
@@ -37,9 +40,11 @@ enum PositionSizing {
         // JForex amounts are in millions of base currency (0.01 = 10,000 units)
         let unitsPerLot: Double = 1_000_000
 
-        // Risk constraint: loss at SL ≤ riskFraction * equity
+        // Risk constraint: loss at SL ≤ riskFraction * equity. The realized loss for a
+        // BUY is open_ask − close_bid, so add the spread to the chart-mid-based stopDistance.
+        let realizedDistance = stopDistance + max(0, spread)
         let riskAmount = equity * riskFraction
-        let riskLots = riskAmount / (stopDistance * unitsPerLot)
+        let riskLots = riskAmount / (realizedDistance * unitsPerLot)
 
         // Margin constraint: required margin ≤ free margin (with safety buffer)
         let marginLots = (freeMargin * marginBuffer * leverage) / (unitsPerLot * entryPrice)

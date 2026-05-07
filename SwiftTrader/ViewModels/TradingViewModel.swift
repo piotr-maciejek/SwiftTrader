@@ -7,6 +7,7 @@ final class TradingViewModel {
     var positions: [Position] = []
     var pendingOrders: [PendingOrder] = []
     var account: Account?
+    var spreads: [String: Double] = [:]
     var isConnected = false
     var isSubmitting = false
     var orderError: String?
@@ -76,9 +77,10 @@ final class TradingViewModel {
         var marginCapped = false
         if let equity = account?.equity, let freeMargin = account?.freeMargin {
             let sizing = PositionSizing.calculate(
-                equity: equity, freeMargin: freeMargin, riskFraction: 0.05,
+                equity: equity, freeMargin: freeMargin, riskFraction: 0.02,
                 entryPrice: currentPrice, stopLoss: sl,
-                leverage: account?.leverage ?? 30)
+                leverage: account?.leverage ?? 30,
+                spread: spreads[instrument] ?? 0)
             initialAmount = sizing.lots
             marginCapped = sizing.isMarginCapped
         }
@@ -141,9 +143,10 @@ final class TradingViewModel {
            let freeMargin = account?.freeMargin {
             let result = PositionSizing.calculate(
                 equity: equity, freeMargin: freeMargin,
-                riskFraction: 0.05,
+                riskFraction: 0.02,
                 entryPrice: order.entryPrice, stopLoss: order.stopLoss,
-                leverage: account?.leverage ?? 30)
+                leverage: account?.leverage ?? 30,
+                spread: spreads[instrument] ?? 0)
             order.amount = result.lots
             order.isMarginCapped = result.isMarginCapped
         }
@@ -160,8 +163,31 @@ final class TradingViewModel {
 
     /// Keeps the visual-order state intact until the server confirms the fill.
     /// On failure, the user sees the error and still has the box to retry or cancel.
-    func confirmVisualOrder(instrument: String) async {
-        guard !isSubmitting, let order = visualOrders[instrument] else { return }
+    ///
+    /// `livePrice` is the latest tick for the instrument; for MARKET orders we re-size
+    /// against it just before sending so the dict's entryPrice (possibly stale from
+    /// click time) cannot poison the amount.
+    func confirmVisualOrder(instrument: String, livePrice: Double? = nil) async {
+        guard !isSubmitting, var order = visualOrders[instrument] else { return }
+
+        if order.orderType == "MARKET",
+           !order.isAmountOverridden,
+           !order.isEntryOverridden,
+           let live = livePrice,
+           let equity = account?.equity,
+           let freeMargin = account?.freeMargin {
+            order.entryPrice = live
+            let result = PositionSizing.calculate(
+                equity: equity, freeMargin: freeMargin,
+                riskFraction: 0.02,
+                entryPrice: live, stopLoss: order.stopLoss,
+                leverage: account?.leverage ?? 30,
+                spread: spreads[instrument] ?? 0)
+            order.amount = result.lots
+            order.isMarginCapped = result.isMarginCapped
+            visualOrders[instrument] = order
+        }
+
         isSubmitting = true
         defer { isSubmitting = false }
         orderError = nil
@@ -193,14 +219,26 @@ final class TradingViewModel {
         visualOrders[instrument]?.isAmountOverridden = true
     }
 
-    func updateVisualOrderSL(instrument: String, price: Double) {
-        visualOrders[instrument]?.stopLoss = price
+    /// `livePrice` keeps the dict's entryPrice in sync with the live preview before
+    /// recalc, so dragging SL relative to where the entry visually sits produces
+    /// a stopDistance that matches what the user sees.
+    func updateVisualOrderSL(instrument: String, price: Double, livePrice: Double? = nil) {
+        guard var order = visualOrders[instrument] else { return }
+        if !order.isEntryOverridden, let live = livePrice {
+            order.entryPrice = live
+        }
+        order.stopLoss = price
+        visualOrders[instrument] = order
         recalculateAmount(for: instrument)
     }
 
-    func resetVisualOrderAmount(instrument: String) {
-        guard visualOrders[instrument] != nil else { return }
-        visualOrders[instrument]?.isAmountOverridden = false
+    func resetVisualOrderAmount(instrument: String, livePrice: Double? = nil) {
+        guard var order = visualOrders[instrument] else { return }
+        if !order.isEntryOverridden, let live = livePrice {
+            order.entryPrice = live
+        }
+        order.isAmountOverridden = false
+        visualOrders[instrument] = order
         recalculateAmount(for: instrument)
     }
 
@@ -274,9 +312,10 @@ final class TradingViewModel {
               let freeMargin = account?.freeMargin else { return }
         let result = PositionSizing.calculate(
             equity: equity, freeMargin: freeMargin,
-            riskFraction: 0.05,
+            riskFraction: 0.02,
             entryPrice: order.entryPrice, stopLoss: order.stopLoss,
-            leverage: account?.leverage ?? 30)
+            leverage: account?.leverage ?? 30,
+            spread: spreads[instrument] ?? 0)
         order.amount = result.lots
         order.isMarginCapped = result.isMarginCapped
         visualOrders[instrument] = order
@@ -291,6 +330,7 @@ final class TradingViewModel {
                         if !isConnected { isConnected = true }
                         positions = snapshot.positions
                         account = snapshot.account
+                        if let s = snapshot.spreads { spreads = s }
                     }
                 } catch is CancellationError {
                     break

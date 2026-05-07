@@ -594,13 +594,13 @@ struct ContentView: View {
             },
             visualOrder: workspace.trading.visualOrderWithLivePrice(for: vm.currentInstrument, currentPrice: vm.bars.last?.close, barCount: vm.bars.count),
             onConfirmVisualOrder: {
-                Task { await workspace.trading.confirmVisualOrder(instrument: vm.currentInstrument) }
+                Task { await workspace.trading.confirmVisualOrder(instrument: vm.currentInstrument, livePrice: vm.bars.last?.close) }
             },
             onCancelVisualOrder: {
                 workspace.trading.cancelVisualOrder(instrument: vm.currentInstrument)
             },
             onUpdateVisualOrderSL: { price in
-                workspace.trading.updateVisualOrderSL(instrument: vm.currentInstrument, price: price)
+                workspace.trading.updateVisualOrderSL(instrument: vm.currentInstrument, price: price, livePrice: vm.bars.last?.close)
             },
             onUpdateVisualOrderTP: { price in
                 workspace.trading.visualOrders[vm.currentInstrument]?.takeProfit = price
@@ -612,9 +612,10 @@ struct ContentView: View {
                 workspace.trading.adjustVisualOrderAmount(instrument: vm.currentInstrument, by: delta)
             },
             onResetVisualOrderAmount: {
-                workspace.trading.resetVisualOrderAmount(instrument: vm.currentInstrument)
+                workspace.trading.resetVisualOrderAmount(instrument: vm.currentInstrument, livePrice: vm.bars.last?.close)
             },
             accountEquity: workspace.trading.account?.equity,
+            visualOrderSpread: workspace.trading.spreads[vm.currentInstrument] ?? 0,
             isSubmittingOrder: workspace.trading.isSubmitting
         )
         .background(ChartView.chartBackground)
