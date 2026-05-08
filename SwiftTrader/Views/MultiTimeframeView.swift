@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct MultiTimeframeView: View {
-    let viewModel: MultiTimeframeViewModel
+    @Bindable var viewModel: MultiTimeframeViewModel
+    @Bindable var trading: TradingViewModel
     /// Tap a cell's period link to open a regular chart tab for the same
     /// instrument on that period.
     var onCellTap: ((_ instrument: String, _ period: String) -> Void)?
@@ -27,12 +28,16 @@ struct MultiTimeframeView: View {
 
     private func cell(vm: ChartViewModel, period: String) -> some View {
         let label = ChartViewModel.availablePeriods.first { $0.value == period }?.label ?? period
+        let instrument = viewModel.instrument
+        let tradingEnabled = !trading.isSubmitting && !vm.bars.isEmpty && vm.isConnected
+            && trading.visualOrders[instrument] == nil
+
         return VStack(spacing: 0) {
             HStack(spacing: 4) {
-                Text("\(formatInstrument(viewModel.instrument)) \(label)")
+                Text("\(formatInstrument(instrument)) \(label)")
                     .font(.system(size: 11, weight: .medium))
                     .underline()
-                    .onTapGesture { onCellTap?(viewModel.instrument, period) }
+                    .onTapGesture { onCellTap?(instrument, period) }
                     .pointerStyle(.link)
 
                 if let last = vm.bars.last {
@@ -42,6 +47,30 @@ struct MultiTimeframeView: View {
                 }
 
                 Spacer()
+
+                Button("B") {
+                    trading.beginVisualOrder(direction: "BUY", instrument: instrument, bars: vm.bars)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.5))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(tradingEnabled ? Color.green : Color.gray, in: RoundedRectangle(cornerRadius: 3))
+                .disabled(!tradingEnabled)
+                .help("Buy at \(label)")
+
+                Button("S") {
+                    trading.beginVisualOrder(direction: "SELL", instrument: instrument, bars: vm.bars)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.5))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(tradingEnabled ? Color.red : Color.gray, in: RoundedRectangle(cornerRadius: 3))
+                .disabled(!tradingEnabled)
+                .help("Sell at \(label)")
 
                 Button(action: { vm.refreshCache() }) {
                     Group {
@@ -57,7 +86,7 @@ struct MultiTimeframeView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(vm.isRefreshingCache)
-                .help("Refresh cache for \(formatInstrument(viewModel.instrument)) \(label)")
+                .help("Refresh cache for \(formatInstrument(instrument)) \(label)")
 
                 Circle()
                     .fill(vm.isConnected ? .green : (vm.bars.isEmpty ? .red : .yellow))
@@ -81,10 +110,47 @@ struct MultiTimeframeView: View {
                 volumeMA: vm.volumeMA,
                 showEMA: vm.showEMA,
                 emaConfigs: vm.emaConfigs,
+                positions: trading.positions,
+                pendingOrders: trading.pendingOrders,
+                currentInstrument: instrument,
                 showATR: vm.showATR,
                 atrPeriod: vm.atrPeriod,
                 atrPips: vm.atrPips,
-                todayATRPercent: vm.todayATRPercent
+                todayATRPercent: vm.todayATRPercent,
+                onModifyPosition: { label, sl, tp in
+                    Task { await trading.modifyPosition(label: label, stopLoss: sl, takeProfit: tp) }
+                },
+                visualOrder: trading.visualOrderWithLivePrice(
+                    for: instrument,
+                    currentPrice: vm.bars.last?.close,
+                    barCount: vm.bars.count
+                ),
+                onConfirmVisualOrder: {
+                    Task { await trading.confirmVisualOrder(instrument: instrument, livePrice: vm.bars.last?.close) }
+                },
+                onCancelVisualOrder: {
+                    trading.cancelVisualOrder(instrument: instrument)
+                },
+                onUpdateVisualOrderSL: { price in
+                    trading.updateVisualOrderSL(instrument: instrument, price: price, livePrice: vm.bars.last?.close)
+                },
+                onUpdateVisualOrderTP: { price in
+                    trading.visualOrders[instrument]?.takeProfit = price
+                },
+                onUpdateVisualOrderEntry: { price in
+                    trading.updateVisualOrderEntry(instrument: instrument, price: price)
+                },
+                onAdjustVisualOrderAmount: { delta in
+                    trading.adjustVisualOrderAmount(instrument: instrument, by: delta)
+                },
+                onResetVisualOrderAmount: {
+                    trading.resetVisualOrderAmount(instrument: instrument, livePrice: vm.bars.last?.close)
+                },
+                accountEquity: trading.account?.equity,
+                visualOrderSpread: trading.spreads[instrument] ?? 0,
+                isSubmittingOrder: trading.isSubmitting,
+                externalCursorTime: viewModel.sharedCursorTime,
+                onCursorChange: { time in viewModel.sharedCursorTime = time }
             )
             .overlay {
                 if vm.bars.isEmpty {

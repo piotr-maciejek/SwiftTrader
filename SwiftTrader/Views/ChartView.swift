@@ -38,6 +38,13 @@ struct ChartView: View {
     var visualOrderSpread: Double = 0
     /// True while a submit is in flight — disables visual-order interactions and dims the box.
     var isSubmittingOrder: Bool = false
+    /// Externally-driven cursor time (UTC ms). When set and there's no local
+    /// hover, draws a ghost vertical crosshair at the bar containing that time.
+    /// Used by the multi-TF view to sync cursor across cells.
+    var externalCursorTime: Int64? = nil
+    /// Called when the local hover crosshair moves. Receives the time of the
+    /// bar under the cursor, or nil when the cursor leaves the chart.
+    var onCursorChange: ((Int64?) -> Void)? = nil
     @State private var crosshair: CrosshairState? = nil
     @State private var dragPreview: DragPreviewState? = nil
     @State private var pendingSLTPEdit: PendingChartSLTPEdit? = nil
@@ -99,6 +106,8 @@ struct ChartView: View {
                     }
                     if let ch = crosshair, !bars.isEmpty {
                         drawCrosshairLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, volumeHeight: volumeHeight, crosshair: ch)
+                    } else if let idx = ghostBarIndex(), !bars.isEmpty {
+                        drawGhostCrosshair(context: &chartContext, barIndex: idx, chartHeight: chartHeight, volumeHeight: volumeHeight)
                     }
 
                     // Price axis and time axis drawn unclipped so they render in their reserved areas
@@ -163,6 +172,13 @@ struct ChartView: View {
                 }
                 .onChange(of: chartWidth) { _, newWidth in
                     onChartWidthChanged?(newWidth)
+                }
+                .onChange(of: crosshair) { _, newCrosshair in
+                    let time: Int64? = newCrosshair.flatMap { ch in
+                        guard ch.barIndex >= 0, ch.barIndex < bars.count else { return nil }
+                        return Int64(bars[ch.barIndex].date.timeIntervalSince1970 * 1000)
+                    }
+                    onCursorChange?(time)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -552,6 +568,32 @@ struct ChartView: View {
     private func priceForY(_ y: CGFloat, chartHeight: CGFloat, priceRange: (min: Double, max: Double)) -> Double {
         let normalized = 1.0 - Double(y / chartHeight)
         return priceRange.min + normalized * (priceRange.max - priceRange.min)
+    }
+
+    /// Last bar whose start time is ≤ the external cursor time. Used to position
+    /// the synced ghost crosshair on a chart whose period differs from the
+    /// originating chart's. Returns nil if no external time is set, the local
+    /// crosshair is active, or no bars precede the cursor.
+    private func ghostBarIndex() -> Int? {
+        guard crosshair == nil, let time = externalCursorTime, !bars.isEmpty else { return nil }
+        return bars.lastIndex { Int64($0.date.timeIntervalSince1970 * 1000) <= time }
+    }
+
+    private func drawGhostCrosshair(
+        context: inout GraphicsContext,
+        barIndex: Int,
+        chartHeight: CGFloat,
+        volumeHeight: CGFloat
+    ) {
+        let snappedX = xForBar(index: barIndex)
+        var path = Path()
+        path.move(to: CGPoint(x: snappedX, y: 0))
+        path.addLine(to: CGPoint(x: snappedX, y: chartHeight + volumeHeight))
+        context.stroke(
+            path,
+            with: .color(Color.white.opacity(0.35)),
+            style: StrokeStyle(lineWidth: 0.5, dash: [3, 3])
+        )
     }
 
     private func drawCrosshairLines(

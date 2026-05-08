@@ -64,6 +64,11 @@ final class MultiTimeframeViewModel {
 
     var onStateChanged: (() -> Void)?
 
+    /// Time (UTC ms) under the user's cursor in any of the 4 cells. All other
+    /// cells render a synced ghost crosshair at the bar covering this time.
+    /// Cleared when the cursor leaves all cells.
+    var sharedCursorTime: Int64?
+
     init(instrument: String, zoom: TFZoom = .standard, coordinator: any MarketDataProviding) {
         self.instrument = instrument
         self.zoom = zoom

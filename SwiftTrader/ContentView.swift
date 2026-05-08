@@ -700,9 +700,13 @@ struct ContentView: View {
 
         Divider()
 
-        MultiTimeframeView(viewModel: vm, onCellTap: { instrument, period in
-            workspace.selectOrCreateChartTab(instrument: instrument, period: period)
-        })
+        MultiTimeframeView(
+            viewModel: vm,
+            trading: workspace.trading,
+            onCellTap: { instrument, period in
+                workspace.selectOrCreateChartTab(instrument: instrument, period: period)
+            }
+        )
     }
 
     // MARK: - Trading controls
