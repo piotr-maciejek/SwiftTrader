@@ -57,13 +57,17 @@ struct ContentView: View {
                 connectionBanner(account: account)
             }
 
-            // Tab bar
-            tabBar
+            topToolbar
 
             Divider()
 
-            // Main content: (header + chart + bottom panel) | right panel
+            // Main content: sidebar | (chart + bottom panel) | right panel
             HStack(spacing: 0) {
+                if workspace.showLeftPanel {
+                    LeftSidebar(workspace: workspace)
+                    Divider()
+                }
+
                 VStack(spacing: 0) {
                     if let tab = workspace.selectedTab {
                         switch tab.content {
@@ -143,217 +147,68 @@ struct ContentView: View {
         .font(.system(size: 10, design: .monospaced))
     }
 
-    // MARK: - Tab bar
+    // MARK: - Top toolbar
 
-    private var chartTabs: [WorkspaceViewModel.Tab] {
-        workspace.tabs.filter { if case .chart = $0.content { return true }; return false }
-    }
-
-    private var correlationTabs: [WorkspaceViewModel.Tab] {
-        workspace.tabs.filter { if case .correlation = $0.content { return true }; return false }
-    }
-
-    private func isChartTab(_ id: UUID) -> Bool {
-        workspace.tabs.first(where: { $0.id == id }).map {
-            if case .chart = $0.content { return true }; return false
-        } ?? false
-    }
-
-    // MARK: - Gesture-based tab drag state
-
-    @State private var draggedTabID: UUID?
-    @State private var dragOffset: CGFloat = 0
-    @State private var tabFrames: [UUID: CGRect] = [:]  // in row coordinate space
     @State private var showShortcuts = false
 
-    private func reorderDuringDrag(tab: WorkspaceViewModel.Tab, rowTabs: [WorkspaceViewModel.Tab]) {
-        guard let dragFrame = tabFrames[tab.id] else { return }
-        let dragCenter = dragFrame.midX + dragOffset
-
-        for other in rowTabs where other.id != tab.id {
-            guard let otherFrame = tabFrames[other.id] else { continue }
-            let otherIndex = workspace.tabs.firstIndex(where: { $0.id == other.id })!
-            let dragIndex = workspace.tabs.firstIndex(where: { $0.id == tab.id })!
-
-            // If dragging right and center passes another tab's midpoint
-            if dragIndex < otherIndex && dragCenter > otherFrame.midX {
-                workspace.moveTab(id: tab.id, beforeID: other.id)
-                // moveTab puts us before other, but we want after — so move other before us
-                workspace.moveTab(id: other.id, beforeID: tab.id)
-                return
-            }
-            // If dragging left and center passes another tab's midpoint
-            if dragIndex > otherIndex && dragCenter < otherFrame.midX {
-                workspace.moveTab(id: tab.id, beforeID: other.id)
-                return
-            }
-        }
-    }
-
-    private var tabBar: some View {
-        VStack(spacing: 0) {
-            // Row 1: chart tabs
-            HStack(spacing: 0) {
-                ForEach(chartTabs) { tab in
-                    tabButton(for: tab, coordinateSpace: "chartRow", rowTabs: chartTabs)
+    private var topToolbar: some View {
+        HStack(spacing: 0) {
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    workspace.showLeftPanel.toggle()
                 }
+            }) {
+                Image(systemName: "sidebar.leading")
+                    .font(.system(size: 13))
+                    .foregroundStyle(workspace.showLeftPanel ? .primary : .tertiary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help("Toggle Sidebar (⌥⌘1)")
 
-                // New tab button
-                Button(action: { workspace.addTab() }) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .medium))
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .help("New Tab (⌘T)")
+            Spacer()
 
-                // Sort tabs by global FX turnover (BIS Triennial Survey)
-                Button(action: {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        workspace.sortTabsByVolume()
+            Button(action: { showShortcuts = true }) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help("Keyboard Shortcuts")
+            .popover(isPresented: $showShortcuts) {
+                ShortcutsPopover()
+            }
+
+            Button(action: { workspace.showSettings = true }) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help("Settings")
+            .popover(isPresented: $workspace.showSettings) {
+                SettingsView(
+                    settings: workspace.settings,
+                    onPortChanged: { port in
+                        workspace.reconnectAll(port: port)
+                        auth.updatePort(port)
+                    },
+                    onRebucketingChanged: {
+                        workspace.applyRebucketingChange()
                     }
-                }) {
-                    Image(systemName: "arrow.up.arrow.down")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .help("Sort tabs by trading volume")
-
-                Spacer()
-
-                // Keyboard shortcuts help
-                Button(action: { showShortcuts = true }) {
-                    Image(systemName: "questionmark.circle")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .help("Keyboard Shortcuts")
-                .popover(isPresented: $showShortcuts) {
-                    ShortcutsPopover()
-                }
-
-                // Settings gear
-                Button(action: { workspace.showSettings = true }) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .help("Settings")
-                .popover(isPresented: $workspace.showSettings) {
-                    SettingsView(
-                        settings: workspace.settings,
-                        onPortChanged: { port in
-                            workspace.reconnectAll(port: port)
-                            auth.updatePort(port)
-                        },
-                        onRebucketingChanged: {
-                            workspace.applyRebucketingChange()
-                        }
-                    )
-                }
-
-                // Panel toggle buttons
-                panelToggles
+                )
             }
-            .padding(.horizontal, 4)
-            .frame(height: 32)
-            .background(.bar)
-            .coordinateSpace(name: "chartRow")
 
-            // Row 2: correlation tabs (only when present)
-            if !correlationTabs.isEmpty {
-                Divider()
-                HStack(spacing: 0) {
-                    ForEach(correlationTabs) { tab in
-                        tabButton(for: tab, coordinateSpace: "correlationRow", rowTabs: correlationTabs)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 4)
-                .frame(height: 32)
-                .background(.bar)
-                .coordinateSpace(name: "correlationRow")
-            }
+            panelToggles
         }
-    }
-
-    private func tabButton(for tab: WorkspaceViewModel.Tab, coordinateSpace: String,
-                           rowTabs: [WorkspaceViewModel.Tab]) -> some View {
-        let isSelected = tab.id == workspace.selectedTabID
-        let isDragged = tab.id == draggedTabID
-
-        let periodLabel = { (p: String) in
-            ChartViewModel.availablePeriods.first { $0.value == p }?.label ?? p
-        }
-        let label: String = switch tab.content {
-        case .chart(let vm): "\(formatInstrument(vm.currentInstrument)) \(periodLabel(vm.currentPeriod))"
-        case .correlation(let vm): "\(vm.currency) ⊞ \(periodLabel(vm.currentPeriod))"
-        }
-
-        return HStack(spacing: 4) {
-            Text(label)
-                .font(.system(size: 11))
-                .lineLimit(1)
-
-            if workspace.tabs.count > 1 {
-                Button(action: { workspace.closeTab(tab.id) }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 14, height: 14)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-        )
-        .contentShape(Rectangle())
-        .offset(x: isDragged ? dragOffset : 0)
-        .zIndex(isDragged ? 1 : 0)
-        .opacity(isDragged ? 0.8 : 1)
-        .background(
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear { tabFrames[tab.id] = geo.frame(in: .named(coordinateSpace)) }
-                    .onChange(of: geo.frame(in: .named(coordinateSpace))) { _, frame in
-                        if !isDragged { tabFrames[tab.id] = frame }
-                    }
-            }
-        )
-        .gesture(
-            DragGesture(minimumDistance: 5)
-                .onChanged { value in
-                    if draggedTabID == nil {
-                        draggedTabID = tab.id
-                        // Snapshot current frame before dragging changes layout
-                        tabFrames[tab.id] = tabFrames[tab.id]
-                    }
-                    dragOffset = value.translation.width
-                    reorderDuringDrag(tab: tab, rowTabs: rowTabs)
-                }
-                .onEnded { _ in
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        dragOffset = 0
-                        draggedTabID = nil
-                    }
-                }
-        )
-        .onTapGesture { workspace.selectTab(tab.id) }
+        .padding(.horizontal, 4)
+        .frame(height: 32)
+        .background(.bar)
     }
 
     // MARK: - Panel toggles

@@ -28,17 +28,7 @@ struct SwiftTraderApp: App {
                 .keyboardShortcut("w")
             }
 
-            CommandMenu("Tabs") {
-                Button("Move Tab Left") {
-                    workspace?.moveSelectedTab(offset: -1)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
-
-                Button("Move Tab Right") {
-                    workspace?.moveSelectedTab(offset: 1)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
-
+            CommandMenu("View") {
                 Button("Longer Timeframe") {
                     workspace?.cycleSelectedTabPeriod(offset: 1)
                 }
@@ -51,6 +41,13 @@ struct SwiftTraderApp: App {
             }
 
             CommandMenu("Panels") {
+                Button(workspace?.showLeftPanel == true ? "Hide Sidebar" : "Show Sidebar") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        workspace?.showLeftPanel.toggle()
+                    }
+                }
+                .keyboardShortcut("1", modifiers: [.command, .option])
+
                 Button(workspace?.showBottomPanel == true ? "Hide Bottom Panel" : "Show Bottom Panel") {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         workspace?.showBottomPanel.toggle()

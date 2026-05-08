@@ -39,7 +39,17 @@ final class WorkspaceViewModel {
     var showRightPanel = false {
         didSet { scheduleSave() }
     }
+    var showLeftPanel = true {
+        didSet { scheduleSave() }
+    }
+    var sidebarSort: SidebarSort = .volume {
+        didSet { scheduleSave() }
+    }
     var showSettings = false
+    /// Workspace-level instrument list, populated once on startAll(). Drives the
+    /// sidebar's "+ pair" picker. Per-tab ChartViewModel still keeps its own
+    /// `availableInstruments` for its picker; the two converge after first fetch.
+    var availableInstruments: [String] = []
 
     var selectedTab: Tab? {
         tabs.first { $0.id == selectedTabID }
@@ -67,20 +77,36 @@ final class WorkspaceViewModel {
     }
 
     /// Called once from ContentView's .task to start WebSocket/REST tasks.
+    /// Only starts the currently-selected tab — other restored tabs stay idle
+    /// until the user picks them. Avoids the thundering herd of N tabs all
+    /// fetching history + opening WebSockets at cold-start.
     func startAll() {
         guard !hasStarted else { return }
         hasStarted = true
         Task {
             await candleCache.hydrate()
-            for tab in tabs {
-                switch tab.content {
-                case .chart(let vm): vm.startAsync()
-                case .correlation(let vm): await vm.startAll()
-                }
+            if let tab = selectedTab {
+                startTabIfNeeded(tab)
+            }
+        }
+        Task {
+            if let instruments = try? await marketData.fetchInstruments(),
+               !instruments.isEmpty {
+                availableInstruments = instruments
             }
         }
         trading.start()
         connectNews()
+    }
+
+    /// Starts a tab's VM(s) on demand. Idempotent — safe to call repeatedly.
+    /// `ChartViewModel.start()` and child VMs in `CorrelationViewModel.startAll()`
+    /// are guarded by their own `hasStarted` flags.
+    private func startTabIfNeeded(_ tab: Tab) {
+        switch tab.content {
+        case .chart(let vm): vm.startAsync()
+        case .correlation(let vm): Task { await vm.startAll() }
+        }
     }
 
     private func connectNews() {
@@ -142,7 +168,7 @@ final class WorkspaceViewModel {
             if case .chart(let vm) = $0.content { return vm.currentInstrument == instrument }
             return false
         }) {
-            selectedTabID = existing.id
+            selectTab(existing.id)
             return
         }
 
@@ -173,7 +199,7 @@ final class WorkspaceViewModel {
             if case .correlation(let vm) = $0.content { return vm.currency == currency }
             return false
         }) {
-            selectedTabID = existing.id
+            selectTab(existing.id)
             return
         }
 
@@ -246,33 +272,32 @@ final class WorkspaceViewModel {
     func selectTab(_ id: UUID) {
         selectedTabID = id
         scheduleSave()
-    }
-
-    func moveTab(id: UUID, beforeID: UUID) {
-        guard id != beforeID,
-              let _ = tabs.firstIndex(where: { $0.id == id }),
-              let _ = tabs.firstIndex(where: { $0.id == beforeID })
-        else { return }
-        let tab = tabs.remove(at: tabs.firstIndex(where: { $0.id == id })!)
-        let insertIndex = tabs.firstIndex(where: { $0.id == beforeID }) ?? tabs.endIndex
-        tabs.insert(tab, at: insertIndex)
-        scheduleSave()
-    }
-
-    /// Sorts both tab rows left-to-right by global FX turnover (BIS 2025).
-    /// Chart tabs stay above correlation tabs; within each group, more actively
-    /// traded pairs/currencies come first. Unknown symbols fall to the end.
-    func sortTabsByVolume() {
-        tabs.sort { a, b in
-            let aChart = a.content.isChart
-            let bChart = b.content.isChart
-            if aChart != bChart { return aChart }
-            let aRank = volumeRank(for: a)
-            let bRank = volumeRank(for: b)
-            if aRank != bRank { return aRank > bRank }
-            return volumeKey(for: a) < volumeKey(for: b)
+        if let tab = tabs.first(where: { $0.id == id }) {
+            startTabIfNeeded(tab)
         }
-        scheduleSave()
+    }
+
+    /// Chart tabs ordered by the active sidebar sort mode.
+    var sortedChartTabs: [Tab] {
+        sortedTabs(tabs.filter { $0.content.isChart })
+    }
+
+    /// Correlation tabs ordered by the active sidebar sort mode.
+    var sortedCorrelationTabs: [Tab] {
+        sortedTabs(tabs.filter { !$0.content.isChart })
+    }
+
+    private func sortedTabs(_ subset: [Tab]) -> [Tab] {
+        switch sidebarSort {
+        case .volume:
+            return subset.sorted { a, b in
+                let ar = volumeRank(for: a), br = volumeRank(for: b)
+                if ar != br { return ar > br }
+                return volumeKey(for: a) < volumeKey(for: b)
+            }
+        case .alphabetical:
+            return subset.sorted { volumeKey(for: $0) < volumeKey(for: $1) }
+        }
     }
 
     private func volumeRank(for tab: Tab) -> Double {
@@ -287,32 +312,6 @@ final class WorkspaceViewModel {
         case .chart(let vm): return vm.currentInstrument
         case .correlation(let vm): return vm.currency
         }
-    }
-
-    /// Moves the currently selected tab one or more slots left/right within its
-    /// own visual row (chart tabs stay among chart tabs, correlation among
-    /// correlation). Skips over tabs of the other type in `tabs`, which may
-    /// sit between two same-type tabs. No-op if the tab is already at the edge
-    /// of its row.
-    func moveSelectedTab(offset: Int) {
-        guard offset != 0, let id = selectedTabID,
-              let fromIdx = tabs.firstIndex(where: { $0.id == id }) else { return }
-        let movingIsChart = tabs[fromIdx].content.isChart
-
-        // Indices of same-type tabs in workspace.tabs order — these form the
-        // visual row. Operate on the row, then map back to absolute indices.
-        let rowIndices = tabs.enumerated()
-            .filter { $0.element.content.isChart == movingIsChart }
-            .map { $0.offset }
-        guard let rowFrom = rowIndices.firstIndex(of: fromIdx) else { return }
-
-        let rowTo = max(0, min(rowIndices.count - 1, rowFrom + offset))
-        guard rowTo != rowFrom else { return }
-        let targetIdx = rowIndices[rowTo]
-
-        let tab = tabs.remove(at: fromIdx)
-        tabs.insert(tab, at: targetIdx)
-        scheduleSave()
     }
 
     /// Cycles the selected tab's timeframe one step in `ChartViewModel.availablePeriods`.
@@ -333,15 +332,6 @@ final class WorkspaceViewModel {
         case .chart(let vm): vm.switchPeriod(target)
         case .correlation(let vm): vm.switchPeriod(target)
         }
-    }
-
-    func moveTabToEnd(id: UUID) {
-        guard let index = tabs.firstIndex(where: { $0.id == id }),
-              index != tabs.count - 1
-        else { return }
-        let tab = tabs.remove(at: index)
-        tabs.append(tab)
-        scheduleSave()
     }
 
     // MARK: - State persistence
@@ -392,13 +382,17 @@ final class WorkspaceViewModel {
             tabs: tabStates,
             selectedTabIndex: selectedIndex,
             showBottomPanel: showBottomPanel,
-            showRightPanel: showRightPanel
+            showRightPanel: showRightPanel,
+            showLeftPanel: showLeftPanel,
+            sidebarSort: sidebarSort
         )
     }
 
     private func restoreTabs(from state: WorkspaceState, startTasks: Bool = true) {
         showBottomPanel = state.showBottomPanel
         showRightPanel = state.showRightPanel
+        showLeftPanel = state.showLeftPanel
+        sidebarSort = state.sidebarSort
 
         for tabState in state.tabs {
             switch tabState.content {

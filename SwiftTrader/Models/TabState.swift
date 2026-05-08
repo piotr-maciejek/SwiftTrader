@@ -97,9 +97,37 @@ struct TabState: Codable, Equatable, Identifiable {
     var content: TabContentState
 }
 
+enum SidebarSort: String, Codable, Equatable, CaseIterable {
+    case volume
+    case alphabetical
+}
+
 struct WorkspaceState: Codable, Equatable {
     var tabs: [TabState]
     var selectedTabIndex: Int?
     var showBottomPanel: Bool
     var showRightPanel: Bool
+    var showLeftPanel: Bool
+    var sidebarSort: SidebarSort
+
+    init(tabs: [TabState], selectedTabIndex: Int?, showBottomPanel: Bool,
+         showRightPanel: Bool, showLeftPanel: Bool = true,
+         sidebarSort: SidebarSort = .volume) {
+        self.tabs = tabs
+        self.selectedTabIndex = selectedTabIndex
+        self.showBottomPanel = showBottomPanel
+        self.showRightPanel = showRightPanel
+        self.showLeftPanel = showLeftPanel
+        self.sidebarSort = sidebarSort
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tabs = try c.decode([TabState].self, forKey: .tabs)
+        selectedTabIndex = try c.decodeIfPresent(Int.self, forKey: .selectedTabIndex)
+        showBottomPanel = try c.decode(Bool.self, forKey: .showBottomPanel)
+        showRightPanel = try c.decode(Bool.self, forKey: .showRightPanel)
+        showLeftPanel = try c.decodeIfPresent(Bool.self, forKey: .showLeftPanel) ?? true
+        sidebarSort = try c.decodeIfPresent(SidebarSort.self, forKey: .sidebarSort) ?? .volume
+    }
 }
