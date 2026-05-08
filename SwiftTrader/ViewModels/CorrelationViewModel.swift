@@ -61,7 +61,7 @@ final class CorrelationViewModel {
     init(currency: String, period: String, coordinator: any MarketDataProviding) {
         self.currency = currency
         self.currentPeriod = period
-        let pairs = CurrencyCorrelation.pairs[currency] ?? []
+        let pairs = (CurrencyCorrelation.pairs[currency] ?? []).sorted()
         self.instruments = pairs
         self.chartViewModels = pairs.map { instrument in
             let vm = ChartViewModel(coordinator: coordinator)

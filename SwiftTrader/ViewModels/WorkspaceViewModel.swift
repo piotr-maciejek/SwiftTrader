@@ -53,9 +53,6 @@ final class WorkspaceViewModel {
     var showLeftPanel = true {
         didSet { scheduleSave() }
     }
-    var sidebarSort: SidebarSort = .volume {
-        didSet { scheduleSave() }
-    }
     var showSettings = false
     /// Workspace-level instrument list, populated once on startAll(). Drives the
     /// sidebar's "+ pair" picker. Per-tab ChartViewModel still keeps its own
@@ -322,43 +319,22 @@ final class WorkspaceViewModel {
         }
     }
 
-    /// Chart tabs ordered by the active sidebar sort mode.
+    /// Chart tabs ordered alphabetically by instrument.
     var sortedChartTabs: [Tab] {
-        sortedTabs(tabs.filter { $0.content.isChart })
+        tabs.filter { $0.content.isChart }.sorted { sortKey(for: $0) < sortKey(for: $1) }
     }
 
-    /// Correlation tabs ordered by the active sidebar sort mode.
+    /// Correlation tabs ordered alphabetically by currency.
     var sortedCorrelationTabs: [Tab] {
-        sortedTabs(tabs.filter { $0.content.isCorrelation })
+        tabs.filter { $0.content.isCorrelation }.sorted { sortKey(for: $0) < sortKey(for: $1) }
     }
 
-    /// Multi-timeframe tabs ordered by the active sidebar sort mode.
+    /// Multi-timeframe tabs ordered alphabetically by instrument.
     var sortedMultiTimeframeTabs: [Tab] {
-        sortedTabs(tabs.filter { $0.content.isMultiTimeframe })
+        tabs.filter { $0.content.isMultiTimeframe }.sorted { sortKey(for: $0) < sortKey(for: $1) }
     }
 
-    private func sortedTabs(_ subset: [Tab]) -> [Tab] {
-        switch sidebarSort {
-        case .volume:
-            return subset.sorted { a, b in
-                let ar = volumeRank(for: a), br = volumeRank(for: b)
-                if ar != br { return ar > br }
-                return volumeKey(for: a) < volumeKey(for: b)
-            }
-        case .alphabetical:
-            return subset.sorted { volumeKey(for: $0) < volumeKey(for: $1) }
-        }
-    }
-
-    private func volumeRank(for tab: Tab) -> Double {
-        switch tab.content {
-        case .chart(let vm): return FXVolumeRank.rank(pair: vm.currentInstrument)
-        case .correlation(let vm): return FXVolumeRank.rank(currency: vm.currency)
-        case .multiTimeframe(let vm): return FXVolumeRank.rank(pair: vm.instrument)
-        }
-    }
-
-    private func volumeKey(for tab: Tab) -> String {
+    private func sortKey(for tab: Tab) -> String {
         switch tab.content {
         case .chart(let vm): return vm.currentInstrument
         case .correlation(let vm): return vm.currency
@@ -451,8 +427,7 @@ final class WorkspaceViewModel {
             selectedTabIndex: selectedIndex,
             showBottomPanel: showBottomPanel,
             showRightPanel: showRightPanel,
-            showLeftPanel: showLeftPanel,
-            sidebarSort: sidebarSort
+            showLeftPanel: showLeftPanel
         )
     }
 
@@ -460,7 +435,6 @@ final class WorkspaceViewModel {
         showBottomPanel = state.showBottomPanel
         showRightPanel = state.showRightPanel
         showLeftPanel = state.showLeftPanel
-        sidebarSort = state.sidebarSort
 
         for tabState in state.tabs {
             switch tabState.content {

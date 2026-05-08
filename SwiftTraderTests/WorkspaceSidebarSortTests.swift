@@ -18,37 +18,24 @@ struct WorkspaceSidebarSortTests {
         return WorkspaceViewModel.Tab(content: .correlation(vm))
     }
 
+    private func makeMultiTFTab(_ instrument: String) -> WorkspaceViewModel.Tab {
+        let vm = MultiTimeframeViewModel(instrument: instrument, zoom: .standard,
+                                         coordinator: MockMarketDataCoordinator())
+        return WorkspaceViewModel.Tab(content: .multiTimeframe(vm))
+    }
+
     private func makeWorkspace() -> WorkspaceViewModel {
         WorkspaceViewModel()
     }
 
-    @Test("Volume sort: chart tabs ordered by FX turnover product")
-    func volumeSortChartTabs() {
-        let ws = makeWorkspace()
-        ws.tabs = [
-            makeChartTab("NZDCAD"),
-            makeChartTab("EURUSD"),
-            makeChartTab("GBPJPY"),
-        ]
-        ws.sidebarSort = .volume
-
-        let order = ws.sortedChartTabs.compactMap { tab -> String? in
-            if case .chart(let vm) = tab.content { return vm.currentInstrument }
-            return nil
-        }
-        #expect(order == ["EURUSD", "GBPJPY", "NZDCAD"])
-    }
-
-    @Test("Alphabetical sort: chart tabs ordered by instrument code")
-    func alphabeticalSortChartTabs() {
+    @Test("Chart tabs sort alphabetically")
+    func chartTabsAlphabetical() {
         let ws = makeWorkspace()
         ws.tabs = [
             makeChartTab("USDJPY"),
             makeChartTab("AUDCAD"),
             makeChartTab("EURGBP"),
         ]
-        ws.sidebarSort = .alphabetical
-
         let order = ws.sortedChartTabs.compactMap { tab -> String? in
             if case .chart(let vm) = tab.content { return vm.currentInstrument }
             return nil
@@ -56,33 +43,14 @@ struct WorkspaceSidebarSortTests {
         #expect(order == ["AUDCAD", "EURGBP", "USDJPY"])
     }
 
-    @Test("Volume sort: correlation tabs ordered by currency turnover")
-    func volumeSortCorrelationTabs() {
-        let ws = makeWorkspace()
-        ws.tabs = [
-            makeCorrelationTab("NZD"),
-            makeCorrelationTab("USD"),
-            makeCorrelationTab("JPY"),
-        ]
-        ws.sidebarSort = .volume
-
-        let order = ws.sortedCorrelationTabs.compactMap { tab -> String? in
-            if case .correlation(let vm) = tab.content { return vm.currency }
-            return nil
-        }
-        #expect(order == ["USD", "JPY", "NZD"])
-    }
-
-    @Test("Alphabetical sort: correlation tabs ordered by currency code")
-    func alphabeticalSortCorrelationTabs() {
+    @Test("Correlation tabs sort alphabetically")
+    func correlationTabsAlphabetical() {
         let ws = makeWorkspace()
         ws.tabs = [
             makeCorrelationTab("USD"),
             makeCorrelationTab("AUD"),
             makeCorrelationTab("EUR"),
         ]
-        ws.sidebarSort = .alphabetical
-
         let order = ws.sortedCorrelationTabs.compactMap { tab -> String? in
             if case .correlation(let vm) = tab.content { return vm.currency }
             return nil
@@ -90,33 +58,45 @@ struct WorkspaceSidebarSortTests {
         #expect(order == ["AUD", "EUR", "USD"])
     }
 
-    @Test("Sorted views split chart and correlation tabs into separate sections")
+    @Test("Multi-TF tabs sort alphabetically by instrument")
+    func multiTFTabsAlphabetical() {
+        let ws = makeWorkspace()
+        ws.tabs = [
+            makeMultiTFTab("USDJPY"),
+            makeMultiTFTab("AUDCAD"),
+            makeMultiTFTab("EURGBP"),
+        ]
+        let order = ws.sortedMultiTimeframeTabs.compactMap { tab -> String? in
+            if case .multiTimeframe(let vm) = tab.content { return vm.instrument }
+            return nil
+        }
+        #expect(order == ["AUDCAD", "EURGBP", "USDJPY"])
+    }
+
+    @Test("Sorted views split tabs by type")
     func sortedViewsSplitByType() {
         let ws = makeWorkspace()
         ws.tabs = [
             makeChartTab("EURUSD"),
             makeCorrelationTab("USD"),
-            makeChartTab("GBPUSD"),
+            makeMultiTFTab("GBPUSD"),
+            makeChartTab("AUDUSD"),
             makeCorrelationTab("EUR"),
         ]
-        ws.sidebarSort = .volume
-
         #expect(ws.sortedChartTabs.count == 2)
         #expect(ws.sortedCorrelationTabs.count == 2)
-        for tab in ws.sortedChartTabs { #expect(tab.content.isChart) }
-        for tab in ws.sortedCorrelationTabs { #expect(!tab.content.isChart) }
+        #expect(ws.sortedMultiTimeframeTabs.count == 1)
     }
 
-    @Test("WorkspaceState round-trips sidebar fields")
-    func workspaceStateRoundTripsSidebarFields() throws {
+    @Test("WorkspaceState round-trips left-panel field")
+    func workspaceStateRoundTripsLeftPanel() throws {
         let original = WorkspaceState(
             tabs: [], selectedTabIndex: nil,
             showBottomPanel: true, showRightPanel: false,
-            showLeftPanel: false, sidebarSort: .alphabetical
+            showLeftPanel: false
         )
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(WorkspaceState.self, from: data)
         #expect(decoded.showLeftPanel == false)
-        #expect(decoded.sidebarSort == .alphabetical)
     }
 }

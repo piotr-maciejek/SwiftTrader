@@ -50,7 +50,6 @@
 		A1000029 /* VisualOrderState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002B; };
 		A100002A /* NewsItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002C; };
 		A100002B /* NewsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002D; };
-		A100002C /* FXVolumeRank.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002E; };
 		A100002D /* ShortcutsPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002F; };
 		A100002E /* PositionSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030; };
 		A100002F /* WebSocketStreamError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031; };
@@ -76,7 +75,6 @@
 		B1000012 /* BarAggregatorEndToEndTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000012; };
 		B1000013 /* TradeHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000013; };
 		B100000C /* PositionSizingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000C; };
-		B1000009 /* FXVolumeRankTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000009; };
 		B100000A /* WorkspaceSidebarSortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000A; };
 		B100000B /* WorkspacePeriodCycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000B; };
 		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001; };
@@ -148,9 +146,7 @@
 		A200002B /* VisualOrderState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualOrderState.swift; sourceTree = "<group>"; };
 		A200002C /* NewsItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsItem.swift; sourceTree = "<group>"; };
 		A200002D /* NewsCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsCoordinator.swift; sourceTree = "<group>"; };
-		A200002E /* FXVolumeRank.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXVolumeRank.swift; sourceTree = "<group>"; };
 		A200002F /* ShortcutsPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsPopover.swift; sourceTree = "<group>"; };
-		B2000009 /* FXVolumeRankTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FXVolumeRankTests.swift; sourceTree = "<group>"; };
 		B200000A /* WorkspaceSidebarSortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSidebarSortTests.swift; sourceTree = "<group>"; };
 		B200000B /* WorkspacePeriodCycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePeriodCycleTests.swift; sourceTree = "<group>"; };
 		A2000030 /* PositionSizing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionSizing.swift; sourceTree = "<group>"; };
@@ -234,7 +230,6 @@
 				A2000028 /* TradingDayATR.swift */,
 				A200002B /* VisualOrderState.swift */,
 				A200002C /* NewsItem.swift */,
-				A200002E /* FXVolumeRank.swift */,
 				A2000030 /* PositionSizing.swift */,
 				A2000031 /* WebSocketStreamError.swift */,
 				A2000036 /* LoadingStatus.swift */,
@@ -325,7 +320,6 @@
 				B2000006 /* OneClickOrderTests.swift */,
 				B2000007 /* TradingDayATRTests.swift */,
 				B2000008 /* TabStateBackwardCompatTests.swift */,
-				B2000009 /* FXVolumeRankTests.swift */,
 				B200000A /* WorkspaceSidebarSortTests.swift */,
 				B200000B /* WorkspacePeriodCycleTests.swift */,
 				B200000C /* PositionSizingTests.swift */,
@@ -453,7 +447,6 @@
 				A100002A /* NewsItem.swift in Sources */,
 				A100002B /* NewsCoordinator.swift in Sources */,
 				A100002D /* ShortcutsPopover.swift in Sources */,
-				A100002C /* FXVolumeRank.swift in Sources */,
 				A100002E /* PositionSizing.swift in Sources */,
 				A100002F /* WebSocketStreamError.swift in Sources */,
 				A1000030 /* WebSocketStreamDriver.swift in Sources */,
@@ -487,7 +480,6 @@
 				B1000006 /* OneClickOrderTests.swift in Sources */,
 				B1000007 /* TradingDayATRTests.swift in Sources */,
 				B1000008 /* TabStateBackwardCompatTests.swift in Sources */,
-				B1000009 /* FXVolumeRankTests.swift in Sources */,
 				B100000A /* WorkspaceSidebarSortTests.swift in Sources */,
 				B100000B /* WorkspacePeriodCycleTests.swift in Sources */,
 				B100000C /* PositionSizingTests.swift in Sources */,

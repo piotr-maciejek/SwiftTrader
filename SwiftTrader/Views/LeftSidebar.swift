@@ -5,39 +5,16 @@ struct LeftSidebar: View {
     @State private var hoveredKey: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            sidebarHeader
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    pairsSection
-                    multiTimeframeSection
-                    correlationsSection
-                }
-                .padding(.vertical, 4)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                pairsSection
+                multiTimeframeSection
+                correlationsSection
             }
+            .padding(.vertical, 4)
         }
         .frame(width: 220)
         .background(.bar)
-    }
-
-    // MARK: - Header
-
-    private var sidebarHeader: some View {
-        HStack(spacing: 4) {
-            Picker("", selection: $workspace.sidebarSort) {
-                Image(systemName: "chart.bar.xaxis").tag(SidebarSort.volume)
-                Image(systemName: "textformat").tag(SidebarSort.alphabetical)
-            }
-            .pickerStyle(.segmented)
-            .fixedSize()
-            .help("Sort by volume / alphabetical")
-
-            Spacer()
-        }
-        .padding(.horizontal, 8)
-        .frame(height: 28)
     }
 
     // MARK: - Pairs
@@ -71,17 +48,7 @@ struct LeftSidebar: View {
                 set.insert(vm.currentInstrument)
             }
         }
-        let all = Array(set)
-        switch workspace.sidebarSort {
-        case .volume:
-            return all.sorted { a, b in
-                let ar = FXVolumeRank.rank(pair: a), br = FXVolumeRank.rank(pair: b)
-                if ar != br { return ar > br }
-                return a < b
-            }
-        case .alphabetical:
-            return all.sorted()
-        }
+        return Array(set).sorted()
     }
 
     private func pairRow(instrument: String) -> some View {
@@ -281,17 +248,7 @@ struct LeftSidebar: View {
     }
 
     private func sortedCurrencies() -> [String] {
-        let all = Array(CurrencyCorrelation.pairs.keys)
-        switch workspace.sidebarSort {
-        case .volume:
-            return all.sorted { a, b in
-                let ar = FXVolumeRank.rank(currency: a), br = FXVolumeRank.rank(currency: b)
-                if ar != br { return ar > br }
-                return a < b
-            }
-        case .alphabetical:
-            return all.sorted()
-        }
+        Array(CurrencyCorrelation.pairs.keys).sorted()
     }
 
     private func correlationRow(currency: String) -> some View {
