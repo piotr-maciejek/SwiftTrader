@@ -8,7 +8,6 @@ struct LeftSidebar: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 pairsSection
-                multiTimeframeSection
                 correlationsSection
             }
             .padding(.vertical, 4)
@@ -63,21 +62,64 @@ struct LeftSidebar: View {
         } else {
             periodLabel = ""
         }
+        let mtfTab = multiTimeframeTab(for: instrument)
+        let mtfSelected = mtfTab?.id == workspace.selectedTabID
 
-        return rowView(
-            key: key,
-            label: formatInstrument(instrument),
-            periodLabel: periodLabel,
-            dotColor: dot,
-            opacity: tab == nil ? 0.55 : 1.0,
-            isSelected: isSelected,
-            isHovered: isHovered
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(dot)
+                .frame(width: 6, height: 6)
+
+            Text(formatInstrument(instrument))
+                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .opacity(tab == nil ? 0.55 : 1.0)
+
+            Spacer()
+
+            if !periodLabel.isEmpty {
+                Text(periodLabel)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            Button(action: {
+                workspace.selectOrCreateMultiTimeframeTab(instrument: instrument)
+            }) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 11, weight: mtfSelected ? .semibold : .regular))
+                    .foregroundStyle(mtfSelected
+                                     ? Color.accentColor
+                                     : Color.secondary.opacity(mtfTab != nil ? 1.0 : 0.45))
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help("Multi-Timeframe view for \(formatInstrument(instrument))")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isSelected
+                      ? Color.accentColor.opacity(0.18)
+                      : (isHovered ? Color.primary.opacity(0.06) : Color.clear))
+                .padding(.horizontal, 4)
         )
+        .contentShape(Rectangle())
         .onTapGesture {
             workspace.selectOrCreateChartTab(instrument: instrument)
         }
         .onHover { hovering in
             hoveredKey = hovering ? key : (hoveredKey == key ? nil : hoveredKey)
+        }
+    }
+
+    private func multiTimeframeTab(for instrument: String) -> WorkspaceViewModel.Tab? {
+        workspace.tabs.first {
+            if case .multiTimeframe(let vm) = $0.content { return vm.instrument == instrument }
+            return false
         }
     }
 
@@ -121,119 +163,6 @@ struct LeftSidebar: View {
         if anyConnected { return .green }
         if anyBars { return .yellow }
         return .secondary.opacity(0.35)
-    }
-
-    // MARK: - Multi-Timeframe (user-curated)
-
-    private var multiTimeframeSection: some View {
-        let tabs = workspace.sortedMultiTimeframeTabs
-        return Group {
-            HStack(spacing: 4) {
-                Text("Multi-Timeframe")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                Spacer()
-                addMultiTimeframeMenu
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .padding(.bottom, 2)
-
-            if tabs.isEmpty {
-                Text("None")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
-            } else {
-                ForEach(tabs) { tab in
-                    multiTimeframeRow(tab: tab)
-                }
-            }
-        }
-    }
-
-    private var addMultiTimeframeMenu: some View {
-        Menu {
-            if workspace.availableInstruments.isEmpty {
-                Text("Loading…")
-            } else {
-                ForEach(workspace.availableInstruments, id: \.self) { instrument in
-                    Button(formatInstrument(instrument)) {
-                        workspace.selectOrCreateMultiTimeframeTab(instrument: instrument)
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 18, height: 18)
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Add multi-timeframe view")
-    }
-
-    private func multiTimeframeRow(tab: WorkspaceViewModel.Tab) -> some View {
-        guard case .multiTimeframe(let vm) = tab.content else {
-            return AnyView(EmptyView())
-        }
-        let key = "mtf:\(tab.id.uuidString)"
-        let isHovered = hoveredKey == key
-        let isSelected = tab.id == workspace.selectedTabID
-        let anyConnected = vm.chartViewModels.contains { $0.isConnected }
-        let anyBars = vm.chartViewModels.contains { !$0.bars.isEmpty }
-        let dot: Color = anyConnected ? .green : (anyBars ? .yellow : .secondary.opacity(0.35))
-        let zoomLabel: String = switch vm.zoom {
-        case .standard: "D-15m"
-        case .intraday: "4H-5m"
-        }
-
-        let view = HStack(spacing: 6) {
-            Circle().fill(dot).frame(width: 6, height: 6)
-
-            Text("\(formatInstrument(vm.instrument)) ▦")
-                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            Spacer()
-
-            Text(zoomLabel)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-
-            if isHovered, workspace.tabs.count > 1 {
-                Button(action: { workspace.closeTab(tab.id) }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 14, height: 14)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(isSelected
-                      ? Color.accentColor.opacity(0.18)
-                      : (isHovered ? Color.primary.opacity(0.06) : Color.clear))
-                .padding(.horizontal, 4)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture { workspace.selectTab(tab.id) }
-        .onHover { hovering in
-            hoveredKey = hovering ? key : (hoveredKey == key ? nil : hoveredKey)
-        }
-
-        return AnyView(view)
     }
 
     // MARK: - Correlations
