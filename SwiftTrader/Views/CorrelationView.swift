@@ -3,6 +3,7 @@ import SwiftUI
 struct CorrelationView: View {
     let viewModel: CorrelationViewModel
     var onInstrumentTap: ((String) -> Void)?
+    var onMultiTimeframeTap: ((String) -> Void)?
 
     private let columns = 3
     private let rows = 2
@@ -38,6 +39,16 @@ struct CorrelationView: View {
                     .underline()
                     .onTapGesture { onInstrumentTap?(instrument) }
                     .pointerStyle(.link)
+
+                Button(action: { onMultiTimeframeTap?(instrument) }) {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Multi-Timeframe view")
 
                 if let last = vm.bars.last {
                     Text(String(format: "%.5f", last.close))

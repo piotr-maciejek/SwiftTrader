@@ -300,6 +300,16 @@ struct ContentView: View {
 
             Divider().frame(height: 16)
 
+            Button(action: {
+                workspace.selectOrCreateMultiTimeframeTab(instrument: vm.currentInstrument)
+            }) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Multi-Timeframe view")
+
             // Correlation screen buttons
             ForEach(CurrencyCorrelation.currencies(from: vm.currentInstrument), id: \.self) { currency in
                 Button("\(currency) \u{229e}") {
@@ -613,7 +623,11 @@ struct ContentView: View {
 
         Divider()
 
-        CorrelationView(viewModel: vm, onInstrumentTap: { workspace.selectOrCreateChartTab(instrument: $0) })
+        CorrelationView(
+            viewModel: vm,
+            onInstrumentTap: { workspace.selectOrCreateChartTab(instrument: $0) },
+            onMultiTimeframeTap: { workspace.selectOrCreateMultiTimeframeTab(instrument: $0) }
+        )
     }
 
     // MARK: - Multi-timeframe tab content
