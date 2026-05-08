@@ -15,6 +15,9 @@ struct ContentView: View {
     @State private var showCorrelationEMAPopover = false
     @State private var showCorrelationVolumeMAPopover = false
     @State private var showCorrelationATRPopover = false
+    @State private var showMultiTFEMAPopover = false
+    @State private var showMultiTFVolumeMAPopover = false
+    @State private var showMultiTFATRPopover = false
 
     var body: some View {
         Group {
@@ -75,6 +78,8 @@ struct ContentView: View {
                             chartContent(vm: vm, tabID: tab.id)
                         case .correlation(let vm):
                             correlationContent(vm: vm)
+                        case .multiTimeframe(let vm):
+                            multiTimeframeContent(vm: vm)
                         }
                     }
 
@@ -609,6 +614,95 @@ struct ContentView: View {
         Divider()
 
         CorrelationView(viewModel: vm, onInstrumentTap: { workspace.selectOrCreateChartTab(instrument: $0) })
+    }
+
+    // MARK: - Multi-timeframe tab content
+
+    @ViewBuilder
+    private func multiTimeframeContent(vm: MultiTimeframeViewModel) -> some View {
+        HStack {
+            Text("\(formatInstrument(vm.instrument)) Multi-Timeframe")
+                .font(.system(size: 13, weight: .semibold))
+
+            Picker("", selection: Binding(
+                get: { vm.zoom },
+                set: { vm.zoom = $0 }
+            )) {
+                Text("D / 4H / 1H / 15m").tag(TFZoom.standard)
+                Text("4H / 1H / 15m / 5m").tag(TFZoom.intraday)
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .help("Timeframe zoom")
+
+            Button(action: { vm.showSessions.toggle() }) {
+                Image(systemName: "clock.arrow.2.circlepath")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showSessions ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Market Sessions")
+
+            Button(action: { vm.showVolume.toggle() }) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showVolume ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Volume")
+
+            Button(action: { showMultiTFVolumeMAPopover.toggle() }) {
+                Text("VMA")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(vm.showVolumeMA ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Volume MA")
+            .popover(isPresented: $showMultiTFVolumeMAPopover) {
+                VolumeMAPopover(
+                    showVolumeMA: Binding(get: { vm.showVolumeMA }, set: { vm.showVolumeMA = $0 }),
+                    volumeMA: Binding(get: { vm.volumeMA }, set: { vm.volumeMA = $0 })
+                )
+            }
+
+            Button(action: { showMultiTFEMAPopover.toggle() }) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showEMA ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("EMA")
+            .popover(isPresented: $showMultiTFEMAPopover) {
+                EMAPopover(
+                    showEMA: Binding(get: { vm.showEMA }, set: { vm.showEMA = $0 }),
+                    emaConfigs: Binding(get: { vm.emaConfigs }, set: { vm.emaConfigs = $0 })
+                )
+            }
+
+            Button(action: { showMultiTFATRPopover.toggle() }) {
+                Text("ATR")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(vm.showATR ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Average True Range")
+            .popover(isPresented: $showMultiTFATRPopover) {
+                ATRPopover(
+                    showATR: Binding(get: { vm.showATR }, set: { vm.showATR = $0 }),
+                    atrPeriod: Binding(get: { vm.atrPeriod }, set: { vm.atrPeriod = $0 })
+                )
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+
+        Divider()
+
+        MultiTimeframeView(viewModel: vm, onCellTap: { instrument, period in
+            workspace.selectOrCreateChartTab(instrument: instrument, period: period)
+        })
     }
 
     // MARK: - Trading controls

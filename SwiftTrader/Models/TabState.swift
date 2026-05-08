@@ -87,9 +87,59 @@ struct CorrelationTabState: Codable, Equatable {
     }
 }
 
+enum TFZoom: String, Codable, Equatable, CaseIterable {
+    case standard
+    case intraday
+
+    /// Periods rendered in the 2x2 grid, top-left → bottom-right.
+    var periods: [String] {
+        switch self {
+        case .standard: return ["DAILY", "FOUR_HOURS", "ONE_HOUR", "FIFTEEN_MINS"]
+        case .intraday: return ["FOUR_HOURS", "ONE_HOUR", "FIFTEEN_MINS", "FIVE_MINS"]
+        }
+    }
+}
+
+struct MultiTimeframeTabState: Codable, Equatable {
+    var instrument: String
+    var zoom: TFZoom
+    var showSessions: Bool
+    var showVolume: Bool
+    var showEMA: Bool
+    var emaConfigs: [EMALineState]
+    var showATR: Bool
+    var atrPeriod: Int
+
+    init(instrument: String, zoom: TFZoom = .standard, showSessions: Bool = true,
+         showVolume: Bool = true, showEMA: Bool = true,
+         emaConfigs: [EMALineState] = [], showATR: Bool = true, atrPeriod: Int = 14) {
+        self.instrument = instrument
+        self.zoom = zoom
+        self.showSessions = showSessions
+        self.showVolume = showVolume
+        self.showEMA = showEMA
+        self.emaConfigs = emaConfigs
+        self.showATR = showATR
+        self.atrPeriod = atrPeriod
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        instrument = try c.decode(String.self, forKey: .instrument)
+        zoom = try c.decodeIfPresent(TFZoom.self, forKey: .zoom) ?? .standard
+        showSessions = try c.decodeIfPresent(Bool.self, forKey: .showSessions) ?? true
+        showVolume = try c.decodeIfPresent(Bool.self, forKey: .showVolume) ?? true
+        showEMA = try c.decodeIfPresent(Bool.self, forKey: .showEMA) ?? true
+        emaConfigs = try c.decodeIfPresent([EMALineState].self, forKey: .emaConfigs) ?? []
+        showATR = try c.decodeIfPresent(Bool.self, forKey: .showATR) ?? true
+        atrPeriod = try c.decodeIfPresent(Int.self, forKey: .atrPeriod) ?? 14
+    }
+}
+
 enum TabContentState: Codable, Equatable {
     case chart(ChartTabState)
     case correlation(CorrelationTabState)
+    case multiTimeframe(MultiTimeframeTabState)
 }
 
 struct TabState: Codable, Equatable, Identifiable {
