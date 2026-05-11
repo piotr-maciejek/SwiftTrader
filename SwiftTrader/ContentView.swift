@@ -256,16 +256,8 @@ struct ContentView: View {
     private func chartContent(vm: ChartViewModel, tabID: UUID) -> some View {
         // Header
         HStack {
-            Picker("", selection: Binding(
-                get: { vm.currentInstrument },
-                set: { vm.switchInstrument($0) }
-            )) {
-                ForEach(vm.availableInstruments, id: \.self) { instrument in
-                    Text(formatInstrument(instrument)).tag(instrument)
-                }
-            }
-            .pickerStyle(.menu)
-            .fixedSize()
+            Text(formatInstrument(vm.currentInstrument))
+                .font(.system(size: 13, weight: .semibold))
 
             Button(action: { workspace.cycleSelectedTabPeriod(offset: -1) }) {
                 Image(systemName: "minus")
