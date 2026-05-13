@@ -411,7 +411,7 @@ struct ContentView: View {
             }
             .buttonStyle(.borderless)
             .disabled(vm.isRefreshingCache)
-            .help("Refresh cache — delete server-side Dukascopy cache and reload (last resort)")
+            .help("Refresh — drop the local chart cache and re-fetch from the server")
 
             Button(action: { vm.hardRefresh() }) {
                 Image(systemName: "arrow.clockwise.circle.fill")

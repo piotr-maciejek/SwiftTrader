@@ -249,6 +249,17 @@ final class ChartViewModel {
         }
     }
 
+    /// Lightweight refresh: drop the in-memory client cache for this instrument
+    /// and re-issue a normal history fetch through the coordinator. The server
+    /// usually already has the bars in its own cache, so this completes in
+    /// milliseconds.
+    ///
+    /// Does **not** call `DELETE /api/v1/history/cache`. Deleting the server-side
+    /// Dukascopy `.bi5` cache forces a CDN re-download that empirically takes
+    /// 2–3 minutes on a thin-cross 15m timeframe — and during that window
+    /// `HistoryController` returns 503s, exhausting the client's retry budget
+    /// and wedging the chart for the user. Use {@link hardRefresh} when a
+    /// server-cache wipe is actually warranted.
     func refreshCache() {
         guard !isRefreshingCache else { return }
         let instrument = currentInstrument
@@ -256,18 +267,11 @@ final class ChartViewModel {
         loadingStatus = .refreshing()
         Task {
             defer { isRefreshingCache = false }
-            do {
-                _ = try await coordinator.clearServerCache(instrument: instrument)
-            } catch {
-                self.error = "Refresh cache: \(error.localizedDescription)"
-                loadingStatus = nil
-                return
-            }
+            await coordinator.cache.clear(instrument: instrument)
             guard instrument == currentInstrument else {
                 loadingStatus = nil
                 return
             }
-            await coordinator.cache.clear(instrument: instrument)
             reloadChart()
         }
     }
