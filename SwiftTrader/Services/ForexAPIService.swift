@@ -1,6 +1,9 @@
 import Foundation
+import os.log
 
 actor ForexAPIService {
+    static let logger = Logger(subsystem: "com.swifttrader", category: "api")
+
     private let baseURL: URL
     /// History requests can take a long time when the Dukascopy data feed is
     /// cold-loading chunks. Use a generous timeout so the server has time to
@@ -39,9 +42,20 @@ actor ForexAPIService {
         }
         components.queryItems = queryItems
 
-        let (data, response) = try await Self.historySession.data(from: components.url!)
-        try Self.checkSuccess(response: response, body: data)
-        return try JSONDecoder().decode([CandleBar].self, from: data)
+        let t0 = Date()
+        do {
+            let (data, response) = try await Self.historySession.data(from: components.url!)
+            let elapsedMs = Int(Date().timeIntervalSince(t0) * 1000)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            try Self.checkSuccess(response: response, body: data)
+            let bars = try JSONDecoder().decode([CandleBar].self, from: data)
+            Self.logger.info("fetchHistory \(instrument, privacy: .public) \(period, privacy: .public) count=\(count) -> \(status) \(elapsedMs)ms (\(bars.count) bars)")
+            return bars
+        } catch {
+            let elapsedMs = Int(Date().timeIntervalSince(t0) * 1000)
+            Self.logger.error("fetchHistory \(instrument, privacy: .public) \(period, privacy: .public) count=\(count) failed after \(elapsedMs)ms: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
     }
 
     func clearCache(instrument: String) async throws -> Int {

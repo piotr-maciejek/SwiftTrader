@@ -1,5 +1,8 @@
 import Foundation
+import os.log
 import SwiftUI
+
+private let chartLogger = Logger(subsystem: "com.swifttrader", category: "chart")
 
 @Observable
 @MainActor
@@ -333,11 +336,17 @@ final class ChartViewModel {
             period: currentPeriod,
             clientSideRebucketing: clientSideRebucketing
         )
+        let logInstrument = currentInstrument
+        let logPeriod = currentPeriod
+        let rebucketingFlag = clientSideRebucketing
+        chartLogger.info("reloadChart \(logInstrument, privacy: .public) \(logPeriod, privacy: .public) rebucketing=\(rebucketingFlag)")
         reloadTask = Task {
+            let cacheT0 = Date()
             let cached = await coordinator.cache.getBars(for: key)
             if !cached.isEmpty {
                 bars = cached
                 scrollToEnd()
+                chartLogger.info("reloadChart \(logInstrument, privacy: .public) \(logPeriod, privacy: .public) painted \(cached.count) cached bars in \(Int(Date().timeIntervalSince(cacheT0) * 1000))ms")
             }
             await loadHistoryWithRetry()
             // See start(): guard against a cancelled-but-still-executing outer Task
@@ -356,6 +365,7 @@ final class ChartViewModel {
         let instrument = currentInstrument
         let period = currentPeriod
         let rebucketing = clientSideRebucketing
+        let t0 = Date()
 
         // Cache paint is done by the caller (start / reloadChart). `bars.isEmpty` here
         // tells us whether we have a warm or cold cache — drives the loading-card detail.
@@ -385,6 +395,7 @@ final class ChartViewModel {
                     error = nil
                     loadingStatus = nil
                     scrollToEnd()
+                    chartLogger.info("loadHistoryWithRetry \(instrument, privacy: .public) \(period, privacy: .public) painted \(history.count) bars in \(Int(Date().timeIntervalSince(t0) * 1000))ms (attempt \(attempt), coldCache=\(coldCache))")
                     return
                 }
                 lastError = "Server returned no bars."
@@ -417,8 +428,10 @@ final class ChartViewModel {
             // Warm cache already painted — exhaustion shouldn't blank it. Surface
             // via the inline error string only.
             loadingStatus = nil
+            chartLogger.info("loadHistoryWithRetry \(instrument, privacy: .public) \(period, privacy: .public) exhausted after \(Int(Date().timeIntervalSince(t0) * 1000))ms — staying on cached bars (lastError=\(lastError ?? "nil", privacy: .public))")
             return
         }
+        chartLogger.error("loadHistoryWithRetry \(instrument, privacy: .public) \(period, privacy: .public) exhausted after \(Int(Date().timeIntervalSince(t0) * 1000))ms (lastError=\(lastError ?? "nil", privacy: .public))")
         loadingStatus = .exhausted(.historyUnavailable, lastError: lastError)
     }
 
