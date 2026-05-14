@@ -5,8 +5,10 @@ struct CorrelationView: View {
     var onInstrumentTap: ((String) -> Void)?
     var onMultiTimeframeTap: ((String) -> Void)?
 
-    private let columns = 3
     private let rows = 2
+    private var columns: Int {
+        viewModel.chartViewModels.count <= 6 ? 3 : 4
+    }
 
     var body: some View {
         Grid(horizontalSpacing: 1, verticalSpacing: 1) {
@@ -23,12 +25,24 @@ struct CorrelationView: View {
                                     instrument: viewModel.instruments[index]
                                 )
                             )
+                        } else if index == columns * rows - 1 {
+                            currencyLabelCell()
                         }
                     }
                 }
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func currencyLabelCell() -> some View {
+        Text(viewModel.currency)
+            .font(.system(size: 48, weight: .bold, design: .rounded))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(ChartView.chartBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.primary.opacity(0.12)))
     }
 
     private func correlationCell(vm: ChartViewModel, instrument: String, inverse: Bool = false) -> some View {
