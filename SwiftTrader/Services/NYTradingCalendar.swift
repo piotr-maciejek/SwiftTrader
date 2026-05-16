@@ -31,6 +31,33 @@ enum NYTradingCalendar {
         return cal.date(bySettingHour: 17, minute: 0, second: 0, of: dayStart)!
     }
 
+    /// Whether the FX market is closed at `at` — the Fri 17:00 ET → Sun 17:00 ET
+    /// weekend closure. Mirrors `BarAggregator.isWeekendFiller` (same gregorian
+    /// weekday numbering: 1=Sun … 6=Fri … 7=Sat), DST-correct via the NY calendar.
+    static func isMarketClosed(at: Date) -> Bool {
+        let comps = calendar.dateComponents([.weekday, .hour], from: at)
+        guard let wd = comps.weekday, let hr = comps.hour else { return false }
+        if wd == 7 { return true }              // Saturday — all day
+        if wd == 6 && hr >= 17 { return true }  // Friday from 17:00 ET
+        if wd == 1 && hr < 17 { return true }   // Sunday before 17:00 ET
+        return false
+    }
+
+    /// Epoch ms of the newest bar that can possibly exist as of `at`: if the
+    /// market is open, `at` itself; if closed, the Friday 17:00 ET that began
+    /// the current weekend closure. Used to clamp the gap-fill target so the
+    /// client doesn't chase candles that don't exist over the weekend.
+    static func lastSessionCloseMs(at: Date) -> Int64 {
+        guard isMarketClosed(at: at) else { return ms(at) }
+        let cal = calendar
+        let wd = cal.dateComponents([.weekday], from: at).weekday ?? 6
+        let back = wd == 7 ? 1 : (wd == 1 ? 2 : 0)  // Sat→Fri, Sun→Fri, Fri→same day
+        let friday = cal.date(byAdding: .day, value: -back, to: at)!
+        let close = cal.date(bySettingHour: 17, minute: 0, second: 0,
+                             of: cal.startOfDay(for: friday))!
+        return ms(close)
+    }
+
     /// Start of the 4H bucket containing `at`. Buckets open at 17, 21, 01, 05, 09, 13 ET.
     static func fourHourBucketStart(at: Date) -> Date {
         let cal = calendar

@@ -179,4 +179,41 @@ struct NYTradingCalendarTests {
                                               nyDate(2024, 4, 16, 17, 3),
                                               period: .threeMinutes))
     }
+
+    // MARK: market-closed / last session close
+
+    @Test("isMarketClosed spans the Fri 17:00 → Sun 17:00 ET closure")
+    func marketClosedWindow() {
+        // 2024-04-16 Tue, 04-19 Fri, 04-20 Sat, 04-21 Sun.
+        #expect(!NYTradingCalendar.isMarketClosed(at: nyDate(2024, 4, 16, 12, 0)))  // Tue — open
+        #expect(!NYTradingCalendar.isMarketClosed(at: nyDate(2024, 4, 19, 16, 59))) // Fri 16:59 — open
+        #expect(NYTradingCalendar.isMarketClosed(at: nyDate(2024, 4, 19, 17, 0)))   // Fri 17:00 — closed
+        #expect(NYTradingCalendar.isMarketClosed(at: nyDate(2024, 4, 20, 3, 0)))    // Sat — closed
+        #expect(NYTradingCalendar.isMarketClosed(at: nyDate(2024, 4, 21, 16, 59)))  // Sun 16:59 — closed
+        #expect(!NYTradingCalendar.isMarketClosed(at: nyDate(2024, 4, 21, 17, 0)))  // Sun 17:00 — open
+    }
+
+    @Test("lastSessionCloseMs = now when open, Friday 17:00 ET when closed")
+    func lastSessionClose() {
+        func ms(_ d: Date) -> Int64 { Int64((d.timeIntervalSince1970 * 1000).rounded()) }
+        let friClose = ms(nyDate(2024, 4, 19, 17, 0))
+
+        let openInstant = nyDate(2024, 4, 16, 12, 0)
+        #expect(NYTradingCalendar.lastSessionCloseMs(at: openInstant) == ms(openInstant))
+
+        #expect(NYTradingCalendar.lastSessionCloseMs(at: nyDate(2024, 4, 19, 20, 0)) == friClose) // Fri eve
+        #expect(NYTradingCalendar.lastSessionCloseMs(at: nyDate(2024, 4, 20, 11, 0)) == friClose) // Sat
+        #expect(NYTradingCalendar.lastSessionCloseMs(at: nyDate(2024, 4, 21, 9, 0)) == friClose)  // Sun am
+    }
+
+    @Test("lastSessionCloseMs is DST-correct across the spring-forward weekend")
+    func lastSessionCloseDST() {
+        func ms(_ d: Date) -> Int64 { Int64((d.timeIntervalSince1970 * 1000).rounded()) }
+        // DST spring-forward Sun 2024-03-10. Closure ran Fri 2024-03-08 17:00 EST
+        // → Sun 2024-03-10 17:00 EDT; Sat/Sun must map to that Friday close.
+        let friClose = ms(nyDate(2024, 3, 8, 17, 0))
+        #expect(NYTradingCalendar.isMarketClosed(at: nyDate(2024, 3, 9, 12, 0)))
+        #expect(NYTradingCalendar.lastSessionCloseMs(at: nyDate(2024, 3, 9, 12, 0)) == friClose)
+        #expect(NYTradingCalendar.lastSessionCloseMs(at: nyDate(2024, 3, 10, 9, 0)) == friClose)
+    }
 }

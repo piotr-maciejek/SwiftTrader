@@ -10,12 +10,16 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
     private let host: String
     private let port: Int
     let cache: CandleCache
+    /// Injectable wall clock — lets tests pin "now" for weekend/staleness logic.
+    private let now: @Sendable () -> Date
 
-    init(host: String = "localhost", port: Int = 8080, cache: CandleCache = CandleCache()) {
+    init(host: String = "localhost", port: Int = 8080, cache: CandleCache = CandleCache(),
+         now: @escaping @Sendable () -> Date = { Date() }) {
         self.apiService = ForexAPIService(baseURL: URL(string: "http://\(host):\(port)")!)
         self.host = host
         self.port = port
         self.cache = cache
+        self.now = now
     }
 
     func fetchInstruments() async throws -> [String] {
@@ -34,7 +38,7 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
 
         let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server)
         if let latest = await cache.latestTime(for: key),
-           !Self.isStale(latest: latest, period: period) {
+           !isStale(latest: latest, period: period) {
             // Warm cache: fetch only the gap. The live partial bar will arrive shortly
             // via the WebSocket — no need for a separate tail request here.
             try await gapFill(serverKey: key, instrument: instrument, period: period, latest: latest)
@@ -55,6 +59,13 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
     private func gapFill(
         serverKey: CandleCache.CacheKey, instrument: String, period: String, latest initialLatest: Int64
     ) async throws {
+        // Weekend storm-stopper: on the Fri 17:00 ET → Sun 17:00 ET closure the
+        // newest bar that can exist is the Friday close. Once the cache holds it,
+        // issue ZERO requests no matter how many reconnects / tab-switches /
+        // WS-drops re-trigger this. The one legitimate fill (cold/behind cache)
+        // still runs because then `initialLatest < lastSessionClose`.
+        if initialLatest >= NYTradingCalendar.lastSessionCloseMs(at: now()) { return }
+
         var latest = initialLatest
         for _ in 0..<Self.maxGapFillIterations {
             // Subtract 1 ms so the boundary bar is re-emitted; merge dedupes by timestamp
@@ -72,9 +83,15 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
 
     /// Period-aware staleness threshold. If the cache's latest bar is older than this,
     /// fall back to a fresh full-N fetch instead of a (potentially huge) gap-fill loop.
-    private static func isStale(latest: Int64, period: String) -> Bool {
-        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let ageMs = nowMs - latest
+    private func isStale(latest: Int64, period: String) -> Bool {
+        let t = now()
+        let nowMs = Int64(t.timeIntervalSince1970 * 1000)
+        // Clamp the reference to the newest bar that can exist: over the weekend
+        // closure that's the Friday close, not "now" — so a cache already at the
+        // Friday close is NOT considered stale (no needless full refetch).
+        let expectedNewestMs = min(nowMs, NYTradingCalendar.lastSessionCloseMs(at: t))
+        let ageMs = expectedNewestMs - latest
+        if ageMs <= 0 { return false }
         let thresholdMs: Int64 = switch period {
         case "FOUR_HOURS", "DAILY", "WEEKLY", "MONTHLY":
             365 * 24 * 60 * 60 * 1000
@@ -156,7 +173,7 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
         // `count * sourceSpan` bars. Re-aggregate the full merged source array as before
         // so the .aggregated cache stays consistent.
         if let latest = await cache.latestTime(for: hourlyKey),
-           !Self.isStale(latest: latest, period: source) {
+           !isStale(latest: latest, period: source) {
             try await gapFill(
                 serverKey: hourlyKey, instrument: instrument, period: source, latest: latest
             )
