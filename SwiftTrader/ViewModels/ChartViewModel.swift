@@ -77,10 +77,9 @@ final class ChartViewModel {
         ("ONE_SEC", "1s"),
         ("TEN_SECS", "10s"),
         ("ONE_MIN", "1m"),
+        ("THREE_MINS", "3m"),
         ("FIVE_MINS", "5m"),
-        ("TEN_MINS", "10m"),
         ("FIFTEEN_MINS", "15m"),
-        ("THIRTY_MINS", "30m"),
         ("ONE_HOUR", "1h"),
         ("FOUR_HOURS", "4h"),
         ("DAILY", "D"),
@@ -606,7 +605,10 @@ final class ChartViewModel {
             // For the aggregated derived path the coordinator already writes into the
             // `.aggregated` cache itself; the outer write would target the wrong key.
             let rebucketing = clientSideRebucketing
-            let isDerivedAggregated = rebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY")
+            // THREE_MINS has no native server period — it is always aggregated,
+            // regardless of the rebucketing toggle (see CacheKey.forDisplay).
+            let isDerivedAggregated = currentPeriod == "THREE_MINS"
+                || (rebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY"))
             if !isDerivedAggregated {
                 Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod) }
             }
@@ -671,6 +673,7 @@ final class ChartViewModel {
         case "DAILY":      return 250  // ~1 year of trading days
         case "FOUR_HOURS": return 500  // ~3 months
         case "ONE_HOUR":   return 500  // ~3 weeks
+        case "THREE_MINS": return 1000 // ~2 days (×3 = ~3000 ONE_MIN bars fetched)
         default:           return 1000 // intraday
         }
     }

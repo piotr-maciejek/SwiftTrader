@@ -153,4 +153,30 @@ struct NYTradingCalendarTests {
         let b = nyDate(2024, 4, 16, 17, 1)
         #expect(!NYTradingCalendar.sameBucket(a, b, period: .daily))
     }
+
+    // MARK: threeMinutes (fixed epoch grid — no NY-session rules)
+
+    @Test("bucketStart THREE_MINS floors to the :03 grid cell")
+    func threeMinBucketStart() {
+        // :00,:01,:02 all floor to the 17:00 cell; :03 starts the next cell.
+        #expect(NYTradingCalendar.bucketStart(at: nyDate(2024, 4, 16, 17, 1),
+                                              period: .threeMinutes)
+                == nyDate(2024, 4, 16, 17, 0))
+        #expect(NYTradingCalendar.bucketStart(at: nyDate(2024, 4, 16, 17, 8),
+                                              period: .threeMinutes)
+                == nyDate(2024, 4, 16, 17, 6))
+        #expect(NYTradingCalendar.bucketStart(at: nyDate(2024, 4, 16, 17, 3),
+                                              period: .threeMinutes)
+                == nyDate(2024, 4, 16, 17, 3))
+    }
+
+    @Test("sameBucket THREE_MINS groups :00–:02 and splits at :03")
+    func threeMinSameBucket() {
+        #expect(NYTradingCalendar.sameBucket(nyDate(2024, 4, 16, 17, 0),
+                                             nyDate(2024, 4, 16, 17, 2),
+                                             period: .threeMinutes))
+        #expect(!NYTradingCalendar.sameBucket(nyDate(2024, 4, 16, 17, 2),
+                                              nyDate(2024, 4, 16, 17, 3),
+                                              period: .threeMinutes))
+    }
 }

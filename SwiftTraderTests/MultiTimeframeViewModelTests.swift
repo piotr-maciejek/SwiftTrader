@@ -22,7 +22,7 @@ struct MultiTimeframeViewModelTests {
         }
     }
 
-    @Test("Intraday zoom creates 4 children with 4H, 1H, 15m, 5m")
+    @Test("Intraday zoom creates 4 children with 4H, 1H, 15m, 3m")
     func intradayZoomChildren() {
         let vm = MultiTimeframeViewModel(
             instrument: "GBPUSD", zoom: .intraday,
@@ -32,7 +32,7 @@ struct MultiTimeframeViewModelTests {
         #expect(vm.chartViewModels[0].currentPeriod == "FOUR_HOURS")
         #expect(vm.chartViewModels[1].currentPeriod == "ONE_HOUR")
         #expect(vm.chartViewModels[2].currentPeriod == "FIFTEEN_MINS")
-        #expect(vm.chartViewModels[3].currentPeriod == "FIVE_MINS")
+        #expect(vm.chartViewModels[3].currentPeriod == "THREE_MINS")
     }
 
     @Test("Switching zoom updates child periods")
@@ -43,7 +43,7 @@ struct MultiTimeframeViewModelTests {
         )
         vm.zoom = .intraday
         #expect(vm.chartViewModels[0].currentPeriod == "FOUR_HOURS")
-        #expect(vm.chartViewModels[3].currentPeriod == "FIVE_MINS")
+        #expect(vm.chartViewModels[3].currentPeriod == "THREE_MINS")
     }
 
     @Test("Setting display flags propagates to all children")

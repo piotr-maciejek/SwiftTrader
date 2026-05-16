@@ -3,6 +3,9 @@ import Foundation
 enum AggregatedPeriod: String, Codable, Sendable {
     case fourHours
     case daily
+    /// Client-derived 3-minute candles bucketed from raw ONE_MIN bars on a fixed
+    /// epoch grid (NOT NY-session-aligned — Dukascopy has no native 3m period).
+    case threeMinutes
 }
 
 enum NYTradingCalendar {
@@ -46,16 +49,23 @@ enum NYTradingCalendar {
     }
 
     /// Whether two dates fall in the same bucket for the given aggregated period.
+    /// Fixed-grid periods (e.g. `.threeMinutes`) ignore NY-session rules entirely —
+    /// the canonical computation lives in `BarAggregator.fixedGridBucketStartMs`.
     static func sameBucket(_ a: Date, _ b: Date, period: AggregatedPeriod) -> Bool {
         switch period {
         case .fourHours: return fourHourBucketStart(at: a) == fourHourBucketStart(at: b)
         case .daily: return tradingDayStart(at: a) == tradingDayStart(at: b)
+        case .threeMinutes:
+            return BarAggregator.fixedGridBucketStartMs(ms(a), 180_000)
+                == BarAggregator.fixedGridBucketStartMs(ms(b), 180_000)
         }
     }
 
     /// Start of the bucket containing `at` for the given aggregated period.
     /// DAILY buckets are labeled by the session's CLOSING calendar day in NY:
     /// a session running Sun 17 ET → Mon 17 ET is labeled Monday (midnight ET).
+    /// Fixed-grid periods (e.g. `.threeMinutes`) ignore NY-session rules entirely —
+    /// the canonical computation lives in `BarAggregator.fixedGridBucketStartMs`.
     static func bucketStart(at: Date, period: AggregatedPeriod) -> Date {
         switch period {
         case .fourHours: return fourHourBucketStart(at: at)
@@ -63,6 +73,13 @@ enum NYTradingCalendar {
             let cal = calendar
             let sessionStart = tradingDayStart(at: at)
             return cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: sessionStart))!
+        case .threeMinutes:
+            let startMs = BarAggregator.fixedGridBucketStartMs(ms(at), 180_000)
+            return Date(timeIntervalSince1970: Double(startMs) / 1000.0)
         }
+    }
+
+    private static func ms(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
 }

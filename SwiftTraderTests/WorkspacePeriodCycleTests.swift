@@ -31,14 +31,14 @@ struct WorkspacePeriodCycleTests {
     func cycleUpChart() {
         let (ws, vm) = makeWorkspaceWithChartTab(period: "FIFTEEN_MINS")
         ws.cycleSelectedTabPeriod(offset: 1)
-        #expect(vm.currentPeriod == "THIRTY_MINS")
+        #expect(vm.currentPeriod == "ONE_HOUR")
     }
 
     @Test("Cycle down on chart tab retreats to the next shorter period")
     func cycleDownChart() {
         let (ws, vm) = makeWorkspaceWithChartTab(period: "FIFTEEN_MINS")
         ws.cycleSelectedTabPeriod(offset: -1)
-        #expect(vm.currentPeriod == "TEN_MINS")
+        #expect(vm.currentPeriod == "FIVE_MINS")
     }
 
     @Test("Cycle up at WEEKLY is a no-op")
@@ -59,7 +59,18 @@ struct WorkspacePeriodCycleTests {
     func cycleCorrelationTab() {
         let (ws, vm) = makeWorkspaceWithCorrelationTab(period: "FIFTEEN_MINS")
         ws.cycleSelectedTabPeriod(offset: 1)
-        #expect(vm.currentPeriod == "THIRTY_MINS")
+        #expect(vm.currentPeriod == "ONE_HOUR")
+    }
+
+    @Test("3m sits between 1m and 5m in the cycle")
+    func cycleAroundThreeMinutes() {
+        let (wsUp, up) = makeWorkspaceWithChartTab(period: "THREE_MINS")
+        wsUp.cycleSelectedTabPeriod(offset: 1)
+        #expect(up.currentPeriod == "FIVE_MINS")
+
+        let (wsDown, down) = makeWorkspaceWithChartTab(period: "THREE_MINS")
+        wsDown.cycleSelectedTabPeriod(offset: -1)
+        #expect(down.currentPeriod == "ONE_MIN")
     }
 
     @Test("No selected tab: cycle is a silent no-op")

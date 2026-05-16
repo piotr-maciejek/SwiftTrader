@@ -23,6 +23,16 @@ private func hourly(
               volume: volume, partial: partial)
 }
 
+private func minly(
+    _ y: Int, _ m: Int, _ d: Int, _ h: Int, _ mn: Int,
+    open: Double, high: Double, low: Double, close: Double,
+    volume: Double = 100, partial: Bool = false
+) -> CandleBar {
+    CandleBar(time: timeMs(nyDate(y, m, d, h, mn)),
+              open: open, high: high, low: low, close: close,
+              volume: volume, partial: partial)
+}
+
 @Suite("BarAggregator")
 struct BarAggregatorTests {
 
@@ -206,5 +216,149 @@ struct BarAggregatorTests {
         let out = BarAggregator.aggregate(hourly: bars, openPartial: nil, target: .fourHours)
         #expect(out.count == 1)
         #expect(out[0].time == timeMs(nyDate(2024, 11, 3, 17, 0)))
+    }
+
+    // MARK: 3m aggregation (fixed epoch grid from 1m — NOT NY-session-aligned)
+
+    private let gridMs: Int64 = 180_000  // 3 minutes
+
+    @Test("3 consecutive 1m bars collapse into one THREE_MINS bucket")
+    func threeMinBasic() {
+        let bars = [
+            minly(2024, 4, 16, 17, 0, open: 1.0, high: 1.1, low: 0.9, close: 1.05, volume: 10),
+            minly(2024, 4, 16, 17, 1, open: 1.05, high: 1.15, low: 1.0, close: 1.1, volume: 20),
+            minly(2024, 4, 16, 17, 2, open: 1.1, high: 1.2, low: 1.05, close: 1.15, volume: 30),
+        ]
+        let out = BarAggregator.aggregate(hourly: bars, openPartial: nil, target: .threeMinutes)
+        #expect(out.count == 1)
+        let b = out[0]
+        #expect(b.time == (bars[0].time / gridMs) * gridMs)
+        #expect(b.time == timeMs(nyDate(2024, 4, 16, 17, 0)))
+        #expect(b.open == 1.0)
+        #expect(b.close == 1.15)
+        #expect(b.high == 1.2)
+        #expect(b.low == 0.9)
+        #expect(b.volume == 60)
+        #expect(b.partial == false)
+    }
+
+    @Test("1m bars at :02 and :03 fall in different 3m buckets")
+    func threeMinBoundary() {
+        let bars = [
+            minly(2024, 4, 16, 17, 2, open: 1.0, high: 1.0, low: 1.0, close: 1.0),
+            minly(2024, 4, 16, 17, 3, open: 2.0, high: 2.0, low: 2.0, close: 2.0),
+        ]
+        let out = BarAggregator.aggregate(hourly: bars, openPartial: nil, target: .threeMinutes)
+        #expect(out.count == 2)
+        #expect(out[0].time == timeMs(nyDate(2024, 4, 16, 17, 0)))
+        #expect(out[1].time == timeMs(nyDate(2024, 4, 16, 17, 3)))
+    }
+
+    @Test("Non-:00 mid-hour 3m bucket starts on the :03 grid")
+    func threeMinMidHour() {
+        // :07,:08 → 17:06 bucket; :09 → 17:09 bucket.
+        let bars = [
+            minly(2024, 4, 16, 17, 7, open: 1.0, high: 1.0, low: 1.0, close: 1.0),
+            minly(2024, 4, 16, 17, 8, open: 1.0, high: 1.0, low: 1.0, close: 1.0),
+            minly(2024, 4, 16, 17, 9, open: 2.0, high: 2.0, low: 2.0, close: 2.0),
+        ]
+        let out = BarAggregator.aggregate(hourly: bars, openPartial: nil, target: .threeMinutes)
+        #expect(out.count == 2)
+        #expect(out[0].time == timeMs(nyDate(2024, 4, 16, 17, 6)))
+        #expect(out[1].time == timeMs(nyDate(2024, 4, 16, 17, 9)))
+    }
+
+    @Test("3m buckets continue cleanly across the hour boundary (proves epoch grid)")
+    func threeMinHourRollover() {
+        // :57,:58,:59 → 17:57 bucket; next hour :00,:01 → 18:00 bucket.
+        let bars = [
+            minly(2024, 4, 16, 17, 57, open: 1.0, high: 1.0, low: 1.0, close: 1.0),
+            minly(2024, 4, 16, 17, 58, open: 1.0, high: 1.0, low: 1.0, close: 1.0),
+            minly(2024, 4, 16, 17, 59, open: 1.0, high: 1.0, low: 1.0, close: 1.0),
+            minly(2024, 4, 16, 18, 0, open: 2.0, high: 2.0, low: 2.0, close: 2.0),
+            minly(2024, 4, 16, 18, 1, open: 2.0, high: 2.0, low: 2.0, close: 2.0),
+        ]
+        let out = BarAggregator.aggregate(hourly: bars, openPartial: nil, target: .threeMinutes)
+        #expect(out.count == 2)
+        #expect(out[0].time == timeMs(nyDate(2024, 4, 16, 17, 57)))
+        #expect(out[1].time == timeMs(nyDate(2024, 4, 16, 18, 0)))
+    }
+
+    @Test("Partial 1m tail marks the last 3m bucket partial")
+    func threeMinPartialTail() {
+        let completed = minly(2024, 4, 16, 17, 0, open: 1.0, high: 1.1, low: 1.0, close: 1.05, volume: 5)
+        let partial = minly(2024, 4, 16, 17, 1, open: 1.05, high: 1.2, low: 1.0, close: 1.18,
+                            volume: 7, partial: true)
+        let out = BarAggregator.aggregate(hourly: [completed], openPartial: partial,
+                                          target: .threeMinutes)
+        #expect(out.count == 1)
+        #expect(out[0].partial == true)
+        #expect(out[0].close == 1.18)
+        #expect(out[0].high == 1.2)
+        #expect(out[0].volume == 12)
+    }
+
+    @Test("Weekend 1m bars are NOT dropped for THREE_MINS (server already filters them)")
+    func threeMinKeepsWeekendEdgeBars() {
+        // Sat 2024-04-20 12:00 and Fri 2024-04-19 17:00 would both be weekend
+        // fillers for session-aligned aggregation. They must survive for 3m.
+        let sat = minly(2024, 4, 20, 12, 0, open: 1.0, high: 1.0, low: 1.0, close: 1.0)
+        let friClose = minly(2024, 4, 19, 17, 0, open: 2.0, high: 2.0, low: 2.0, close: 2.0)
+        #expect(BarAggregator.isWeekendFiller(sat))       // sanity: session-aligned would drop it
+        #expect(BarAggregator.isWeekendFiller(friClose))
+        let out = BarAggregator.aggregate(hourly: [friClose, sat], openPartial: nil,
+                                          target: .threeMinutes)
+        #expect(out.count == 2)
+        #expect(out.contains { $0.time == timeMs(nyDate(2024, 4, 19, 17, 0)) })
+        #expect(out.contains { $0.time == timeMs(nyDate(2024, 4, 20, 12, 0)) })
+        // And the same inputs ARE dropped for a session-aligned target:
+        let session = BarAggregator.aggregate(hourly: [friClose, sat], openPartial: nil,
+                                              target: .fourHours)
+        #expect(session.isEmpty)
+    }
+
+    @Test("3m bucket starts stay on a clean 180000ms grid across a DST instant")
+    func threeMinDSTIrrelevance() {
+        // Spring-forward instant 2024-03-10 02:00 ET. Fixed grid is pure epoch ms,
+        // so every bucket start must be a multiple of 180000 regardless of DST.
+        let bars = (0..<10).map { i in
+            minly(2024, 3, 10, 1, i, open: 1.0, high: 1.0, low: 1.0, close: 1.0)
+        }
+        let out = BarAggregator.aggregate(hourly: bars, openPartial: nil, target: .threeMinutes)
+        #expect(!out.isEmpty)
+        for b in out {
+            #expect(b.time % gridMs == 0)
+        }
+        // Consecutive bucket starts differ by exactly one grid cell.
+        for (a, c) in zip(out, out.dropFirst()) {
+            #expect(c.time - a.time == gridMs)
+        }
+    }
+
+    // MARK: AggregatedPeriod source/grid metadata
+
+    @Test("THREE_MINS aggregated-period metadata")
+    func threeMinEnumMetadata() {
+        #expect(AggregatedPeriod("THREE_MINS") == .threeMinutes)
+        #expect(AggregatedPeriod.threeMinutes.periodCode == "THREE_MINS")
+        #expect(AggregatedPeriod.threeMinutes.sourcePeriod == "ONE_MIN")
+        #expect(AggregatedPeriod.threeMinutes.sourceSpan == 3)
+        #expect(AggregatedPeriod.threeMinutes.isSessionAligned == false)
+        #expect(AggregatedPeriod.threeMinutes.alwaysAggregated == true)
+    }
+
+    @Test("4H/Daily metadata unchanged after the sourceSpan rename")
+    func sessionAlignedEnumMetadataRegression() {
+        #expect(AggregatedPeriod.fourHours.sourcePeriod == "ONE_HOUR")
+        #expect(AggregatedPeriod.fourHours.sourceSpan == 4)
+        #expect(AggregatedPeriod.fourHours.isSessionAligned == true)
+        #expect(AggregatedPeriod.fourHours.alwaysAggregated == false)
+        #expect(AggregatedPeriod.daily.sourcePeriod == "ONE_HOUR")
+        #expect(AggregatedPeriod.daily.sourceSpan == 24)
+        #expect(AggregatedPeriod.daily.isSessionAligned == true)
+        #expect(AggregatedPeriod.daily.alwaysAggregated == false)
+        #expect(AggregatedPeriod("FOUR_HOURS") == .fourHours)
+        #expect(AggregatedPeriod("DAILY") == .daily)
+        #expect(AggregatedPeriod("ONE_HOUR") == nil)
     }
 }

@@ -343,7 +343,7 @@ final class WorkspaceViewModel {
     }
 
     /// Cycles the selected tab's timeframe one step in `ChartViewModel.availablePeriods`.
-    /// Positive offset = longer timeframe (15m → 30m). No wrap at the ends.
+    /// Positive offset = longer timeframe (15m → 1h). No wrap at the ends.
     /// For multi-timeframe tabs, cycles the zoom preset (standard ↔ intraday).
     func cycleSelectedTabPeriod(offset: Int) {
         guard offset != 0, let tab = selectedTab else { return }

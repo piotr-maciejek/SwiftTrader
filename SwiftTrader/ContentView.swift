@@ -635,7 +635,7 @@ struct ContentView: View {
                 set: { vm.zoom = $0 }
             )) {
                 Text("D / 4H / 1H / 15m").tag(TFZoom.standard)
-                Text("4H / 1H / 15m / 5m").tag(TFZoom.intraday)
+                Text("4H / 1H / 15m / 3m").tag(TFZoom.intraday)
             }
             .pickerStyle(.segmented)
             .fixedSize()

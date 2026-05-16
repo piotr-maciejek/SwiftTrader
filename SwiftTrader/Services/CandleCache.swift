@@ -18,12 +18,14 @@ actor CandleCache {
         }
 
         /// Resolve the source for the currently-displayed chart given the rebucketing toggle.
-        /// Raw periods always map to `.server`; only FOUR_HOURS/DAILY can switch.
+        /// Raw periods map to `.server`; FOUR_HOURS/DAILY switch with the toggle.
+        /// THREE_MINS has no native server period, so it is ALWAYS `.aggregated`.
         static func forDisplay(
             instrument: String, period: String, clientSideRebucketing: Bool
         ) -> CacheKey {
             let source: BarSource =
-                (period == "FOUR_HOURS" || period == "DAILY") && clientSideRebucketing
+                period == "THREE_MINS"
+                    || ((period == "FOUR_HOURS" || period == "DAILY") && clientSideRebucketing)
                     ? .aggregated : .server
             return CacheKey(instrument: instrument, period: period, source: source)
         }

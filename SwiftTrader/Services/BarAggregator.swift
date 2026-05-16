@@ -10,9 +10,17 @@ enum BarAggregator {
         openPartial: CandleBar?,
         target: AggregatedPeriod
     ) -> [CandleBar] {
-        var inputs = hourly.filter { !isWeekendFiller($0) }
+        // Weekend-filler dropping only applies to NY-session-aligned periods
+        // (4H/Daily from 1H). Fixed-grid intraday periods (3m from 1m) must NOT
+        // run it: the server already strips weekends from ONE_MIN via
+        // Filter.WEEKENDS, and isWeekendFiller's Fri≥17 / Sun<17 hour windows
+        // would wrongly drop legitimate session-edge minute bars.
+        var inputs = target.isSessionAligned
+            ? hourly.filter { !isWeekendFiller($0) }
+            : hourly
 
-        if let partial = openPartial, !isWeekendFiller(partial) {
+        if let partial = openPartial,
+           !target.isSessionAligned || !isWeekendFiller(partial) {
             let hasCompleted = inputs.contains { $0.time == partial.time && !$0.partial }
             if !hasCompleted {
                 inputs.removeAll { $0.time == partial.time }
@@ -23,10 +31,10 @@ enum BarAggregator {
         let sorted = inputs.sorted { $0.time < $1.time }
         guard !sorted.isEmpty else { return [] }
 
-        var buckets: [(start: Date, bars: [CandleBar])] = []
+        var buckets: [(startMs: Int64, bars: [CandleBar])] = []
         for bar in sorted {
-            let bStart = NYTradingCalendar.bucketStart(at: bar.date, period: target)
-            if let lastIdx = buckets.indices.last, buckets[lastIdx].start == bStart {
+            let bStart = bucketStartMs(for: bar, target: target)
+            if let lastIdx = buckets.indices.last, buckets[lastIdx].startMs == bStart {
                 buckets[lastIdx].bars.append(bar)
             } else {
                 buckets.append((bStart, [bar]))
@@ -41,9 +49,8 @@ enum BarAggregator {
             let low = bars.map(\.low).min()!
             let volume = bars.map(\.volume).reduce(0, +)
             let partial = bars.contains { $0.partial }
-            let timeMs = Int64(bucket.start.timeIntervalSince1970 * 1000)
             return CandleBar(
-                time: timeMs,
+                time: bucket.startMs,
                 open: open,
                 high: high,
                 low: low,
@@ -52,6 +59,24 @@ enum BarAggregator {
                 partial: partial
             )
         }
+    }
+
+    /// Bucket-start epoch ms for `bar` under `target`. Session-aligned periods
+    /// (4H/Daily) defer to `NYTradingCalendar`; fixed-grid periods (3m) use a
+    /// pure epoch grid that needs no timezone/DST/session logic.
+    private static func bucketStartMs(for bar: CandleBar, target: AggregatedPeriod) -> Int64 {
+        if target.isSessionAligned {
+            let start = NYTradingCalendar.bucketStart(at: bar.date, period: target)
+            return Int64((start.timeIntervalSince1970 * 1000).rounded())
+        }
+        return fixedGridBucketStartMs(bar.time, 180_000)
+    }
+
+    /// Floor `timeMs` to the start of its fixed `granularityMs` grid cell.
+    /// Because 180 000 ms (3 min) divides an hour evenly, the grid is identical
+    /// regardless of epoch/hour anchoring — no timezone or DST handling needed.
+    static func fixedGridBucketStartMs(_ timeMs: Int64, _ granularityMs: Int64) -> Int64 {
+        (timeMs / granularityMs) * granularityMs
     }
 
     /// True when a 1H bar sits inside the Fri 17:00 ET → Sun 17:00 ET market closure.

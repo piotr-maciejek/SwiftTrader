@@ -95,7 +95,7 @@ enum TFZoom: String, Codable, Equatable, CaseIterable {
     var periods: [String] {
         switch self {
         case .standard: return ["DAILY", "FOUR_HOURS", "ONE_HOUR", "FIFTEEN_MINS"]
-        case .intraday: return ["FOUR_HOURS", "ONE_HOUR", "FIFTEEN_MINS", "FIVE_MINS"]
+        case .intraday: return ["FOUR_HOURS", "ONE_HOUR", "FIFTEEN_MINS", "THREE_MINS"]
         }
     }
 }
