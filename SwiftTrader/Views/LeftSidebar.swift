@@ -107,6 +107,7 @@ struct LeftSidebar: View {
                 Text(periodLabel)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
+                    .frame(width: 24, alignment: .trailing)
             }
 
             Button(action: {
