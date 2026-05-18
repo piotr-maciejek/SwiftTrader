@@ -100,3 +100,36 @@ struct WorkspaceSidebarSortTests {
         #expect(decoded.showLeftPanel == false)
     }
 }
+
+@Suite("LeftSidebar visual-order badge")
+struct LeftSidebarVisualOrderBadgeTests {
+
+    private func order(_ direction: String) -> VisualOrderState {
+        VisualOrderState(
+            direction: direction, instrument: "EURUSD",
+            entryPrice: 1.1, marketPrice: 1.1, amount: 0.01,
+            stopLoss: 1.09, takeProfit: 1.12,
+            startBarIndex: 0, endBarIndex: 10
+        )
+    }
+
+    @Test("BUY order maps to .buy badge")
+    func buyBadge() {
+        #expect(LeftSidebar.visualOrderBadge(for: order("BUY")) == .buy)
+    }
+
+    @Test("SELL order maps to .sell badge")
+    func sellBadge() {
+        #expect(LeftSidebar.visualOrderBadge(for: order("SELL")) == .sell)
+    }
+
+    @Test("No open order → no badge")
+    func noBadge() {
+        #expect(LeftSidebar.visualOrderBadge(for: nil) == nil)
+    }
+
+    @Test("Unexpected direction → no badge")
+    func unknownDirectionNoBadge() {
+        #expect(LeftSidebar.visualOrderBadge(for: order("FLAT")) == nil)
+    }
+}

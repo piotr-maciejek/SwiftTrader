@@ -50,6 +50,19 @@ struct LeftSidebar: View {
         return Array(set).sorted()
     }
 
+    /// Badge shown on a pair row while a visual position tool is open on it,
+    /// so the user can find their way back. Pure mapping (color-free) for tests.
+    enum VisualOrderBadge { case buy, sell }
+
+    static func visualOrderBadge(for state: VisualOrderState?) -> VisualOrderBadge? {
+        guard let state else { return nil }
+        switch state.direction {
+        case "BUY":  return .buy
+        case "SELL": return .sell
+        default:     return nil
+        }
+    }
+
     private func pairRow(instrument: String) -> some View {
         let tab = chartTab(for: instrument)
         let key = "pair:\(instrument)"
@@ -64,6 +77,9 @@ struct LeftSidebar: View {
         }
         let mtfTab = multiTimeframeTab(for: instrument)
         let mtfSelected = mtfTab?.id == workspace.selectedTabID
+        // Reading visualOrders here makes the row re-render when a tool
+        // opens/cancels/confirms (TradingViewModel is @Observable).
+        let badge = Self.visualOrderBadge(for: workspace.trading.visualOrders[instrument])
 
         return HStack(spacing: 6) {
             Circle()
@@ -77,6 +93,15 @@ struct LeftSidebar: View {
                 .opacity(tab == nil ? 0.55 : 1.0)
 
             Spacer()
+
+            if let badge {
+                Image(systemName: badge == .buy ? "arrowtriangle.up.fill"
+                                                : "arrowtriangle.down.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(badge == .buy ? Color.green : Color.red)
+                    .help("\(badge == .buy ? "Buy" : "Sell") order being placed on \(formatInstrument(instrument))")
+                    .accessibilityLabel("\(badge == .buy ? "Buy" : "Sell") order in progress")
+            }
 
             if !periodLabel.isEmpty {
                 Text(periodLabel)
