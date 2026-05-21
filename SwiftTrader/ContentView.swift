@@ -641,6 +641,19 @@ struct ContentView: View {
             .fixedSize()
             .help("Timeframe zoom")
 
+            Divider().frame(height: 16)
+
+            // Correlation screen links for each currency in the pair.
+            ForEach(CurrencyCorrelation.currencies(from: vm.instrument), id: \.self) { currency in
+                Button("\(currency) \u{229e}") {
+                    workspace.addCorrelationTab(currency: currency)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .help("\(currency) Correlation")
+            }
+
             Button(action: { vm.showSessions.toggle() }) {
                 Image(systemName: "clock.arrow.2.circlepath")
                     .font(.system(size: 11))
