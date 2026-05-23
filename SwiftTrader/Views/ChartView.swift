@@ -52,6 +52,7 @@ struct ChartView: View {
     var onCommitDrawing: ((Drawing) -> Void)? = nil
     var onDeleteDrawing: ((UUID) -> Void)? = nil
     var onClearAllDrawings: (() -> Void)? = nil
+    var onClearAllDrawingsAcrossCells: (() -> Void)? = nil
     var onSetDrawingTool: ((DrawingKind?) -> Void)? = nil
     var onSelectDrawing: ((UUID?) -> Void)? = nil
     @State private var crosshair: CrosshairState? = nil
@@ -164,6 +165,7 @@ struct ChartView: View {
                         onCommitDrawing: onCommitDrawing,
                         onDeleteDrawing: onDeleteDrawing,
                         onClearAllDrawings: onClearAllDrawings,
+                        onClearAllDrawingsAcrossCells: onClearAllDrawingsAcrossCells,
                         onSetDrawingTool: onSetDrawingTool,
                         onSelectDrawing: onSelectDrawing
                     )

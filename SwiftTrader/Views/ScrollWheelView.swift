@@ -61,6 +61,7 @@ struct ChartInteractionView: NSViewRepresentable {
     var onCommitDrawing: ((Drawing) -> Void)? = nil
     var onDeleteDrawing: ((UUID) -> Void)? = nil
     var onClearAllDrawings: (() -> Void)? = nil
+    var onClearAllDrawingsAcrossCells: (() -> Void)? = nil
     var onSetDrawingTool: ((DrawingKind?) -> Void)? = nil
     var onSelectDrawing: ((UUID?) -> Void)? = nil
 
@@ -98,6 +99,7 @@ struct ChartInteractionView: NSViewRepresentable {
         context.coordinator.onCommitDrawing = onCommitDrawing
         context.coordinator.onDeleteDrawing = onDeleteDrawing
         context.coordinator.onClearAllDrawings = onClearAllDrawings
+        context.coordinator.onClearAllDrawingsAcrossCells = onClearAllDrawingsAcrossCells
         context.coordinator.onSetDrawingTool = onSetDrawingTool
         context.coordinator.onSelectDrawing = onSelectDrawing
     }
@@ -146,6 +148,7 @@ struct ChartInteractionView: NSViewRepresentable {
         var onCommitDrawing: ((Drawing) -> Void)?
         var onDeleteDrawing: ((UUID) -> Void)?
         var onClearAllDrawings: (() -> Void)?
+        var onClearAllDrawingsAcrossCells: (() -> Void)?
         var onSetDrawingTool: ((DrawingKind?) -> Void)?
         var onSelectDrawing: ((UUID?) -> Void)?
         /// (startTimeMs, startPrice, tool) seeded on drawing mouseDown.
@@ -525,6 +528,17 @@ struct ChartInteractionView: NSViewRepresentable {
         override func keyDown(with event: NSEvent) {
             guard let coord = coordinator else {
                 super.keyDown(with: event)
+                return
+            }
+
+            // ⌥D (Option+D): clear drawings across every cell of the active
+            // correlation/MTF tab. Handled before the no-modifier gate below
+            // because Option is in the blocking-modifier set there.
+            if event.keyCode == 2,
+               event.modifierFlags.contains(.option),
+               !event.modifierFlags.contains(.command),
+               !event.modifierFlags.contains(.control) {
+                coord.onClearAllDrawingsAcrossCells?()
                 return
             }
 

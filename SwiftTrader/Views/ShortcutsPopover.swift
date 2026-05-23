@@ -22,7 +22,8 @@ struct ShortcutsPopover: View {
             Row(label: "Line tool", keys: "A"),
             Row(label: "Arrow tool", keys: "S"),
             Row(label: "Delete selected drawing", keys: "D / ⌫"),
-            Row(label: "Clear all drawings", keys: "⇧D / ⇧⌫"),
+            Row(label: "Clear all drawings (this chart)", keys: "⇧D / ⇧⌫"),
+            Row(label: "Clear all drawings (every cell)", keys: "⌥D"),
             Row(label: "Exit tool / clear selection", keys: "Esc"),
         ]),
     ]

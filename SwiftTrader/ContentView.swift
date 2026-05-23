@@ -485,6 +485,7 @@ struct ContentView: View {
             onCommitDrawing: { drawing in vm.drawings.append(drawing) },
             onDeleteDrawing: { id in vm.drawings.removeAll { $0.id == id } },
             onClearAllDrawings: { vm.drawings = [] },
+            onClearAllDrawingsAcrossCells: { vm.drawings = [] },
             onSetDrawingTool: { tool in vm.drawingTool = tool },
             onSelectDrawing: { id in vm.selectedDrawingID = id }
         )
