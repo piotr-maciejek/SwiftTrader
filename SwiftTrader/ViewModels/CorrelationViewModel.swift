@@ -58,6 +58,11 @@ final class CorrelationViewModel {
 
     var onStateChanged: (() -> Void)?
 
+    /// Time (UTC ms) under the user's cursor in any cell. All other cells
+    /// render a synced ghost vertical crosshair at the bar covering this time.
+    /// Cleared when the cursor leaves all cells. Ephemeral — not persisted.
+    var sharedCursorTime: Int64?
+
     init(currency: String, period: String, coordinator: any MarketDataProviding) {
         self.currency = currency
         self.currentPeriod = period

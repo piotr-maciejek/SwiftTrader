@@ -124,6 +124,8 @@ struct CorrelationView: View {
                 atrPeriod: vm.atrPeriod,
                 atrPips: vm.atrPips,
                 todayATRPercent: vm.todayATRPercent,
+                externalCursorTime: viewModel.sharedCursorTime,
+                onCursorChange: { time in viewModel.sharedCursorTime = time },
                 drawings: vm.drawings,
                 drawingTool: vm.drawingTool,
                 selectedDrawingID: vm.selectedDrawingID,
