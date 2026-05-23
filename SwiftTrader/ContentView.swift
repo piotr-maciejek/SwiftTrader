@@ -478,7 +478,15 @@ struct ContentView: View {
             },
             accountEquity: workspace.trading.account?.equity,
             visualOrderSpread: workspace.trading.spreads[vm.currentInstrument] ?? 0,
-            isSubmittingOrder: workspace.trading.isSubmitting
+            isSubmittingOrder: workspace.trading.isSubmitting,
+            drawings: vm.drawings,
+            drawingTool: vm.drawingTool,
+            selectedDrawingID: vm.selectedDrawingID,
+            onCommitDrawing: { drawing in vm.drawings.append(drawing) },
+            onDeleteDrawing: { id in vm.drawings.removeAll { $0.id == id } },
+            onClearAllDrawings: { vm.drawings = [] },
+            onSetDrawingTool: { tool in vm.drawingTool = tool },
+            onSelectDrawing: { id in vm.selectedDrawingID = id }
         )
         .background(ChartView.chartBackground)
         .overlay {

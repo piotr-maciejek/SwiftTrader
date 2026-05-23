@@ -34,13 +34,16 @@ struct ChartTabState: Codable, Equatable {
     var emaConfigs: [EMALineState]
     var showATR: Bool
     var atrPeriod: Int
+    var drawings: [Drawing]
 
     init(instrument: String, period: String, showSessions: Bool, showVolume: Bool,
-         showEMA: Bool, emaConfigs: [EMALineState], showATR: Bool = true, atrPeriod: Int = 14) {
+         showEMA: Bool, emaConfigs: [EMALineState], showATR: Bool = true, atrPeriod: Int = 14,
+         drawings: [Drawing] = []) {
         self.instrument = instrument; self.period = period
         self.showSessions = showSessions; self.showVolume = showVolume
         self.showEMA = showEMA; self.emaConfigs = emaConfigs
         self.showATR = showATR; self.atrPeriod = atrPeriod
+        self.drawings = drawings
     }
 
     init(from decoder: Decoder) throws {
@@ -53,6 +56,7 @@ struct ChartTabState: Codable, Equatable {
         emaConfigs = try c.decode([EMALineState].self, forKey: .emaConfigs)
         showATR = try c.decodeIfPresent(Bool.self, forKey: .showATR) ?? true
         atrPeriod = try c.decodeIfPresent(Int.self, forKey: .atrPeriod) ?? 14
+        drawings = try c.decodeIfPresent([Drawing].self, forKey: .drawings) ?? []
     }
 }
 
@@ -65,13 +69,17 @@ struct CorrelationTabState: Codable, Equatable {
     var emaConfigs: [EMALineState]
     var showATR: Bool
     var atrPeriod: Int
+    /// Per-cell drawings, ordered to match the correlation grid.
+    var drawings: [[Drawing]]
 
     init(currency: String, period: String, showSessions: Bool, showVolume: Bool,
-         showEMA: Bool, emaConfigs: [EMALineState], showATR: Bool = true, atrPeriod: Int = 14) {
+         showEMA: Bool, emaConfigs: [EMALineState], showATR: Bool = true, atrPeriod: Int = 14,
+         drawings: [[Drawing]] = []) {
         self.currency = currency; self.period = period
         self.showSessions = showSessions; self.showVolume = showVolume
         self.showEMA = showEMA; self.emaConfigs = emaConfigs
         self.showATR = showATR; self.atrPeriod = atrPeriod
+        self.drawings = drawings
     }
 
     init(from decoder: Decoder) throws {
@@ -84,6 +92,7 @@ struct CorrelationTabState: Codable, Equatable {
         emaConfigs = try c.decode([EMALineState].self, forKey: .emaConfigs)
         showATR = try c.decodeIfPresent(Bool.self, forKey: .showATR) ?? true
         atrPeriod = try c.decodeIfPresent(Int.self, forKey: .atrPeriod) ?? 14
+        drawings = try c.decodeIfPresent([[Drawing]].self, forKey: .drawings) ?? []
     }
 }
 
@@ -109,10 +118,13 @@ struct MultiTimeframeTabState: Codable, Equatable {
     var emaConfigs: [EMALineState]
     var showATR: Bool
     var atrPeriod: Int
+    /// Per-cell drawings, ordered to match `zoom.periods`.
+    var drawings: [[Drawing]]
 
     init(instrument: String, zoom: TFZoom = .standard, showSessions: Bool = true,
          showVolume: Bool = true, showEMA: Bool = true,
-         emaConfigs: [EMALineState] = [], showATR: Bool = true, atrPeriod: Int = 14) {
+         emaConfigs: [EMALineState] = [], showATR: Bool = true, atrPeriod: Int = 14,
+         drawings: [[Drawing]] = []) {
         self.instrument = instrument
         self.zoom = zoom
         self.showSessions = showSessions
@@ -121,6 +133,7 @@ struct MultiTimeframeTabState: Codable, Equatable {
         self.emaConfigs = emaConfigs
         self.showATR = showATR
         self.atrPeriod = atrPeriod
+        self.drawings = drawings
     }
 
     init(from decoder: Decoder) throws {
@@ -133,6 +146,7 @@ struct MultiTimeframeTabState: Codable, Equatable {
         emaConfigs = try c.decodeIfPresent([EMALineState].self, forKey: .emaConfigs) ?? []
         showATR = try c.decodeIfPresent(Bool.self, forKey: .showATR) ?? true
         atrPeriod = try c.decodeIfPresent(Int.self, forKey: .atrPeriod) ?? 14
+        drawings = try c.decodeIfPresent([[Drawing]].self, forKey: .drawings) ?? []
     }
 }
 

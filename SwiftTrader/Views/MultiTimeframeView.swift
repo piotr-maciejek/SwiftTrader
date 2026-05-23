@@ -150,7 +150,15 @@ struct MultiTimeframeView: View {
                 visualOrderSpread: trading.spreads[instrument] ?? 0,
                 isSubmittingOrder: trading.isSubmitting,
                 externalCursorTime: viewModel.sharedCursorTime,
-                onCursorChange: { time in viewModel.sharedCursorTime = time }
+                onCursorChange: { time in viewModel.sharedCursorTime = time },
+                drawings: vm.drawings,
+                drawingTool: vm.drawingTool,
+                selectedDrawingID: vm.selectedDrawingID,
+                onCommitDrawing: { drawing in vm.drawings.append(drawing) },
+                onDeleteDrawing: { id in vm.drawings.removeAll { $0.id == id } },
+                onClearAllDrawings: { vm.drawings = [] },
+                onSetDrawingTool: { tool in vm.drawingTool = tool },
+                onSelectDrawing: { id in vm.selectedDrawingID = id }
             )
             .overlay {
                 if vm.bars.isEmpty {

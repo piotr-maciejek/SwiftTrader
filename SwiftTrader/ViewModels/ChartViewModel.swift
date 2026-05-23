@@ -60,6 +60,17 @@ final class ChartViewModel {
     var isRefreshingCache = false
     var loadingStatus: LoadingStatus?
 
+    /// User-drawn lines/arrows anchored in (time, price). Persisted with the tab.
+    var drawings: [Drawing] = [] {
+        didSet { onStateChanged?() }
+    }
+    /// Active drawing tool while in drawing mode (nil = normal pan/select).
+    /// Ephemeral; not persisted.
+    var drawingTool: DrawingKind?
+    /// ID of the currently selected drawing, for highlight + Delete key.
+    /// Ephemeral; not persisted.
+    var selectedDrawingID: UUID?
+
     /// Snapshot of the rebucketing toggle for current Tasks. Read-through to
     /// `AppSettings` at reload time so flipping the toggle takes effect on the
     /// next chart reload.
@@ -199,6 +210,12 @@ final class ChartViewModel {
 
     func switchInstrument(_ instrument: String) {
         guard instrument != currentInstrument else { return }
+        // Drawings are anchored in (time, price). A different instrument's price scale
+        // makes those anchors meaningless, so we drop them rather than render them
+        // in nonsensical positions.
+        drawings = []
+        selectedDrawingID = nil
+        drawingTool = nil
         currentInstrument = instrument
         reloadChart()
     }

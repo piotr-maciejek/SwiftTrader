@@ -18,6 +18,13 @@ struct ShortcutsPopover: View {
             Row(label: "Toggle Bottom Panel", keys: "⇧⌘Y"),
             Row(label: "Toggle Right Panel", keys: "⌥⌘0"),
         ]),
+        ("Drawing (chart focused)", [
+            Row(label: "Line tool", keys: "A"),
+            Row(label: "Arrow tool", keys: "S"),
+            Row(label: "Delete selected drawing", keys: "D / ⌫"),
+            Row(label: "Clear all drawings", keys: "⇧D / ⇧⌫"),
+            Row(label: "Exit tool / clear selection", keys: "Esc"),
+        ]),
     ]
 
     var body: some View {

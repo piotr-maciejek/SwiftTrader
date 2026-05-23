@@ -395,7 +395,8 @@ final class WorkspaceViewModel {
                     showEMA: vm.showEMA,
                     emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) },
                     showATR: vm.showATR,
-                    atrPeriod: vm.atrPeriod
+                    atrPeriod: vm.atrPeriod,
+                    drawings: vm.drawings
                 )))
             case .correlation(let vm):
                 return TabState(id: tab.id, content: .correlation(CorrelationTabState(
@@ -406,7 +407,8 @@ final class WorkspaceViewModel {
                     showEMA: vm.showEMA,
                     emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) },
                     showATR: vm.showATR,
-                    atrPeriod: vm.atrPeriod
+                    atrPeriod: vm.atrPeriod,
+                    drawings: vm.chartViewModels.map(\.drawings)
                 )))
             case .multiTimeframe(let vm):
                 return TabState(id: tab.id, content: .multiTimeframe(MultiTimeframeTabState(
@@ -417,7 +419,8 @@ final class WorkspaceViewModel {
                     showEMA: vm.showEMA,
                     emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) },
                     showATR: vm.showATR,
-                    atrPeriod: vm.atrPeriod
+                    atrPeriod: vm.atrPeriod,
+                    drawings: vm.chartViewModels.map(\.drawings)
                 )))
             }
         }
@@ -448,6 +451,7 @@ final class WorkspaceViewModel {
                 vm.emaConfigs = chartState.emaConfigs.map { $0.toEMALine() }
                 vm.showATR = chartState.showATR
                 vm.atrPeriod = chartState.atrPeriod
+                vm.drawings = chartState.drawings
                 wireStateChanged(vm)
                 let tab = Tab(content: .chart(vm))
                 tabs.append(tab)
@@ -465,6 +469,12 @@ final class WorkspaceViewModel {
                 vm.emaConfigs = corrState.emaConfigs.map { $0.toEMALine() }
                 vm.showATR = corrState.showATR
                 vm.atrPeriod = corrState.atrPeriod
+                // Restore per-cell drawings, tolerating a different cell count
+                // (e.g. correlation roster changed since the save).
+                for (i, cellDrawings) in corrState.drawings.enumerated()
+                    where i < vm.chartViewModels.count {
+                    vm.chartViewModels[i].drawings = cellDrawings
+                }
                 wireStateChanged(vm)
                 let tab = Tab(content: .correlation(vm))
                 tabs.append(tab)
@@ -482,6 +492,10 @@ final class WorkspaceViewModel {
                 vm.emaConfigs = mtfState.emaConfigs.map { $0.toEMALine() }
                 vm.showATR = mtfState.showATR
                 vm.atrPeriod = mtfState.atrPeriod
+                for (i, cellDrawings) in mtfState.drawings.enumerated()
+                    where i < vm.chartViewModels.count {
+                    vm.chartViewModels[i].drawings = cellDrawings
+                }
                 wireStateChanged(vm)
                 let tab = Tab(content: .multiTimeframe(vm))
                 tabs.append(tab)
@@ -502,10 +516,18 @@ final class WorkspaceViewModel {
 
     private func wireStateChanged(_ vm: CorrelationViewModel) {
         vm.onStateChanged = { [weak self] in self?.scheduleSave() }
+        // Per-cell drawings live on the child ChartViewModels; their own
+        // didSet → onStateChanged?() needs to reach scheduleSave too.
+        for child in vm.chartViewModels {
+            child.onStateChanged = { [weak self] in self?.scheduleSave() }
+        }
     }
 
     private func wireStateChanged(_ vm: MultiTimeframeViewModel) {
         vm.onStateChanged = { [weak self] in self?.scheduleSave() }
+        for child in vm.chartViewModels {
+            child.onStateChanged = { [weak self] in self?.scheduleSave() }
+        }
     }
 }
 

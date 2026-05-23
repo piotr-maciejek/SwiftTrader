@@ -123,7 +123,15 @@ struct CorrelationView: View {
                 showATR: vm.showATR,
                 atrPeriod: vm.atrPeriod,
                 atrPips: vm.atrPips,
-                todayATRPercent: vm.todayATRPercent
+                todayATRPercent: vm.todayATRPercent,
+                drawings: vm.drawings,
+                drawingTool: vm.drawingTool,
+                selectedDrawingID: vm.selectedDrawingID,
+                onCommitDrawing: { drawing in vm.drawings.append(drawing) },
+                onDeleteDrawing: { id in vm.drawings.removeAll { $0.id == id } },
+                onClearAllDrawings: { vm.drawings = [] },
+                onSetDrawingTool: { tool in vm.drawingTool = tool },
+                onSelectDrawing: { id in vm.selectedDrawingID = id }
             )
             .overlay {
                 if vm.bars.isEmpty {

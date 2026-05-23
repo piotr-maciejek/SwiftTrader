@@ -52,6 +52,17 @@ struct ChartInteractionView: NSViewRepresentable {
     var onResetVisualOrderAmount: (() -> Void)? = nil
     /// While true, all visual-order mouse and key interactions are ignored.
     var isSubmittingOrder: Bool = false
+    // Drawing-layer wiring
+    var barTimes: [Int64] = []
+    var drawings: [Drawing] = []
+    var drawingTool: DrawingKind? = nil
+    var selectedDrawingID: UUID? = nil
+    @Binding var inFlightDrawing: Drawing?
+    var onCommitDrawing: ((Drawing) -> Void)? = nil
+    var onDeleteDrawing: ((UUID) -> Void)? = nil
+    var onClearAllDrawings: (() -> Void)? = nil
+    var onSetDrawingTool: ((DrawingKind?) -> Void)? = nil
+    var onSelectDrawing: ((UUID?) -> Void)? = nil
 
     func makeNSView(context: Context) -> ChartInteractionNSView {
         let view = ChartInteractionNSView()
@@ -79,12 +90,22 @@ struct ChartInteractionView: NSViewRepresentable {
         context.coordinator.onAdjustVisualOrderAmount = onAdjustVisualOrderAmount
         context.coordinator.onResetVisualOrderAmount = onResetVisualOrderAmount
         context.coordinator.isSubmittingOrder = isSubmittingOrder
+        context.coordinator.barTimes = barTimes
+        context.coordinator.drawings = drawings
+        context.coordinator.drawingTool = drawingTool
+        context.coordinator.selectedDrawingID = selectedDrawingID
+        context.coordinator.inFlightDrawing = $inFlightDrawing
+        context.coordinator.onCommitDrawing = onCommitDrawing
+        context.coordinator.onDeleteDrawing = onDeleteDrawing
+        context.coordinator.onClearAllDrawings = onClearAllDrawings
+        context.coordinator.onSetDrawingTool = onSetDrawingTool
+        context.coordinator.onSelectDrawing = onSelectDrawing
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(transform: $transform, barCount: barCount, chartWidth: chartWidth,
                     onUserDrag: onUserDrag, crosshair: $crosshair, dragPreview: $dragPreview,
-                    pendingSLTPEdit: $pendingSLTPEdit)
+                    pendingSLTPEdit: $pendingSLTPEdit, inFlightDrawing: $inFlightDrawing)
     }
 
     class Coordinator {
@@ -116,10 +137,25 @@ struct ChartInteractionView: NSViewRepresentable {
         var visualDragField: VisualOrderDragField?
         var isSubmittingOrder: Bool = false
 
+        // Drawing layer
+        var barTimes: [Int64] = []
+        var drawings: [Drawing] = []
+        var drawingTool: DrawingKind?
+        var selectedDrawingID: UUID?
+        var inFlightDrawing: Binding<Drawing?>
+        var onCommitDrawing: ((Drawing) -> Void)?
+        var onDeleteDrawing: ((UUID) -> Void)?
+        var onClearAllDrawings: (() -> Void)?
+        var onSetDrawingTool: ((DrawingKind?) -> Void)?
+        var onSelectDrawing: ((UUID?) -> Void)?
+        /// (startTimeMs, startPrice, tool) seeded on drawing mouseDown.
+        var inFlightStart: (timeMs: Int64, price: Double, tool: DrawingKind)?
+
         init(transform: Binding<ChartTransform>, barCount: Int, chartWidth: CGFloat,
              onUserDrag: (() -> Void)?, crosshair: Binding<CrosshairState?>,
              dragPreview: Binding<DragPreviewState?>,
-             pendingSLTPEdit: Binding<PendingChartSLTPEdit?>) {
+             pendingSLTPEdit: Binding<PendingChartSLTPEdit?>,
+             inFlightDrawing: Binding<Drawing?>) {
             self.transform = transform
             self.barCount = barCount
             self.chartWidth = chartWidth
@@ -127,6 +163,32 @@ struct ChartInteractionView: NSViewRepresentable {
             self.crosshair = crosshair
             self.dragPreview = dragPreview
             self.pendingSLTPEdit = pendingSLTPEdit
+            self.inFlightDrawing = inFlightDrawing
+        }
+
+        func timeMsForX(_ x: CGFloat) -> Int64 {
+            DrawingMath.timeMsForX(x,
+                                   barTimes: barTimes,
+                                   xOffset: transform.wrappedValue.xOffset,
+                                   slotWidth: transform.wrappedValue.candleSlotWidth)
+        }
+
+        func xForTimeMs(_ ms: Int64) -> CGFloat {
+            DrawingMath.xForTimeMs(ms,
+                                   barTimes: barTimes,
+                                   xOffset: transform.wrappedValue.xOffset,
+                                   slotWidth: transform.wrappedValue.candleSlotWidth)
+        }
+
+        func hitTestDrawing(mouseX: CGFloat, mouseY: CGFloat, threshold: CGFloat = 6) -> UUID? {
+            let point = CGPoint(x: mouseX, y: mouseY)
+            for drawing in drawings {
+                let a = CGPoint(x: xForTimeMs(drawing.startTimeMs), y: yForPrice(drawing.startPrice))
+                let b = CGPoint(x: xForTimeMs(drawing.endTimeMs), y: yForPrice(drawing.endPrice))
+                let d = DrawingMath.distanceFromSegment(point: point, a: a, b: b)
+                if d <= threshold { return drawing.id }
+            }
+            return nil
         }
 
         func clampOffset(_ offset: CGFloat) -> CGFloat {
@@ -262,6 +324,21 @@ struct ChartInteractionView: NSViewRepresentable {
             let location = convert(event.locationInWindow, from: nil)
             let flippedY = bounds.height - location.y
 
+            // Drawing-tool active: place start anchor and seed the in-flight preview.
+            // Suppresses every other interaction while the user is drawing.
+            if let tool = coord.drawingTool {
+                let startPrice = coord.priceForY(min(max(flippedY, 0), coord.chartHeight))
+                let startTimeMs = coord.timeMsForX(location.x)
+                coord.inFlightStart = (timeMs: startTimeMs, price: startPrice, tool: tool)
+                coord.inFlightDrawing.wrappedValue = Drawing(
+                    kind: tool,
+                    startTimeMs: startTimeMs, startPrice: startPrice,
+                    endTimeMs: startTimeMs, endPrice: startPrice
+                )
+                coord.crosshair.wrappedValue = nil
+                return
+            }
+
             // Check visual order buttons first. Swallow clicks while a submit is in flight
             // so users cannot fire confirm/cancel/amount mutations on a frozen box.
             if let button = coord.hitTestVisualOrderButtons(mouseX: location.x, mouseY: flippedY) {
@@ -294,6 +371,17 @@ struct ChartInteractionView: NSViewRepresentable {
                 return
             }
 
+            // Select an existing drawing if the click lands close enough to one.
+            if let id = coord.hitTestDrawing(mouseX: location.x, mouseY: flippedY) {
+                coord.onSelectDrawing?(id)
+                coord.crosshair.wrappedValue = nil
+                return
+            }
+            // Empty-space click deselects.
+            if coord.selectedDrawingID != nil {
+                coord.onSelectDrawing?(nil)
+            }
+
             coord.lastDragX = event.locationInWindow.x
             coord.isDraggingSLTP = false
             coord.isDraggingVisualSLTP = false
@@ -302,6 +390,28 @@ struct ChartInteractionView: NSViewRepresentable {
 
         override func mouseUp(with event: NSEvent) {
             guard let coord = coordinator else { return }
+
+            if let start = coord.inFlightStart {
+                let location = convert(event.locationInWindow, from: nil)
+                let flippedY = bounds.height - location.y
+                let endPrice = coord.priceForY(min(max(flippedY, 0), coord.chartHeight))
+                let endTimeMs = coord.timeMsForX(location.x)
+                // Discard zero-length attempts (likely an accidental click).
+                let dxPixels = abs(coord.xForTimeMs(endTimeMs) - coord.xForTimeMs(start.timeMs))
+                if dxPixels >= 3 {
+                    let drawing = Drawing(
+                        kind: start.tool,
+                        startTimeMs: start.timeMs, startPrice: start.price,
+                        endTimeMs: endTimeMs, endPrice: endPrice
+                    )
+                    coord.onCommitDrawing?(drawing)
+                }
+                coord.inFlightStart = nil
+                coord.inFlightDrawing.wrappedValue = nil
+                // Auto-exit tool after one commit. User can press L/A again to continue.
+                coord.onSetDrawingTool?(nil)
+                return
+            }
 
             if coord.isDraggingVisualSLTP {
                 coord.isDraggingVisualSLTP = false
@@ -337,6 +447,20 @@ struct ChartInteractionView: NSViewRepresentable {
 
         override func mouseDragged(with event: NSEvent) {
             guard let coord = coordinator else { return }
+
+            if let start = coord.inFlightStart {
+                let location = convert(event.locationInWindow, from: nil)
+                let flippedY = bounds.height - location.y
+                let clampedY = min(max(flippedY, 0), coord.chartHeight)
+                let endPrice = coord.priceForY(clampedY)
+                let endTimeMs = coord.timeMsForX(location.x)
+                coord.inFlightDrawing.wrappedValue = Drawing(
+                    kind: start.tool,
+                    startTimeMs: start.timeMs, startPrice: start.price,
+                    endTimeMs: endTimeMs, endPrice: endPrice
+                )
+                return
+            }
 
             if coord.isDraggingVisualSLTP, let field = coord.visualDragField {
                 let location = convert(event.locationInWindow, from: nil)
@@ -399,7 +523,53 @@ struct ChartInteractionView: NSViewRepresentable {
         }
 
         override func keyDown(with event: NSEvent) {
-            guard let coord = coordinator, coord.visualOrder != nil else {
+            guard let coord = coordinator else {
+                super.keyDown(with: event)
+                return
+            }
+
+            // Drawing shortcuts are only active when no command-key modifier is held,
+            // so app-level Cmd+L / Cmd+A bindings still propagate. Shift IS allowed
+            // because Shift+Delete is the "clear all" gesture.
+            let blockingModifiers = event.modifierFlags.intersection([.command, .option, .control])
+            if blockingModifiers.isEmpty {
+                let isShift = event.modifierFlags.contains(.shift)
+                switch event.keyCode {
+                case 0:  // A → line tool
+                    coord.onSetDrawingTool?(.line)
+                    return
+                case 1:  // S → arrow tool
+                    coord.onSetDrawingTool?(.arrow)
+                    return
+                case 53: // Escape
+                    if coord.drawingTool != nil {
+                        coord.onSetDrawingTool?(nil)
+                        coord.inFlightStart = nil
+                        coord.inFlightDrawing.wrappedValue = nil
+                        return
+                    }
+                    if coord.selectedDrawingID != nil {
+                        coord.onSelectDrawing?(nil)
+                        return
+                    }
+                    // fall through to visual-order Esc handling below
+                case 2, 51, 117: // D / Backspace / forward-Delete
+                    if isShift {
+                        coord.onClearAllDrawings?()
+                        return
+                    }
+                    if let id = coord.selectedDrawingID {
+                        coord.onDeleteDrawing?(id)
+                        coord.onSelectDrawing?(nil)
+                        return
+                    }
+                default:
+                    break
+                }
+            }
+
+            // Existing visual-order handling.
+            guard coord.visualOrder != nil else {
                 super.keyDown(with: event)
                 return
             }

@@ -84,6 +84,7 @@ struct TabStateBackwardCompatTests {
             #expect(state.instrument == "EURUSD")
             #expect(state.showATR == true)
             #expect(state.atrPeriod == 14)
+            #expect(state.drawings.isEmpty)
         } else {
             Issue.record("Expected chart content")
         }
@@ -96,6 +97,7 @@ struct TabStateBackwardCompatTests {
             #expect(state.currency == "EUR")
             #expect(state.showATR == true)
             #expect(state.atrPeriod == 14)
+            #expect(state.drawings.isEmpty)
         } else {
             Issue.record("Expected correlation content")
         }

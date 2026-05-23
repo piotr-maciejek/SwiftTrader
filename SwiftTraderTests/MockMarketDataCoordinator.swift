@@ -9,18 +9,22 @@ final class MockMarketDataCoordinator: MarketDataProviding, @unchecked Sendable 
     var fetchCandlesResult: Result<[CandleBar], Error> = .success([])
     var fetchEarlierResult: Result<[CandleBar], Error> = .success([])
 
-    // Call tracking
+    // Call tracking. ChartViewModel can fan-out multiple fetchCandles
+    // concurrently (history + loadATR) which lands on the cooperative
+    // thread pool, so the call-log arrays need a lock to avoid Array
+    // realloc races during `append`.
+    private let lock = NSLock()
     var fetchInstrumentsCalled = false
     var fetchCandlesCalls: [(instrument: String, period: String, count: Int)] = []
     var cachedBars: [(bar: CandleBar, instrument: String, period: String)] = []
 
     func fetchInstruments() async throws -> [String] {
-        fetchInstrumentsCalled = true
+        lock.withLock { fetchInstrumentsCalled = true }
         return try instrumentsResult.get()
     }
 
     func fetchCandles(instrument: String, period: String, count: Int, rebucketing: Bool) async throws -> [CandleBar] {
-        fetchCandlesCalls.append((instrument, period, count))
+        lock.withLock { fetchCandlesCalls.append((instrument, period, count)) }
         return try fetchCandlesResult.get()
     }
 
@@ -29,7 +33,7 @@ final class MockMarketDataCoordinator: MarketDataProviding, @unchecked Sendable 
     }
 
     func cacheBar(_ bar: CandleBar, instrument: String, period: String, rebucketing: Bool) async {
-        cachedBars.append((bar, instrument, period))
+        lock.withLock { cachedBars.append((bar, instrument, period)) }
     }
 
     func streamCandles(instrument: String, period: String, rebucketing: Bool) -> AsyncThrowingStream<CandleBar, Error> {
@@ -44,7 +48,7 @@ final class MockMarketDataCoordinator: MarketDataProviding, @unchecked Sendable 
     var forceReconnectCalled = false
     var forceReconnectResult: Result<Void, Error> = .success(())
     func forceReconnect() async throws {
-        forceReconnectCalled = true
+        lock.withLock { forceReconnectCalled = true }
         try forceReconnectResult.get()
     }
 }

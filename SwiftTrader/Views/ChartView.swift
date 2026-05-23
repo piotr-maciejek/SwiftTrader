@@ -45,9 +45,19 @@ struct ChartView: View {
     /// Called when the local hover crosshair moves. Receives the time of the
     /// bar under the cursor, or nil when the cursor leaves the chart.
     var onCursorChange: ((Int64?) -> Void)? = nil
+    // Drawing layer
+    var drawings: [Drawing] = []
+    var drawingTool: DrawingKind? = nil
+    var selectedDrawingID: UUID? = nil
+    var onCommitDrawing: ((Drawing) -> Void)? = nil
+    var onDeleteDrawing: ((UUID) -> Void)? = nil
+    var onClearAllDrawings: (() -> Void)? = nil
+    var onSetDrawingTool: ((DrawingKind?) -> Void)? = nil
+    var onSelectDrawing: ((UUID?) -> Void)? = nil
     @State private var crosshair: CrosshairState? = nil
     @State private var dragPreview: DragPreviewState? = nil
     @State private var pendingSLTPEdit: PendingChartSLTPEdit? = nil
+    @State private var inFlightDrawing: Drawing? = nil
 
     // Layout constants
     private let priceAxisWidth: CGFloat = 70
@@ -88,6 +98,10 @@ struct ChartView: View {
                     drawCurrentPriceLine(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawSLTPLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
                     drawPendingOrderLines(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    drawUserDrawings(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    if let inflight = inFlightDrawing {
+                        drawSingleDrawing(context: &chartContext, drawing: inflight, isSelected: false, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+                    }
                     if let vo = visualOrder {
                         drawVisualOrderBox(context: &chartContext, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, order: vo, isSubmitting: isSubmittingOrder)
                     }
@@ -141,7 +155,17 @@ struct ChartView: View {
                         onUpdateVisualOrderEntry: onUpdateVisualOrderEntry,
                         onAdjustVisualOrderAmount: onAdjustVisualOrderAmount,
                         onResetVisualOrderAmount: onResetVisualOrderAmount,
-                        isSubmittingOrder: isSubmittingOrder
+                        isSubmittingOrder: isSubmittingOrder,
+                        barTimes: bars.map(\.time),
+                        drawings: drawings,
+                        drawingTool: drawingTool,
+                        selectedDrawingID: selectedDrawingID,
+                        inFlightDrawing: $inFlightDrawing,
+                        onCommitDrawing: onCommitDrawing,
+                        onDeleteDrawing: onDeleteDrawing,
+                        onClearAllDrawings: onClearAllDrawings,
+                        onSetDrawingTool: onSetDrawingTool,
+                        onSelectDrawing: onSelectDrawing
                     )
                     .frame(width: chartWidth, height: chartHeight + volumeHeight)
                 }
@@ -296,6 +320,13 @@ struct ChartView: View {
     private func yForPrice(_ price: Double, chartHeight: CGFloat, priceRange: (min: Double, max: Double)) -> CGFloat {
         let normalized = (price - priceRange.min) / (priceRange.max - priceRange.min)
         return chartHeight * (1 - CGFloat(normalized))
+    }
+
+    private func xForTimeMs(_ ms: Int64) -> CGFloat {
+        DrawingMath.xForTimeMs(ms,
+                               barTimes: bars.map(\.time),
+                               xOffset: transform.xOffset,
+                               slotWidth: transform.candleSlotWidth)
     }
 
     // MARK: - Drawing
@@ -808,6 +839,49 @@ struct ChartView: View {
                 context.fill(Path(roundedRect: pillRect, cornerRadius: 3), with: .color(color))
                 context.draw(resolved, at: CGPoint(x: chartWidth + 6, y: y), anchor: .leading)
             }
+        }
+    }
+
+    // MARK: - User drawings
+
+    private let drawingDefaultColor = Color.white.opacity(0.9)
+    private let drawingSelectedColor = Color.yellow
+
+    private func drawUserDrawings(context: inout GraphicsContext, chartWidth: CGFloat,
+                                   chartHeight: CGFloat, priceRange: (min: Double, max: Double)) {
+        for drawing in drawings {
+            let isSelected = drawing.id == selectedDrawingID
+            drawSingleDrawing(context: &context, drawing: drawing, isSelected: isSelected,
+                              chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange)
+        }
+    }
+
+    private func drawSingleDrawing(context: inout GraphicsContext, drawing: Drawing,
+                                    isSelected: Bool, chartWidth: CGFloat,
+                                    chartHeight: CGFloat, priceRange: (min: Double, max: Double)) {
+        guard !bars.isEmpty else { return }
+        let p1 = CGPoint(x: xForTimeMs(drawing.startTimeMs),
+                         y: yForPrice(drawing.startPrice, chartHeight: chartHeight, priceRange: priceRange))
+        let p2 = CGPoint(x: xForTimeMs(drawing.endTimeMs),
+                         y: yForPrice(drawing.endPrice, chartHeight: chartHeight, priceRange: priceRange))
+        // Cheap culling: segment entirely off the right of the chart.
+        if min(p1.x, p2.x) > chartWidth { return }
+        if max(p1.x, p2.x) < 0 { return }
+
+        let color = isSelected ? drawingSelectedColor : drawingDefaultColor
+        let lineWidth: CGFloat = isSelected ? 2.5 : 1.5
+
+        var path = Path()
+        path.move(to: p1)
+        path.addLine(to: p2)
+        context.stroke(path, with: .color(color), lineWidth: lineWidth)
+
+        if drawing.kind == .arrow {
+            let (tipL, tipR) = DrawingMath.arrowHeadTips(from: p1, to: p2, length: 10)
+            var head = Path()
+            head.move(to: p2); head.addLine(to: tipL)
+            head.move(to: p2); head.addLine(to: tipR)
+            context.stroke(head, with: .color(color), lineWidth: lineWidth)
         }
     }
 
