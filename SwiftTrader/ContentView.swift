@@ -626,6 +626,7 @@ struct ContentView: View {
 
         CorrelationView(
             viewModel: vm,
+            trading: workspace.trading,
             onInstrumentTap: { workspace.selectOrCreateChartTab(instrument: $0) },
             onMultiTimeframeTap: { workspace.selectOrCreateMultiTimeframeTab(instrument: $0) }
         )

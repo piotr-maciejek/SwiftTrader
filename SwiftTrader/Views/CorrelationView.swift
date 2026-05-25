@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CorrelationView: View {
     let viewModel: CorrelationViewModel
+    @Bindable var trading: TradingViewModel
     var onInstrumentTap: ((String) -> Void)?
     var onMultiTimeframeTap: ((String) -> Void)?
 
@@ -70,6 +71,35 @@ struct CorrelationView: View {
                         .foregroundColor(last.close >= last.open ? .green : .red)
                 }
 
+                let tradingEnabled = !trading.isSubmitting
+                    && !vm.bars.isEmpty
+                    && vm.isConnected
+                    && trading.visualOrders[instrument] == nil
+
+                Button("B") {
+                    trading.beginVisualOrder(direction: "BUY", instrument: instrument, bars: vm.bars)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.6))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(tradingEnabled ? Color.green : Color.gray, in: RoundedRectangle(cornerRadius: 3))
+                .disabled(!tradingEnabled)
+                .help("Buy \(formatInstrument(instrument))")
+
+                Button("S") {
+                    trading.beginVisualOrder(direction: "SELL", instrument: instrument, bars: vm.bars)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.6))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(tradingEnabled ? Color.red : Color.gray, in: RoundedRectangle(cornerRadius: 3))
+                .disabled(!tradingEnabled)
+                .help("Sell \(formatInstrument(instrument))")
+
                 Spacer()
 
                 Button(action: { vm.refreshCache() }) {
@@ -120,10 +150,45 @@ struct CorrelationView: View {
                 volumeMA: vm.volumeMA,
                 showEMA: vm.showEMA,
                 emaConfigs: vm.emaConfigs,
+                positions: trading.positions,
+                pendingOrders: trading.pendingOrders,
+                currentInstrument: instrument,
                 showATR: vm.showATR,
                 atrPeriod: vm.atrPeriod,
                 atrPips: vm.atrPips,
                 todayATRPercent: vm.todayATRPercent,
+                onModifyPosition: { label, sl, tp in
+                    Task { await trading.modifyPosition(label: label, stopLoss: sl, takeProfit: tp) }
+                },
+                visualOrder: trading.visualOrderWithLivePrice(
+                    for: instrument,
+                    currentPrice: vm.bars.last?.close,
+                    barCount: vm.bars.count
+                ),
+                onConfirmVisualOrder: {
+                    Task { await trading.confirmVisualOrder(instrument: instrument, livePrice: vm.bars.last?.close) }
+                },
+                onCancelVisualOrder: {
+                    trading.cancelVisualOrder(instrument: instrument)
+                },
+                onUpdateVisualOrderSL: { price in
+                    trading.updateVisualOrderSL(instrument: instrument, price: price, livePrice: vm.bars.last?.close)
+                },
+                onUpdateVisualOrderTP: { price in
+                    trading.visualOrders[instrument]?.takeProfit = price
+                },
+                onUpdateVisualOrderEntry: { price in
+                    trading.updateVisualOrderEntry(instrument: instrument, price: price)
+                },
+                onAdjustVisualOrderAmount: { delta in
+                    trading.adjustVisualOrderAmount(instrument: instrument, by: delta)
+                },
+                onResetVisualOrderAmount: {
+                    trading.resetVisualOrderAmount(instrument: instrument, livePrice: vm.bars.last?.close)
+                },
+                accountEquity: trading.account?.equity,
+                visualOrderSpread: trading.spreads[instrument] ?? 0,
+                isSubmittingOrder: trading.isSubmitting,
                 externalCursorTime: viewModel.sharedCursorTime,
                 onCursorChange: { time in viewModel.sharedCursorTime = time },
                 drawings: vm.drawings,
