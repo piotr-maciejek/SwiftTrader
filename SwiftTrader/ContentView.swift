@@ -67,7 +67,7 @@ struct ContentView: View {
             // Main content: sidebar | (chart + bottom panel) | right panel
             HStack(spacing: 0) {
                 if workspace.showLeftPanel {
-                    LeftSidebar(workspace: workspace)
+                    LeftSidebar(workspace: workspace, settings: AppSettings.shared)
                     Divider()
                 }
 

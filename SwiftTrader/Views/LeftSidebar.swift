@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LeftSidebar: View {
     @Bindable var workspace: WorkspaceViewModel
+    @Bindable var settings: AppSettings
     @State private var hoveredKey: String?
 
     var body: some View {
@@ -21,7 +22,7 @@ struct LeftSidebar: View {
     private var pairsSection: some View {
         let instruments = sortedInstruments()
         return Group {
-            sectionHeader("Pairs")
+            pairsHeader
             if instruments.isEmpty {
                 Text("Loading…")
                     .font(.system(size: 10))
@@ -29,11 +30,71 @@ struct LeftSidebar: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
             } else {
-                ForEach(instruments, id: \.self) { instrument in
-                    pairRow(instrument: instrument)
+                switch settings.pairsGroupingMode {
+                case .alphabetical:
+                    ForEach(instruments, id: \.self) { instrument in
+                        pairRow(instrument: instrument)
+                    }
+                case .byCurrency:
+                    ForEach(Self.instrumentsByCurrency(instruments), id: \.currency) { group in
+                        currencyGroupHeader(group.currency)
+                        ForEach(group.instruments, id: \.self) { instrument in
+                            pairRow(instrument: instrument, scopeKey: group.currency)
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private var pairsHeader: some View {
+        HStack(spacing: 6) {
+            Text("Pairs")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            Spacer()
+            Picker("", selection: $settings.pairsGroupingMode) {
+                Text("A-Z").tag(PairsGroupingMode.alphabetical)
+                Text("Group").tag(PairsGroupingMode.byCurrency)
+            }
+            .pickerStyle(.segmented)
+            .controlSize(.mini)
+            .fixedSize()
+            .help("Sort pairs alphabetically, or group by currency")
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+    }
+
+    private func currencyGroupHeader(_ currency: String) -> some View {
+        Text(currency)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+    }
+
+    /// Buckets each instrument under every recognized currency it contains
+    /// (base AND quote), in alphabetical currency order. EURUSD therefore
+    /// appears under both EUR and USD. Currencies with zero matching
+    /// instruments are omitted. Pure — exposed `static` for unit testing.
+    static func instrumentsByCurrency(_ instruments: [String])
+        -> [(currency: String, instruments: [String])]
+    {
+        let currencies = Array(CurrencyCorrelation.pairs.keys).sorted()
+        var result: [(currency: String, instruments: [String])] = []
+        for currency in currencies {
+            let matches = instruments.filter { instrument in
+                CurrencyCorrelation.currencies(from: instrument).contains(currency)
+            }
+            if !matches.isEmpty {
+                result.append((currency: currency, instruments: matches))
+            }
+        }
+        return result
     }
 
     private func sortedInstruments() -> [String] {
@@ -63,9 +124,9 @@ struct LeftSidebar: View {
         }
     }
 
-    private func pairRow(instrument: String) -> some View {
+    private func pairRow(instrument: String, scopeKey: String? = nil) -> some View {
         let tab = chartTab(for: instrument)
-        let key = "pair:\(instrument)"
+        let key = scopeKey.map { "pair:\($0):\(instrument)" } ?? "pair:\(instrument)"
         let isHovered = hoveredKey == key
         let isSelected = tab?.id == workspace.selectedTabID
         let dot = pairDotColor(instrument: instrument, chartTab: tab)

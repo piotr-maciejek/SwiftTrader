@@ -1,5 +1,10 @@
 import Foundation
 
+enum PairsGroupingMode: String, CaseIterable, Codable {
+    case alphabetical
+    case byCurrency
+}
+
 @Observable
 @MainActor
 final class AppSettings {
@@ -11,6 +16,10 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(clientSideRebucketing, forKey: "clientSideRebucketing") }
     }
 
+    var pairsGroupingMode: PairsGroupingMode {
+        didSet { UserDefaults.standard.set(pairsGroupingMode.rawValue, forKey: "pairsGroupingMode") }
+    }
+
     static let shared = AppSettings()
 
     private init() {
@@ -19,5 +28,7 @@ final class AppSettings {
         // Default ON — use object(forKey:) so an explicit OFF from the user isn't
         // overwritten by the default.
         self.clientSideRebucketing = (UserDefaults.standard.object(forKey: "clientSideRebucketing") as? Bool) ?? true
+        let raw = UserDefaults.standard.string(forKey: "pairsGroupingMode")
+        self.pairsGroupingMode = raw.flatMap(PairsGroupingMode.init(rawValue:)) ?? .alphabetical
     }
 }

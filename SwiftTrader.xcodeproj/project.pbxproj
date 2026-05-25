@@ -91,6 +91,7 @@
 		B100000E /* WebSocketStreamDriverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000E; };
 		B1000014 /* MultiTimeframeViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000014; };
 		B1000050 /* DrawingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000050; };
+		B1000051 /* LeftSidebarGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000051; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -191,6 +192,7 @@
 		B200000E /* WebSocketStreamDriverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketStreamDriverTests.swift; sourceTree = "<group>"; };
 		B2000014 /* MultiTimeframeViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiTimeframeViewModelTests.swift; sourceTree = "<group>"; };
 		B2000050 /* DrawingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTests.swift; sourceTree = "<group>"; };
+		B2000051 /* LeftSidebarGroupingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftSidebarGroupingTests.swift; sourceTree = "<group>"; };
 		B3000001 /* SwiftTraderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SwiftTraderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -340,6 +342,7 @@
 				B2000013 /* TradeHistoryTests.swift */,
 				B2000014 /* MultiTimeframeViewModelTests.swift */,
 				B2000050 /* DrawingTests.swift */,
+				B2000051 /* LeftSidebarGroupingTests.swift */,
 			);
 			path = SwiftTraderTests;
 			sourceTree = "<group>";
@@ -503,6 +506,7 @@
 				B1000013 /* TradeHistoryTests.swift in Sources */,
 				B1000014 /* MultiTimeframeViewModelTests.swift in Sources */,
 				B1000050 /* DrawingTests.swift in Sources */,
+				B1000051 /* LeftSidebarGroupingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
