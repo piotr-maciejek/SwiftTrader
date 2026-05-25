@@ -779,8 +779,10 @@ struct ContentView: View {
     @ViewBuilder
     private func mtfTradingControls(vm: MultiTimeframeViewModel) -> some View {
         let trading = workspace.trading
-        // Seed SL/TP from the highest-TF cell (index 0: Daily standard / 4H intraday).
-        let primaryCell = vm.chartViewModels.first
+        // Seed SL/TP from the lowest-TF cell (last index: 15m standard / 3m intraday) —
+        // tighter recent swing produces a tighter stop, which matches the precision the
+        // MTF view is for.
+        let primaryCell = vm.chartViewModels.last
         let tradingEnabled = !trading.isSubmitting
             && (primaryCell.map { !$0.bars.isEmpty && $0.isConnected } ?? false)
             && trading.visualOrders[vm.instrument] == nil

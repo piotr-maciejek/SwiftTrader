@@ -108,16 +108,21 @@ final class TradingViewModel {
         let lookback = min(5, bars.count)
         let recentBars = bars.suffix(lookback).filter { !$0.partial }
 
+        // Floor distance keeps SL outside the spread (avoids instant stop-out) without
+        // pushing it artificially far from the recent swing. 0.01% of price is ≈1 pip
+        // for non-JPY majors and ≈1.5 pips for JPY pairs — tight enough that bar-based
+        // stops on low timeframes (e.g. 3m) come through, wide enough to dodge typical
+        // spreads. Previous 0.001 floor (≈10 pips on AUDCAD) was masking the recent
+        // swing on low TFs.
+        let floor = abs(currentPrice) * 0.0001
         if direction == "BUY" {
             let lowestLow = recentBars.map(\.low).min() ?? currentPrice
-            // SL at the lowest low of recent bars, but always below current price
-            let sl = min(lowestLow, currentPrice - abs(currentPrice) * 0.001)
+            let sl = min(lowestLow, currentPrice - floor)
             let risk = currentPrice - sl
             return (stopLoss: sl, takeProfit: currentPrice + risk * 3)
         } else {
             let highestHigh = recentBars.map(\.high).max() ?? currentPrice
-            // SL at the highest high of recent bars, but always above current price
-            let sl = max(highestHigh, currentPrice + abs(currentPrice) * 0.001)
+            let sl = max(highestHigh, currentPrice + floor)
             let risk = sl - currentPrice
             return (stopLoss: sl, takeProfit: currentPrice - risk * 3)
         }
