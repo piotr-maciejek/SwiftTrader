@@ -721,6 +721,10 @@ struct ContentView: View {
                 )
             }
 
+            Divider().frame(height: 16)
+
+            mtfTradingControls(vm: vm)
+
             Spacer()
         }
         .padding(.horizontal)
@@ -760,6 +764,46 @@ struct ContentView: View {
             Button("Sell") {
                 trading.beginVisualOrder(
                     direction: "SELL", instrument: vm.currentInstrument, bars: vm.bars)
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.6))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(tradingEnabled ? Color.red : Color.gray, in: RoundedRectangle(cornerRadius: 4))
+            .disabled(!tradingEnabled)
+        }
+    }
+
+    @ViewBuilder
+    private func mtfTradingControls(vm: MultiTimeframeViewModel) -> some View {
+        let trading = workspace.trading
+        // Seed SL/TP from the highest-TF cell (index 0: Daily standard / 4H intraday).
+        let primaryCell = vm.chartViewModels.first
+        let tradingEnabled = !trading.isSubmitting
+            && (primaryCell.map { !$0.bars.isEmpty && $0.isConnected } ?? false)
+            && trading.visualOrders[vm.instrument] == nil
+
+        HStack(spacing: 6) {
+            Button("Buy") {
+                if let cell = primaryCell {
+                    trading.beginVisualOrder(
+                        direction: "BUY", instrument: vm.instrument, bars: cell.bars)
+                }
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.6))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(tradingEnabled ? Color.green : Color.gray, in: RoundedRectangle(cornerRadius: 4))
+            .disabled(!tradingEnabled)
+
+            Button("Sell") {
+                if let cell = primaryCell {
+                    trading.beginVisualOrder(
+                        direction: "SELL", instrument: vm.instrument, bars: cell.bars)
+                }
             }
             .buttonStyle(.borderless)
             .font(.system(size: 11, weight: .semibold))

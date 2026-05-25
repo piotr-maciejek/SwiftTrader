@@ -29,8 +29,6 @@ struct MultiTimeframeView: View {
     private func cell(vm: ChartViewModel, period: String) -> some View {
         let label = ChartViewModel.availablePeriods.first { $0.value == period }?.label ?? period
         let instrument = viewModel.instrument
-        let tradingEnabled = !trading.isSubmitting && !vm.bars.isEmpty && vm.isConnected
-            && trading.visualOrders[instrument] == nil
 
         return VStack(spacing: 0) {
             HStack(spacing: 4) {
@@ -47,30 +45,6 @@ struct MultiTimeframeView: View {
                 }
 
                 Spacer()
-
-                Button("B") {
-                    trading.beginVisualOrder(direction: "BUY", instrument: instrument, bars: vm.bars)
-                }
-                .buttonStyle(.borderless)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.5))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(tradingEnabled ? Color.green : Color.gray, in: RoundedRectangle(cornerRadius: 3))
-                .disabled(!tradingEnabled)
-                .help("Buy at \(label)")
-
-                Button("S") {
-                    trading.beginVisualOrder(direction: "SELL", instrument: instrument, bars: vm.bars)
-                }
-                .buttonStyle(.borderless)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.5))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(tradingEnabled ? Color.red : Color.gray, in: RoundedRectangle(cornerRadius: 3))
-                .disabled(!tradingEnabled)
-                .help("Sell at \(label)")
 
                 Button(action: { vm.refreshCache() }) {
                     Group {
