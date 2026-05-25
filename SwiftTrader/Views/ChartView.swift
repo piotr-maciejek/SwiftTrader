@@ -59,6 +59,9 @@ struct ChartView: View {
     @State private var dragPreview: DragPreviewState? = nil
     @State private var pendingSLTPEdit: PendingChartSLTPEdit? = nil
     @State private var inFlightDrawing: Drawing? = nil
+    /// Captures `transform.yScale` at the start of a price-axis drag so the gesture's
+    /// cumulative translation can scale relative to that snapshot, not the live value.
+    @State private var yZoomDragStartScale: Double? = nil
 
     // Layout constants
     private let priceAxisWidth: CGFloat = 70
@@ -170,6 +173,34 @@ struct ChartView: View {
                         onSelectDrawing: onSelectDrawing
                     )
                     .frame(width: chartWidth, height: chartHeight + volumeHeight)
+                }
+                .overlay(alignment: .topLeading) {
+                    // Price-axis gesture surface: drag vertically to zoom Y, double-click
+                    // to reset. Sits over the price-axis column on the right; doesn't catch
+                    // any other chart interactions. Drag minimumDistance=3 so stationary
+                    // clicks pass through to the tap gesture below.
+                    Color.clear
+                        .frame(width: priceAxisWidth, height: chartHeight + volumeHeight)
+                        .contentShape(Rectangle())
+                        .offset(x: chartWidth)
+                        .gesture(
+                            DragGesture(minimumDistance: 3)
+                                .onChanged { value in
+                                    if yZoomDragStartScale == nil {
+                                        yZoomDragStartScale = transform.yScale
+                                    }
+                                    let factor = exp(-Double(value.translation.height) * 0.005)
+                                    let start = yZoomDragStartScale ?? 1.0
+                                    transform.yScale = max(0.1, min(20, start * factor))
+                                }
+                                .onEnded { _ in yZoomDragStartScale = nil }
+                        )
+                        .simultaneousGesture(
+                            TapGesture(count: 2).onEnded {
+                                transform.yScale = 1.0
+                                transform.yOffset = 0
+                            }
+                        )
                 }
                 .confirmationDialog(
                     "Adjust order",
@@ -298,8 +329,10 @@ struct ChartView: View {
             lo = min(lo, bars[i].low)
             hi = max(hi, bars[i].high)
         }
-        // Include visual order SL/TP so they're always visible
-        if let vo = visualOrder {
+        // Default: fold visual order SL/TP into the range so they're always visible.
+        // Skipped when the user has manually zoomed Y — they're explicitly choosing
+        // what to see, and including a far-away TP would defeat the zoom.
+        if !transform.hasManualYTransform, let vo = visualOrder {
             lo = min(lo, min(vo.stopLoss, vo.takeProfit))
             hi = max(hi, max(vo.stopLoss, vo.takeProfit))
         }
@@ -310,7 +343,15 @@ struct ChartView: View {
             hi = mid + 0.0005
         }
         let padding = (hi - lo) * pricePaddingPercent
-        return (lo - padding, hi + padding)
+        let baseLo = lo - padding
+        let baseHi = hi + padding
+        if !transform.hasManualYTransform {
+            return (baseLo, baseHi)
+        }
+        // Manual Y zoom: scale the range around its center, then pan by yOffset.
+        let center = (baseLo + baseHi) / 2 + transform.yOffset
+        let span = (baseHi - baseLo) / transform.yScale
+        return (center - span / 2, center + span / 2)
     }
 
     // MARK: - Coordinate mapping

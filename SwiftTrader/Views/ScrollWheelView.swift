@@ -305,6 +305,16 @@ struct ChartInteractionView: NSViewRepresentable {
 
         override func scrollWheel(with event: NSEvent) {
             guard let coord = coordinator else { return }
+
+            // Option+scroll → vertical zoom (mirrors the price-axis drag). Up = zoom in.
+            // Zoom is around the chart's vertical center, not the cursor.
+            if event.modifierFlags.contains(.option) {
+                let factor = exp(Double(event.scrollingDeltaY) * 0.01)
+                let newScale = max(0.1, min(20, coord.transform.wrappedValue.yScale * factor))
+                coord.transform.wrappedValue.yScale = newScale
+                return
+            }
+
             let zoomDelta = event.scrollingDeltaY * 0.02
             let oldScale = coord.transform.wrappedValue.xScale
             let newScale = max(0.3, min(5.0, oldScale + zoomDelta))
