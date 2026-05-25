@@ -1051,6 +1051,45 @@ struct ChartView: View {
 
     // MARK: - Visual Order Box
 
+    /// Fixed-size control panel for amount / R:R / risk text / Confirm-Cancel. Width and
+    /// height are pixel-fixed so the internal layout never squishes when the price-based
+    /// box is shallow. Anchored horizontally to the box midX and vertically into the TP
+    /// zone (above entry for BUY, below for SELL), clamped to chart bounds so it never
+    /// disappears off-screen. May extend beyond the box's chart-rendered border — the
+    /// panel is a sticker on top of the box, not a sub-rect of it.
+    static let visualOrderPanelWidth: CGFloat = 180
+    static let visualOrderPanelHeight: CGFloat = 140
+
+    static func visualOrderPanelRect(boxLeft: CGFloat, boxRight: CGFloat,
+                                     entryY: CGFloat, isBuy: Bool,
+                                     chartWidth: CGFloat, chartHeight: CGFloat) -> CGRect {
+        let width = visualOrderPanelWidth
+        let height = visualOrderPanelHeight
+        let midX = (boxLeft + boxRight) / 2
+        var x = midX - width / 2
+        x = max(4, min(chartWidth - width - 4, x))
+        let desiredY: CGFloat = isBuy ? entryY - height - 8 : entryY + 8
+        let y = max(4, min(chartHeight - height - 4, desiredY))
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// Y-coordinate for the amount row (and ± buttons) inside the panel.
+    static func visualOrderPanelAmountY(panelRect: CGRect) -> CGFloat {
+        panelRect.minY + 12
+    }
+
+    /// `boxRight` to pass into `visualOrderButtonRects` so Confirm/Cancel land
+    /// inside the panel's bottom-right corner.
+    static func visualOrderPanelButtonsRight(panelRect: CGRect) -> CGFloat {
+        panelRect.maxX - 2
+    }
+
+    /// `boxBottom` to pass into `visualOrderButtonRects` so the button row anchors
+    /// to the panel's bottom edge.
+    static func visualOrderPanelButtonsBottom(panelRect: CGRect) -> CGFloat {
+        panelRect.maxY - 4
+    }
+
     /// Button rect positions for visual order confirm/cancel — shared between drawing and hit-testing.
     static func visualOrderButtonRects(boxRight: CGFloat, boxBottom: CGFloat) -> (confirm: CGRect, cancel: CGRect) {
         let bw: CGFloat = 28
@@ -1139,68 +1178,86 @@ struct ChartView: View {
                            style: StrokeStyle(lineWidth: 1))
         }
 
-        // Info text
-        let midX = (leftX + rightX) / 2
+        // SL/TP price labels on right side of bar-anchored box (unchanged — sit on the
+        // dashed lines at the box's right edge, on the chart).
+        let labelFont = Font.system(size: 9, weight: .medium, design: .monospaced)
+        let decimalPlaces = order.instrument.contains("JPY") ? 3 : 5
+        let slLabel = context.resolve(Text(String(format: "SL %.\(decimalPlaces)f", order.stopLoss))
+            .font(labelFont).foregroundStyle(bearishColor))
+        context.draw(slLabel, at: CGPoint(x: rightX + 4, y: slY), anchor: .leading)
+
+        let tpLabel = context.resolve(Text(String(format: "TP %.\(decimalPlaces)f", order.takeProfit))
+            .font(labelFont).foregroundStyle(bullishColor))
+        context.draw(tpLabel, at: CGPoint(x: rightX + 4, y: tpY), anchor: .leading)
+
+        // Fixed-size control panel — sticker over the box that keeps amount/RR/buttons
+        // legible regardless of how shallow the price-based box is.
+        let panelRect = Self.visualOrderPanelRect(
+            boxLeft: leftX, boxRight: rightX,
+            entryY: entryY, isBuy: isBuy,
+            chartWidth: chartWidth, chartHeight: chartHeight
+        )
+        context.fill(Path(roundedRect: panelRect, cornerRadius: 5),
+                     with: .color(.black.opacity(0.78 * alpha)))
+        context.stroke(Path(roundedRect: panelRect, cornerRadius: 5),
+                       with: .color(.white.opacity(0.2 * alpha)),
+                       style: StrokeStyle(lineWidth: 1))
+
         let textStyle = Font.system(size: 10, weight: .medium, design: .monospaced)
+        let panelMidX = panelRect.midX
+        let amountY = Self.visualOrderPanelAmountY(panelRect: panelRect)
 
         let amountSuffix = order.isAmountOverridden ? " (M)" : ""
         let standardLots = order.amount * 10
         let amountText = String(format: "%g lots%@", standardLots, amountSuffix)
-        // Realized loss when SL hits ≈ chart distance + spread (open at ask, close at bid for BUY).
+        let resolvedAmount = context.resolve(Text(amountText).font(textStyle).foregroundStyle(.white.opacity(0.9 * alpha)))
+        let amountSize = resolvedAmount.measure(in: CGSize(width: 200, height: 20))
+        context.draw(resolvedAmount, at: CGPoint(x: panelMidX - amountSize.width / 2, y: amountY), anchor: .topLeading)
+
+        let (minusRect, plusRect) = Self.visualOrderAmountButtonRects(midX: panelMidX, amountY: amountY)
+        context.fill(Path(roundedRect: minusRect, cornerRadius: 3), with: .color(.white.opacity(0.15 * alpha)))
+        let minusSymbol = context.resolve(Text("\u{2212}").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.8 * alpha)))
+        context.draw(minusSymbol, at: CGPoint(x: minusRect.midX, y: minusRect.midY), anchor: .center)
+        context.fill(Path(roundedRect: plusRect, cornerRadius: 3), with: .color(.white.opacity(0.15 * alpha)))
+        let plusSymbol = context.resolve(Text("+").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.8 * alpha)))
+        context.draw(plusSymbol, at: CGPoint(x: plusRect.midX, y: plusRect.midY), anchor: .center)
+
         let realizedDistance = abs(order.entryPrice - order.stopLoss) + max(0, visualOrderSpread)
         let riskMoney = order.amount * realizedDistance * 1_000_000
         var riskMoneyText = String(format: "Risk  %.0f", riskMoney)
         if let eq = accountEquity, eq > 0 {
             riskMoneyText += String(format: "  (%.1f%%)", (riskMoney / eq) * 100)
         }
-        let rrText = String(format: "R:R  %.1f", order.riskRewardRatio(spread: visualOrderSpread))
-        let riskText = String(format: "Risk  %.1f pips", order.riskPips)
-        let rewardText = String(format: "Reward  %.1f pips", order.rewardPips)
-
-        let lineHeight: CGFloat = 14
-        let textBlockY = entryY - lineHeight * 2.5
-
-        // Amount row with +/- buttons
-        let amountY = textBlockY
-        let resolvedAmount = context.resolve(Text(amountText).font(textStyle).foregroundStyle(.white.opacity(0.9)))
-        let amountSize = resolvedAmount.measure(in: CGSize(width: 200, height: 20))
-        context.draw(resolvedAmount, at: CGPoint(x: midX - amountSize.width / 2, y: amountY), anchor: .topLeading)
-
-        let (minusRect, plusRect) = Self.visualOrderAmountButtonRects(midX: midX, amountY: amountY)
-        context.fill(Path(roundedRect: minusRect, cornerRadius: 3), with: .color(.white.opacity(0.15)))
-        let minusSymbol = context.resolve(Text("\u{2212}").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.8)))
-        context.draw(minusSymbol, at: CGPoint(x: minusRect.midX, y: minusRect.midY), anchor: .center)
-        context.fill(Path(roundedRect: plusRect, cornerRadius: 3), with: .color(.white.opacity(0.15)))
-        let plusSymbol = context.resolve(Text("+").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.8)))
-        context.draw(plusSymbol, at: CGPoint(x: plusRect.midX, y: plusRect.midY), anchor: .center)
-
         var infoLines: [(String, Color)] = [
-            (rrText, .white.opacity(0.8)),
-            (riskText, .white.opacity(0.8)),
-            (rewardText, .white.opacity(0.8)),
-            (riskMoneyText, .white.opacity(0.8)),
+            (String(format: "R:R  %.1f", order.riskRewardRatio(spread: visualOrderSpread)), .white.opacity(0.8 * alpha)),
+            (String(format: "Risk  %.1f pips", order.riskPips), .white.opacity(0.8 * alpha)),
+            (String(format: "Reward  %.1f pips", order.rewardPips), .white.opacity(0.8 * alpha)),
+            (riskMoneyText, .white.opacity(0.8 * alpha)),
         ]
         if order.isEntryOverridden {
             let typeLabel = order.orderType.replacingOccurrences(of: "_", with: " ")
             let entryText = String(
                 format: "%@  %.\(order.instrument.contains("JPY") ? 3 : 5)f  (%+.1f pips)",
                 typeLabel, order.entryPrice, order.entryOffsetPips)
-            infoLines.append((entryText, Color.orange))
+            infoLines.append((entryText, Color.orange.opacity(alpha)))
         }
         if order.isMarginCapped {
-            infoLines.append(("margin limited", Color.orange))
+            infoLines.append(("margin limited", Color.orange.opacity(alpha)))
         }
+        let lineHeight: CGFloat = 14
+        let infoStartY = amountY + 20
         for (i, (text, color)) in infoLines.enumerated() {
-            let y = textBlockY + CGFloat(i + 1) * lineHeight
+            let y = infoStartY + CGFloat(i) * lineHeight
             let resolved = context.resolve(Text(text).font(textStyle).foregroundStyle(color))
             let textSize = resolved.measure(in: CGSize(width: 200, height: 20))
-            context.draw(resolved, at: CGPoint(x: midX - textSize.width / 2, y: y), anchor: .topLeading)
+            context.draw(resolved, at: CGPoint(x: panelMidX - textSize.width / 2, y: y), anchor: .topLeading)
         }
 
-        // Confirm / Cancel buttons
-        let (confirmRect, cancelRect) = Self.visualOrderButtonRects(boxRight: rightX, boxBottom: bottomY)
+        // Confirm / Cancel — bottom-right of panel.
+        let buttonsRight = Self.visualOrderPanelButtonsRight(panelRect: panelRect)
+        let buttonsBottom = Self.visualOrderPanelButtonsBottom(panelRect: panelRect)
+        let (confirmRect, cancelRect) = Self.visualOrderButtonRects(boxRight: buttonsRight, boxBottom: buttonsBottom)
 
-        // Confirm button (green). If a submit is in flight, render a spinner-style progress ring instead of the checkmark.
         context.fill(Path(roundedRect: confirmRect, cornerRadius: 4),
                      with: .color(bullishColor.opacity(0.8 * alpha)))
         if isSubmitting {
@@ -1211,22 +1268,10 @@ struct ChartView: View {
             context.draw(checkmark, at: CGPoint(x: confirmRect.midX, y: confirmRect.midY), anchor: .center)
         }
 
-        // Cancel button (red)
         context.fill(Path(roundedRect: cancelRect, cornerRadius: 4),
                      with: .color(bearishColor.opacity(0.8 * alpha)))
         let xmark = context.resolve(Text("\u{2717}").font(.system(size: 12, weight: .bold)).foregroundStyle(.white.opacity(alpha)))
         context.draw(xmark, at: CGPoint(x: cancelRect.midX, y: cancelRect.midY), anchor: .center)
-
-        // SL/TP price labels on right side of box
-        let labelFont = Font.system(size: 9, weight: .medium, design: .monospaced)
-        let decimalPlaces = order.instrument.contains("JPY") ? 3 : 5
-        let slLabel = context.resolve(Text(String(format: "SL %.\(decimalPlaces)f", order.stopLoss))
-            .font(labelFont).foregroundStyle(bearishColor))
-        context.draw(slLabel, at: CGPoint(x: rightX + 4, y: slY), anchor: .leading)
-
-        let tpLabel = context.resolve(Text(String(format: "TP %.\(decimalPlaces)f", order.takeProfit))
-            .font(labelFont).foregroundStyle(bullishColor))
-        context.draw(tpLabel, at: CGPoint(x: rightX + 4, y: tpY), anchor: .leading)
     }
 
     // MARK: - Helpers

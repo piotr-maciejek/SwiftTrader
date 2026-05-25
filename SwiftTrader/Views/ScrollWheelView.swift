@@ -255,28 +255,29 @@ struct ChartInteractionView: NSViewRepresentable {
 
         func hitTestVisualOrderButtons(mouseX: CGFloat, mouseY: CGFloat) -> VisualOrderButton? {
             guard let vo = visualOrder else { return nil }
-            let slY = yForPrice(vo.stopLoss)
-            let tpY = yForPrice(vo.takeProfit)
+            // Buttons live in a fixed-size control panel — mirror ChartView's geometry.
             let entryY = yForPrice(vo.entryPrice)
-            let bottomY = max(slY, tpY)
             let slotWidth = transform.wrappedValue.candleSlotWidth
             let leftX = CGFloat(vo.startBarIndex) * slotWidth - transform.wrappedValue.xOffset
             let rightX = CGFloat(vo.endBarIndex) * slotWidth - transform.wrappedValue.xOffset + slotWidth
-            let midX = (leftX + rightX) / 2
+            let panelRect = ChartView.visualOrderPanelRect(
+                boxLeft: leftX, boxRight: rightX,
+                entryY: entryY, isBuy: vo.direction == "BUY",
+                chartWidth: chartWidth, chartHeight: chartHeight
+            )
+            let midX = panelRect.midX
+            let amountY = ChartView.visualOrderPanelAmountY(panelRect: panelRect)
 
-            // Amount +/- buttons
-            let lineHeight: CGFloat = 14
-            let amountY = entryY - lineHeight * 2.5
             let (minusRect, plusRect) = ChartView.visualOrderAmountButtonRects(midX: midX, amountY: amountY)
             if minusRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountDown }
             if plusRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountUp }
 
-            // Amount label (click to reset to auto)
             let amountLabelRect = ChartView.visualOrderAmountLabelRect(midX: midX, amountY: amountY)
             if amountLabelRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountReset }
 
-            // Confirm/Cancel buttons
-            let (confirmRect, cancelRect) = ChartView.visualOrderButtonRects(boxRight: rightX, boxBottom: bottomY)
+            let buttonsRight = ChartView.visualOrderPanelButtonsRight(panelRect: panelRect)
+            let buttonsBottom = ChartView.visualOrderPanelButtonsBottom(panelRect: panelRect)
+            let (confirmRect, cancelRect) = ChartView.visualOrderButtonRects(boxRight: buttonsRight, boxBottom: buttonsBottom)
             if confirmRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .confirm }
             if cancelRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .cancel }
             return nil
