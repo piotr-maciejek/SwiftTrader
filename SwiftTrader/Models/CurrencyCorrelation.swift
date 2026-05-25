@@ -10,12 +10,12 @@ func formatInstrument(_ instrument: String) -> String {
 enum CurrencyCorrelation {
     /// Correlation pairs for each currency.
     static let pairs: [String: [String]] = [
-        "EUR": ["EURUSD", "EURJPY", "EURGBP", "EURCHF", "EURAUD", "EURCAD"],
-        "USD": ["EURUSD", "USDJPY", "GBPUSD", "AUDUSD", "USDCAD", "USDCHF"],
-        "GBP": ["GBPUSD", "EURGBP", "GBPJPY", "GBPAUD", "GBPCAD", "GBPCHF"],
-        "JPY": ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY"],
+        "EUR": ["EURUSD", "EURJPY", "EURGBP", "EURCHF", "EURAUD", "EURCAD", "EURNZD"],
+        "USD": ["EURUSD", "USDJPY", "GBPUSD", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD"],
+        "GBP": ["GBPUSD", "EURGBP", "GBPJPY", "GBPAUD", "GBPCAD", "GBPCHF", "GBPNZD"],
+        "JPY": ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY", "NZDJPY"],
         "AUD": ["AUDUSD", "EURAUD", "GBPAUD", "AUDJPY", "AUDCAD", "AUDNZD", "AUDCHF"],
-        "CAD": ["USDCAD", "EURCAD", "GBPCAD", "AUDCAD", "CADJPY", "NZDCAD"],
+        "CAD": ["USDCAD", "EURCAD", "GBPCAD", "AUDCAD", "CADJPY", "NZDCAD", "CADCHF"],
         "CHF": ["USDCHF", "EURCHF", "GBPCHF", "AUDCHF", "CADCHF", "CHFJPY"],
         "NZD": ["NZDUSD", "EURNZD", "GBPNZD", "NZDJPY", "AUDNZD", "NZDCAD"],
     ]
