@@ -20,6 +20,10 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(pairsGroupingMode.rawValue, forKey: "pairsGroupingMode") }
     }
 
+    var incognitoMode: Bool {
+        didSet { UserDefaults.standard.set(incognitoMode, forKey: "incognitoMode") }
+    }
+
     static let shared = AppSettings()
 
     private init() {
@@ -30,5 +34,6 @@ final class AppSettings {
         self.clientSideRebucketing = (UserDefaults.standard.object(forKey: "clientSideRebucketing") as? Bool) ?? true
         let raw = UserDefaults.standard.string(forKey: "pairsGroupingMode")
         self.pairsGroupingMode = raw.flatMap(PairsGroupingMode.init(rawValue:)) ?? .alphabetical
+        self.incognitoMode = (UserDefaults.standard.object(forKey: "incognitoMode") as? Bool) ?? false
     }
 }

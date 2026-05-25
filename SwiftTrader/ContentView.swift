@@ -95,8 +95,10 @@ struct ContentView: View {
                 }
             }
 
-            Divider()
-            accountStatusBar
+            if !workspace.settings.incognitoMode {
+                Divider()
+                accountStatusBar
+            }
         }
         .frame(minWidth: 800, minHeight: 500)
         .background(WindowAccessor())

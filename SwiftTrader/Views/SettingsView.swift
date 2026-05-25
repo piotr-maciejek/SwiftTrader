@@ -40,6 +40,17 @@ struct SettingsView: View {
             }
             .toggleStyle(.switch)
 
+            Toggle(isOn: $settings.incognitoMode) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Incognito mode (hide balances)")
+                    Text("Hides account balance, equity, P&L, and lot sizes for demo recordings.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+
             if let errorMessage {
                 Text(errorMessage)
                     .font(.caption)

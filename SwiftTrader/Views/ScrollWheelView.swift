@@ -268,12 +268,17 @@ struct ChartInteractionView: NSViewRepresentable {
             let midX = panelRect.midX
             let amountY = ChartView.visualOrderPanelAmountY(panelRect: panelRect)
 
-            let (minusRect, plusRect) = ChartView.visualOrderAmountButtonRects(midX: midX, amountY: amountY)
-            if minusRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountDown }
-            if plusRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountUp }
+            // Amount +/- buttons — hit-test only when incognito is off (matches draw gate).
+            // Mouse events arrive on the main thread, so AppSettings.shared (MainActor) is safe.
+            let isIncognito = MainActor.assumeIsolated { AppSettings.shared.incognitoMode }
+            if !isIncognito {
+                let (minusRect, plusRect) = ChartView.visualOrderAmountButtonRects(midX: midX, amountY: amountY)
+                if minusRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountDown }
+                if plusRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountUp }
 
-            let amountLabelRect = ChartView.visualOrderAmountLabelRect(midX: midX, amountY: amountY)
-            if amountLabelRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountReset }
+                let amountLabelRect = ChartView.visualOrderAmountLabelRect(midX: midX, amountY: amountY)
+                if amountLabelRect.contains(CGPoint(x: mouseX, y: mouseY)) { return .amountReset }
+            }
 
             let buttonsRight = ChartView.visualOrderPanelButtonsRight(panelRect: panelRect)
             let buttonsBottom = ChartView.visualOrderPanelButtonsBottom(panelRect: panelRect)

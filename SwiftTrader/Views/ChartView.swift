@@ -63,6 +63,8 @@ struct ChartView: View {
     /// cumulative translation can scale relative to that snapshot, not the live value.
     @State private var yZoomDragStartScale: Double? = nil
 
+    private var incognitoMode: Bool { AppSettings.shared.incognitoMode }
+
     // Layout constants
     private let priceAxisWidth: CGFloat = 70
     private let timeAxisHeight: CGFloat = 24
@@ -1210,17 +1212,19 @@ struct ChartView: View {
         let amountSuffix = order.isAmountOverridden ? " (M)" : ""
         let standardLots = order.amount * 10
         let amountText = String(format: "%g lots%@", standardLots, amountSuffix)
-        let resolvedAmount = context.resolve(Text(amountText).font(textStyle).foregroundStyle(.white.opacity(0.9 * alpha)))
-        let amountSize = resolvedAmount.measure(in: CGSize(width: 200, height: 20))
-        context.draw(resolvedAmount, at: CGPoint(x: panelMidX - amountSize.width / 2, y: amountY), anchor: .topLeading)
+        if !incognitoMode {
+            let resolvedAmount = context.resolve(Text(amountText).font(textStyle).foregroundStyle(.white.opacity(0.9 * alpha)))
+            let amountSize = resolvedAmount.measure(in: CGSize(width: 200, height: 20))
+            context.draw(resolvedAmount, at: CGPoint(x: panelMidX - amountSize.width / 2, y: amountY), anchor: .topLeading)
 
-        let (minusRect, plusRect) = Self.visualOrderAmountButtonRects(midX: panelMidX, amountY: amountY)
-        context.fill(Path(roundedRect: minusRect, cornerRadius: 3), with: .color(.white.opacity(0.15 * alpha)))
-        let minusSymbol = context.resolve(Text("\u{2212}").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.8 * alpha)))
-        context.draw(minusSymbol, at: CGPoint(x: minusRect.midX, y: minusRect.midY), anchor: .center)
-        context.fill(Path(roundedRect: plusRect, cornerRadius: 3), with: .color(.white.opacity(0.15 * alpha)))
-        let plusSymbol = context.resolve(Text("+").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.8 * alpha)))
-        context.draw(plusSymbol, at: CGPoint(x: plusRect.midX, y: plusRect.midY), anchor: .center)
+            let (minusRect, plusRect) = Self.visualOrderAmountButtonRects(midX: panelMidX, amountY: amountY)
+            context.fill(Path(roundedRect: minusRect, cornerRadius: 3), with: .color(.white.opacity(0.15 * alpha)))
+            let minusSymbol = context.resolve(Text("\u{2212}").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.8 * alpha)))
+            context.draw(minusSymbol, at: CGPoint(x: minusRect.midX, y: minusRect.midY), anchor: .center)
+            context.fill(Path(roundedRect: plusRect, cornerRadius: 3), with: .color(.white.opacity(0.15 * alpha)))
+            let plusSymbol = context.resolve(Text("+").font(.system(size: 11, weight: .bold)).foregroundStyle(.white.opacity(0.8 * alpha)))
+            context.draw(plusSymbol, at: CGPoint(x: plusRect.midX, y: plusRect.midY), anchor: .center)
+        }
 
         let realizedDistance = abs(order.entryPrice - order.stopLoss) + max(0, visualOrderSpread)
         let riskMoney = order.amount * realizedDistance * 1_000_000
@@ -1232,8 +1236,10 @@ struct ChartView: View {
             (String(format: "R:R  %.1f", order.riskRewardRatio(spread: visualOrderSpread)), .white.opacity(0.8 * alpha)),
             (String(format: "Risk  %.1f pips", order.riskPips), .white.opacity(0.8 * alpha)),
             (String(format: "Reward  %.1f pips", order.rewardPips), .white.opacity(0.8 * alpha)),
-            (riskMoneyText, .white.opacity(0.8 * alpha)),
         ]
+        if !incognitoMode {
+            infoLines.append((riskMoneyText, .white.opacity(0.8 * alpha)))
+        }
         if order.isEntryOverridden {
             let typeLabel = order.orderType.replacingOccurrences(of: "_", with: " ")
             let entryText = String(
@@ -1241,7 +1247,7 @@ struct ChartView: View {
                 typeLabel, order.entryPrice, order.entryOffsetPips)
             infoLines.append((entryText, Color.orange.opacity(alpha)))
         }
-        if order.isMarginCapped {
+        if order.isMarginCapped && !incognitoMode {
             infoLines.append(("margin limited", Color.orange.opacity(alpha)))
         }
         let lineHeight: CGFloat = 14

@@ -3,6 +3,7 @@ import SwiftUI
 struct BottomPanel: View {
     let trading: TradingViewModel
     @Bindable var tradeHistory: TradeHistoryViewModel
+    @Bindable var settings: AppSettings = AppSettings.shared
     @State private var tab: Tab = .open
     @State private var editingLabel: String?
     @State private var editingField: EditField?
@@ -83,11 +84,15 @@ struct BottomPanel: View {
             HStack(spacing: 0) {
                 headerCell("Instrument", width: 90)
                 headerCell("Side", width: 50)
-                headerCell("Amount", width: 60)
+                if !settings.incognitoMode {
+                    headerCell("Amount", width: 60)
+                }
                 headerCell("Open", width: 80)
                 headerCell("SL", width: 80)
                 headerCell("TP", width: 80)
-                headerCell("P&L", width: 80)
+                if !settings.incognitoMode {
+                    headerCell("P&L", width: 80)
+                }
                 headerCell("Pips", width: 60)
                 Spacer()
                 headerCell("", width: 50)
@@ -118,7 +123,9 @@ struct BottomPanel: View {
             cell(formatInstrument(position.instrument), width: 90)
             cell(position.direction, width: 50,
                  color: position.isBuy ? .green : .red)
-            cell(String(format: "%.2f", position.amount * 10), width: 60)
+            if !settings.incognitoMode {
+                cell(String(format: "%.2f", position.amount * 10), width: 60)
+            }
             cell(String(format: "%.5f", position.openPrice), width: 80)
 
             // SL
@@ -155,8 +162,10 @@ struct BottomPanel: View {
                     .onTapGesture { startEdit(position, field: .takeProfit, value: position.takeProfit) }
             }
 
-            cell(String(format: "%.2f", position.profitLoss), width: 80,
-                 color: position.profitLoss >= 0 ? .green : .red)
+            if !settings.incognitoMode {
+                cell(String(format: "%.2f", position.profitLoss), width: 80,
+                     color: position.profitLoss >= 0 ? .green : .red)
+            }
             cell(String(format: "%.1f", position.profitLossPips), width: 60,
                  color: position.profitLossPips >= 0 ? .green : .red)
 
@@ -181,7 +190,9 @@ struct BottomPanel: View {
                 headerCell("Instrument", width: 90)
                 headerCell("Side", width: 50)
                 headerCell("Type", width: 90)
-                headerCell("Amount", width: 60)
+                if !settings.incognitoMode {
+                    headerCell("Amount", width: 60)
+                }
                 headerCell("Entry", width: 80)
                 headerCell("SL", width: 80)
                 headerCell("TP", width: 80)
@@ -211,7 +222,9 @@ struct BottomPanel: View {
             cell(order.direction, width: 50,
                  color: order.isBuy ? .green : .red)
             cell(formatOrderType(order.orderType), width: 90)
-            cell(String(format: "%.2f", order.amount * 10), width: 60)
+            if !settings.incognitoMode {
+                cell(String(format: "%.2f", order.amount * 10), width: 60)
+            }
             cell(String(format: "%.5f", order.openPrice), width: 80)
 
             // SL

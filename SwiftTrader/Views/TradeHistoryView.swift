@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TradeHistoryView: View {
     @Bindable var vm: TradeHistoryViewModel
+    @Bindable var settings: AppSettings = AppSettings.shared
 
     private static let dateTimeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -21,8 +22,10 @@ struct TradeHistoryView: View {
         VStack(spacing: 0) {
             filterBar
             Divider()
-            summaryBar
-            Divider()
+            if !settings.incognitoMode {
+                summaryBar
+                Divider()
+            }
             tradesBody
         }
     }
@@ -118,11 +121,15 @@ struct TradeHistoryView: View {
                     headerCell("Close", width: 130)
                     headerCell("Instrument", width: 90)
                     headerCell("Side", width: 50)
-                    headerCell("Amount", width: 80)
+                    if !settings.incognitoMode {
+                        headerCell("Amount", width: 80)
+                    }
                     headerCell("Open", width: 80)
                     headerCell("Close", width: 80)
                     headerCell("Pips", width: 60)
-                    headerCell("Net P&L", width: 80)
+                    if !settings.incognitoMode {
+                        headerCell("Net P&L", width: 80)
+                    }
                     Spacer()
                 }
                 .padding(.horizontal, 12)
@@ -147,13 +154,17 @@ struct TradeHistoryView: View {
             cell(Self.dateTimeFormatter.string(from: t.closeDate), width: 130)
             cell(formatInstrument(t.instrument), width: 90)
             cell(t.direction, width: 50, color: t.isBuy ? .green : .red)
-            cell(String(format: "%.2f", t.amount * 10), width: 80)
+            if !settings.incognitoMode {
+                cell(String(format: "%.2f", t.amount * 10), width: 80)
+            }
             cell(String(format: "%.5f", t.openPrice), width: 80)
             cell(String(format: "%.5f", t.closePrice), width: 80)
             cell(String(format: "%.1f", t.profitLossPips), width: 60,
                  color: t.profitLossPips >= 0 ? .green : .red)
-            cell(String(format: "%.2f", t.profitLoss), width: 80,
-                 color: t.profitLoss >= 0 ? .green : .red)
+            if !settings.incognitoMode {
+                cell(String(format: "%.2f", t.profitLoss), width: 80,
+                     color: t.profitLoss >= 0 ? .green : .red)
+            }
             Spacer()
         }
         .padding(.horizontal, 12)
