@@ -1112,7 +1112,7 @@ struct ChartView: View {
         if let eq = accountEquity, eq > 0 {
             riskMoneyText += String(format: "  (%.1f%%)", (riskMoney / eq) * 100)
         }
-        let rrText = String(format: "R:R  %.1f", order.riskRewardRatio)
+        let rrText = String(format: "R:R  %.1f", order.riskRewardRatio(spread: visualOrderSpread))
         let riskText = String(format: "Risk  %.1f pips", order.riskPips)
         let rewardText = String(format: "Reward  %.1f pips", order.rewardPips)
 

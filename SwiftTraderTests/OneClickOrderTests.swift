@@ -177,7 +177,7 @@ struct VisualOrderStateTests {
         // Risk = 0.0020 = 20 pips, Reward = 0.0060 = 60 pips, R:R = 3.0
         #expect(abs(order.riskPips - 20.0) < 0.01)
         #expect(abs(order.rewardPips - 60.0) < 0.01)
-        #expect(abs(order.riskRewardRatio - 3.0) < 0.01)
+        #expect(abs(order.riskRewardRatio(spread: 0) - 3.0) < 0.01)
     }
 
     @Test("R:R ratio computed correctly for JPY pair")
@@ -190,7 +190,7 @@ struct VisualOrderStateTests {
         // Risk = 0.30 = 30 pips, Reward = 0.90 = 90 pips, R:R = 3.0
         #expect(abs(order.riskPips - 30.0) < 0.01)
         #expect(abs(order.rewardPips - 90.0) < 0.01)
-        #expect(abs(order.riskRewardRatio - 3.0) < 0.01)
+        #expect(abs(order.riskRewardRatio(spread: 0) - 3.0) < 0.01)
     }
 
     @Test("R:R is zero when SL equals entry")
@@ -200,7 +200,41 @@ struct VisualOrderStateTests {
             stopLoss: 1.1000, takeProfit: 1.1060,
             startBarIndex: 0, endBarIndex: 10
         )
-        #expect(order.riskRewardRatio == 0)
+        #expect(order.riskRewardRatio(spread: 0) == 0)
+    }
+
+    @Test("R:R shrinks once the spread is accounted for (BUY)")
+    func rrSpreadAwareBuy() {
+        // 20 pip risk / 60 pip reward / 1 pip spread → (60-1)/(20+1) = 59/21 ≈ 2.81
+        let order = VisualOrderState(
+            direction: "BUY", instrument: "EURUSD", entryPrice: 1.1000, marketPrice: 1.1000, amount: 0.001,
+            stopLoss: 1.0980, takeProfit: 1.1060,
+            startBarIndex: 0, endBarIndex: 10
+        )
+        #expect(abs(order.riskRewardRatio(spread: 0.0001) - (59.0 / 21.0)) < 0.001)
+    }
+
+    @Test("R:R shrinks once the spread is accounted for (SELL)")
+    func rrSpreadAwareSell() {
+        // Same math, opposite direction — abs() makes the formula symmetric.
+        let order = VisualOrderState(
+            direction: "SELL", instrument: "USDJPY", entryPrice: 150.00, marketPrice: 150.00, amount: 0.001,
+            stopLoss: 150.30, takeProfit: 149.10,
+            startBarIndex: 0, endBarIndex: 10
+        )
+        // 30 pip risk / 90 pip reward / 2 pip spread → (90-2)/(30+2) = 88/32 = 2.75
+        #expect(abs(order.riskRewardRatio(spread: 0.02) - (88.0 / 32.0)) < 0.001)
+    }
+
+    @Test("R:R clamps to 0 when spread eats the entire reward")
+    func rrSpreadEatsReward() {
+        let order = VisualOrderState(
+            direction: "BUY", instrument: "EURUSD", entryPrice: 1.1000, marketPrice: 1.1000, amount: 0.001,
+            stopLoss: 1.0990, takeProfit: 1.1005,
+            startBarIndex: 0, endBarIndex: 10
+        )
+        // Reward = 5 pips, spread = 10 pips → reward clamps to 0, R:R = 0
+        #expect(order.riskRewardRatio(spread: 0.0010) == 0)
     }
 }
 

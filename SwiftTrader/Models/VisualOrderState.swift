@@ -20,9 +20,16 @@ struct VisualOrderState: Equatable {
         abs(takeProfit - entryPrice) * TradingDayATR.pipFactor(for: instrument)
     }
 
-    var riskRewardRatio: Double {
-        guard riskPips > 0 else { return 0 }
-        return rewardPips / riskPips
+    /// Spread-aware R:R. Risk widens by the spread (open at ask, exit SL at bid for
+    /// BUY — and the mirror for SELL); reward narrows by it. `spread` is in price units
+    /// (same as `entryPrice`), matching `TradingViewModel.spreads[instrument]`. abs() makes
+    /// the formula direction-agnostic. Passing 0 yields the legacy raw ratio.
+    func riskRewardRatio(spread: Double) -> Double {
+        let s = max(0, spread)
+        let risk = abs(entryPrice - stopLoss) + s
+        let reward = max(0, abs(takeProfit - entryPrice) - s)
+        guard risk > 0 else { return 0 }
+        return reward / risk
     }
 
     /// Distance of entry from market, in pips (signed: positive = above market).
