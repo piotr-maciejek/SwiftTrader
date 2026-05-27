@@ -7,7 +7,7 @@ struct DukascopyCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dukascopy-cli",
         abstract: "Dukascopy native protocol prototyping CLI.",
-        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self, StreamCommand.self]
+        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self]
     )
 }
 
@@ -256,7 +256,7 @@ struct StreamCommand: AsyncParsableCommand {
             case .error(let e):
                 FileHandle.standardError.write(Data("server error: \(e)\n".utf8))
                 return
-            case .ok, .halo:
+            case .ok, .halo, .packedAccountInfo:
                 break
             case .unknown(let classId, let body):
                 if ProcessInfo.processInfo.environment["DUKASCOPY_CLI_VERBOSE"] != nil {
@@ -267,5 +267,93 @@ struct StreamCommand: AsyncParsableCommand {
             }
         }
         await transport.close()
+    }
+}
+
+struct AccountCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "account",
+        abstract: "Authenticate, connect, and print the account snapshot."
+    )
+
+    @Option(name: .long, help: "Target environment: demo or live")
+    var env: String = "demo"
+
+    @Option(name: .long, help: "Login")
+    var user: String
+
+    @Option(name: .long, help: "Password")
+    var pass: String
+
+    @Option(name: .long, help: "Snapshot wait timeout in seconds")
+    var timeout: Double = 15
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        let jnlp = try await JNLPClient.fetch(from: target.jnlpURL)
+        guard let serverURL = jnlp.srp6LoginURLs.first else {
+            throw ValidationError("JNLP returned no SRP6 servers")
+        }
+        let auth = try await AuthClient().authenticate(
+            baseURL: serverURL,
+            credentials: AuthCredentials(login: user, password: pass)
+        )
+        guard let first = auth.authApiURLs.first,
+              let address = ServerAddress.parse(first) else {
+            throw ValidationError("no usable authApiURL")
+        }
+        let transport = Transport(address: address)
+        try await transport.connect()
+        _ = try await transport.handshake(
+            login: user, ticket: auth.ticket, authSessionId: auth.authSessionId
+        )
+
+        var initReq = InitRequest()
+        initReq.requestId = UUID().uuidString
+        initReq.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        try await transport.sendFrame(initReq.encode())
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let frame = try await transport.receiveFrame()
+            // Peek at the classId before dispatching so we can hex-dump the
+            // PackedAccountInfo frame for debugging if decode fails.
+            var peek = BinaryReader(frame)
+            let classId = try peek.readInt32BE()
+            _ = classId
+            let msg = try MessageDecoder.decode(frame)
+            switch msg {
+            case .packedAccountInfo(let p):
+                printAccount(p.account)
+                await transport.close()
+                return
+            case .heartbeatRequest(let h):
+                let resp = HeartbeatOkResponse(
+                    requestTime: h.requestTime ?? 0,
+                    receiveTime: Int64(Date().timeIntervalSince1970 * 1000)
+                )
+                try await transport.sendFrame(resp.encode())
+            case .error(let e):
+                throw ValidationError("server error: \(e)")
+            default:
+                continue
+            }
+        }
+        throw ValidationError("no account snapshot within \(timeout)s")
+    }
+
+    private func printAccount(_ a: AccountInfo) {
+        print("login:        \(a.accountLoginId ?? "-")")
+        print("currency:     \(a.currency ?? "-")")
+        print("balance:      \(a.balance?.description ?? "-")")
+        print("equity:       \(a.equity?.description ?? "-")")
+        print("usableMargin: \(a.usableMargin?.description ?? "-")")
+        if let used = a.usedMargin {
+            print("usedMargin:   \(used.description)  (equity − usableMargin)")
+        }
+        print("leverage:     \(a.leverage.map(String.init) ?? "-")")
+        print("state:        \(a.state ?? "-")")
     }
 }

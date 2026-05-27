@@ -201,6 +201,7 @@ public enum InboundMessage: Sendable {
     case error(ErrorResponse)
     case currencyMarket(CurrencyMarket)
     case heartbeatRequest(HeartbeatRequest)
+    case packedAccountInfo(PackedAccountInfo)
     case unknown(classId: Int32, body: Data)
 }
 
@@ -221,6 +222,8 @@ public enum MessageDecoder {
             return .currencyMarket(try CurrencyMarket.decode(from: &fields))
         case javaStringHashCode(WireClass.heartbeatRequest):
             return .heartbeatRequest(try HeartbeatRequest.decode(from: &fields))
+        case javaStringHashCode(WireClass.packedAccountInfo):
+            return .packedAccountInfo(try PackedAccountInfo.decode(from: &fields))
         default:
             let remaining = try fields.readBytes(fields.remaining)
             return .unknown(classId: classId, body: remaining)

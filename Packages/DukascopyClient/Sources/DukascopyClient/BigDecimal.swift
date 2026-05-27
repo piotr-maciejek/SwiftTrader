@@ -97,6 +97,12 @@ public enum BigDecimalCodec {
         return BigInt(BigUInt(data))
     }
 
+    /// Scale-aware subtraction: returns `a - b` as a `BigDecimalValue`.
+    public static func subtract(_ a: BigDecimalValue, _ b: BigDecimalValue) -> BigDecimalValue {
+        let (l, r) = alignScales(a, b)
+        return BigDecimalValue(unscaled: l.unscaled - r.unscaled, scale: l.scale)
+    }
+
     public static func operatorAddDelta(
         first: BigDecimalValue,
         delta: BigDecimalValue,
@@ -114,7 +120,7 @@ public enum BigDecimalCodec {
         return BigDecimalValue(unscaled: sum, scale: a.scale)
     }
 
-    private static func alignScales(_ x: BigDecimalValue, _ y: BigDecimalValue) -> (BigDecimalValue, BigDecimalValue) {
+    static func alignScales(_ x: BigDecimalValue, _ y: BigDecimalValue) -> (BigDecimalValue, BigDecimalValue) {
         if x.scale == y.scale { return (x, y) }
         if x.scale < y.scale {
             let factor = BigInt(10).power(y.scale - x.scale)
