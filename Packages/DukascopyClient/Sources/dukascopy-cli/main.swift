@@ -7,7 +7,7 @@ struct DukascopyCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dukascopy-cli",
         abstract: "Dukascopy native protocol prototyping CLI.",
-        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self]
+        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self, StreamCommand.self]
     )
 }
 
@@ -169,6 +169,103 @@ struct ConnectTestCommand: AsyncParsableCommand {
         }
         print("LOGIN: ok.")
 
+        await transport.close()
+    }
+}
+
+struct StreamCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "stream",
+        abstract: "Stream live ticks for the given instruments (Ctrl-C to stop)."
+    )
+
+    @Option(name: .long, help: "Target environment: demo or live")
+    var env: String = "demo"
+
+    @Option(name: .long, help: "Login (account number / username)")
+    var user: String
+
+    @Option(name: .long, help: "Password")
+    var pass: String
+
+    @Argument(help: "Comma-separated instruments in BASE/QUOTE form, e.g. EUR/USD,GBP/USD")
+    var instruments: String
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        let jnlp = try await JNLPClient.fetch(from: target.jnlpURL)
+        guard let serverURL = jnlp.srp6LoginURLs.first else {
+            throw ValidationError("JNLP returned no SRP6 servers")
+        }
+
+        let auth = try await AuthClient().authenticate(
+            baseURL: serverURL,
+            credentials: AuthCredentials(login: user, password: pass)
+        )
+        guard let first = auth.authApiURLs.first,
+              let address = ServerAddress.parse(first) else {
+            throw ValidationError("no usable authApiURL")
+        }
+        print("connecting to \(address) …")
+
+        let transport = Transport(address: address)
+        try await transport.connect()
+        _ = try await transport.handshake(
+            login: user, ticket: auth.ticket, authSessionId: auth.authSessionId
+        )
+        print("logged in.")
+
+        var initReq = InitRequest()
+        initReq.sendGroups = true
+        initReq.sendPacked = true
+        initReq.sendSettlementPrices = true
+        initReq.requestId = UUID().uuidString
+        initReq.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        try await transport.sendFrame(initReq.encode())
+
+        let pairs = instruments.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        var sub = QuoteSubscribeRequest(instruments: Set(pairs))
+        sub.requestId = UUID().uuidString
+        sub.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        try await transport.sendFrame(sub.encode())
+        print("subscribed: \(pairs.joined(separator: ", "))")
+        print("waiting for ticks …")
+
+        while !Task.isCancelled {
+            let frame = try await transport.receiveFrame()
+            let msg = try MessageDecoder.decode(frame)
+            switch msg {
+            case .currencyMarket(let m):
+                let bid = m.bestBid?.description ?? "—"
+                let ask = m.bestAsk?.description ?? "—"
+                let ts = Date(timeIntervalSince1970: Double(m.creationTimestampMillis) / 1000)
+                let f = DateFormatter()
+                f.dateFormat = "HH:mm:ss.SSS"
+                f.timeZone = .current
+                print("\(f.string(from: ts)) \(m.instrument)  bid=\(bid)  ask=\(ask)")
+            case .heartbeatRequest(let h):
+                let resp = HeartbeatOkResponse(
+                    requestTime: h.requestTime ?? 0,
+                    receiveTime: Int64(Date().timeIntervalSince1970 * 1000)
+                )
+                try await transport.sendFrame(resp.encode())
+            case .error(let e):
+                FileHandle.standardError.write(Data("server error: \(e)\n".utf8))
+                return
+            case .ok, .halo:
+                break
+            case .unknown(let classId, let body):
+                if ProcessInfo.processInfo.environment["DUKASCOPY_CLI_VERBOSE"] != nil {
+                    FileHandle.standardError.write(Data(
+                        "unknown classId=\(classId) bytes=\(body.count)\n".utf8
+                    ))
+                }
+            }
+        }
         await transport.close()
     }
 }

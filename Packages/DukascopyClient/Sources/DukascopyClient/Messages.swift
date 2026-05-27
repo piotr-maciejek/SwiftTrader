@@ -199,6 +199,8 @@ public enum InboundMessage: Sendable {
     case halo(HaloResponse)
     case ok(OkResponse)
     case error(ErrorResponse)
+    case currencyMarket(CurrencyMarket)
+    case heartbeatRequest(HeartbeatRequest)
     case unknown(classId: Int32, body: Data)
 }
 
@@ -207,15 +209,19 @@ public enum MessageDecoder {
     public static func decode(_ payload: Data) throws -> InboundMessage {
         var reader = BinaryReader(payload)
         let classId = try reader.readInt32BE()
-        // The remainder is the field stream.
         var fields = reader
-        if classId == javaStringHashCode(WireClass.haloResponse) {
+        switch classId {
+        case javaStringHashCode(WireClass.haloResponse):
             return .halo(try HaloResponse.decode(from: &fields))
-        } else if classId == javaStringHashCode(WireClass.okResponse) {
+        case javaStringHashCode(WireClass.okResponse):
             return .ok(try OkResponse.decode(from: &fields))
-        } else if classId == javaStringHashCode(WireClass.errorResponse) {
+        case javaStringHashCode(WireClass.errorResponse):
             return .error(try ErrorResponse.decode(from: &fields))
-        } else {
+        case javaStringHashCode(WireClass.currencyMarket):
+            return .currencyMarket(try CurrencyMarket.decode(from: &fields))
+        case javaStringHashCode(WireClass.heartbeatRequest):
+            return .heartbeatRequest(try HeartbeatRequest.decode(from: &fields))
+        default:
             let remaining = try fields.readBytes(fields.remaining)
             return .unknown(classId: classId, body: remaining)
         }
