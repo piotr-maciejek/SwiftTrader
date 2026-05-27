@@ -7,7 +7,7 @@ struct DukascopyCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dukascopy-cli",
         abstract: "Dukascopy native protocol prototyping CLI.",
-        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self]
+        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self]
     )
 }
 
@@ -256,7 +256,7 @@ struct StreamCommand: AsyncParsableCommand {
             case .error(let e):
                 FileHandle.standardError.write(Data("server error: \(e)\n".utf8))
                 return
-            case .ok, .halo, .packedAccountInfo:
+            case .ok, .halo, .packedAccountInfo, .candleHistoryGroup:
                 break
             case .unknown(let classId, let body):
                 if ProcessInfo.processInfo.environment["DUKASCOPY_CLI_VERBOSE"] != nil {
@@ -355,5 +355,130 @@ struct AccountCommand: AsyncParsableCommand {
         }
         print("leverage:     \(a.leverage.map(String.init) ?? "-")")
         print("state:        \(a.state ?? "-")")
+    }
+}
+
+struct HistoryCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "history",
+        abstract: "Fetch historical bars and print them."
+    )
+
+    @Option(name: .long, help: "Target environment: demo or live")
+    var env: String = "demo"
+
+    @Option(name: .long, help: "Login")
+    var user: String
+
+    @Option(name: .long, help: "Password")
+    var pass: String
+
+    @Argument(help: "Instrument in BASE/QUOTE form, e.g. EUR/USD")
+    var instrument: String
+
+    @Argument(help: "Period: ONE_MIN, FIVE_MINS, FIFTEEN_MINS, ONE_HOUR, FOUR_HOURS, DAILY, …")
+    var period: String
+
+    @Option(name: .long, help: "Number of bars to fetch (going backwards from now)")
+    var count: Int = 100
+
+    @Option(name: .long, help: "Bid or Ask side")
+    var side: String = "Bid"
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        guard let cp = CandlePeriod.parse(period) else {
+            throw ValidationError("unknown period \(period)")
+        }
+        guard let offerSide = OfferSide(rawValue: side.capitalized) else {
+            throw ValidationError("side must be Bid or Ask")
+        }
+        let jnlp = try await JNLPClient.fetch(from: target.jnlpURL)
+        guard let serverURL = jnlp.srp6LoginURLs.first else {
+            throw ValidationError("JNLP returned no SRP6 servers")
+        }
+        let auth = try await AuthClient().authenticate(
+            baseURL: serverURL,
+            credentials: AuthCredentials(login: user, password: pass)
+        )
+        guard let first = auth.authApiURLs.first,
+              let address = ServerAddress.parse(first) else {
+            throw ValidationError("no usable authApiURL")
+        }
+        let transport = Transport(address: address)
+        try await transport.connect()
+        _ = try await transport.handshake(
+            login: user, ticket: auth.ticket, authSessionId: auth.authSessionId
+        )
+
+        var initReq = InitRequest()
+        initReq.requestId = UUID().uuidString
+        initReq.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        try await transport.sendFrame(initReq.encode())
+
+        let endSec = Int64(Date().timeIntervalSince1970)
+        let startSec = endSec - cp.seconds * Int64(count)
+        let reqId = UUID().uuidString
+        var req = CandleSubscribeRequest(
+            instrument: instrument, side: offerSide,
+            period: cp,
+            startTimeSeconds: startSec, endTimeSeconds: endSec
+        )
+        req.requestId = reqId
+        req.userName = user
+        req.sessionId = auth.authSessionId
+        try await transport.sendFrame(req.encode())
+
+        var groupsByOrder: [Int32: CandleHistoryGroup] = [:]
+        var maxOrder: Int32 = -1
+        var finished = false
+
+        let deadline = Date().addingTimeInterval(30)
+        while !finished && Date() < deadline {
+            let frame = try await transport.receiveFrame()
+            let msg = try MessageDecoder.decode(frame)
+            switch msg {
+            case .candleHistoryGroup(let g):
+                if g.requestId == reqId, let order = g.messageOrder {
+                    groupsByOrder[order] = g
+                    if g.historyFinished == true { maxOrder = order; finished = true }
+                }
+            case .heartbeatRequest(let h):
+                let resp = HeartbeatOkResponse(
+                    requestTime: h.requestTime ?? 0,
+                    receiveTime: Int64(Date().timeIntervalSince1970 * 1000)
+                )
+                try await transport.sendFrame(resp.encode())
+            case .error(let e):
+                throw ValidationError("server error: \(e)")
+            default:
+                continue
+            }
+        }
+        if !finished {
+            throw ValidationError("history request did not complete within 30s")
+        }
+
+        var bars: [CandleBar] = []
+        for order in 0...maxOrder {
+            guard let g = groupsByOrder[order], let s = g.candles else {
+                FileHandle.standardError.write(Data("missing chunk \(order)\n".utf8))
+                continue
+            }
+            bars.append(contentsOf: try HistoryDecoder.decodeCandles(s))
+        }
+        await transport.close()
+
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.timeZone = .current
+        for bar in bars.suffix(count) {
+            let ts = Date(timeIntervalSince1970: Double(bar.timeMillis) / 1000)
+            print(String(format: "%@  o=%.5f h=%.5f l=%.5f c=%.5f v=%.0f",
+                         f.string(from: ts), bar.open, bar.high, bar.low, bar.close, bar.volume))
+        }
+        print("\(bars.count) bars total.")
     }
 }
