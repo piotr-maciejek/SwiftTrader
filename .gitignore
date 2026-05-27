@@ -3,5 +3,7 @@ DerivedData/
 .DS_Store
 *.xcuserstate
 xcuserdata/
+.build/
+.swiftpm/
 
 Packages/DukascopyClient/PROTOCOL.md
