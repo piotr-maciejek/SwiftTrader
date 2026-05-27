@@ -3,3 +3,5 @@ DerivedData/
 .DS_Store
 *.xcuserstate
 xcuserdata/
+
+Packages/DukascopyClient/PROTOCOL.md
