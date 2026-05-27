@@ -6,6 +6,9 @@ public struct AuthSuccess: Sendable {
     public let ticket: String
     /// `urlA@urlB@…@ticket` — packed form expected by the transport layer.
     public let packedTicket: String
+    /// SRP6 session id used as the `sermo` query parameter; required again by
+    /// the binary login step on the transport socket.
+    public let authSessionId: String
     /// Server-supplied settings blob. Parsing deferred to a later phase.
     public let settingsBlob: Data?
     public let step3Headers: [String: String]
@@ -125,6 +128,7 @@ public struct AuthClient {
             authApiURLs: urls,
             ticket: ticket,
             packedTicket: packed,
+            authSessionId: sessionId,
             settingsBlob: step3.settingsBlob,
             step3Headers: step3.headers
         )

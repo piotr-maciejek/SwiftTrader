@@ -157,6 +157,18 @@ struct ConnectTestCommand: AsyncParsableCommand {
         try await transport.connect(timeout: timeout)
         let version = await transport.negotiatedVersion ?? -1
         print("version: \(version) negotiated.")
+
+        let handshake = try await transport.handshake(
+            login: user,
+            ticket: auth.ticket,
+            authSessionId: auth.authSessionId
+        )
+        print("session: \(handshake.transportSessionId)")
+        if let challenge = handshake.challenge {
+            print("challenge: \(challenge)")
+        }
+        print("LOGIN: ok.")
+
         await transport.close()
     }
 }
