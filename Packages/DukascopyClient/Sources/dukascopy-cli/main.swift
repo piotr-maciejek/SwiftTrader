@@ -7,7 +7,7 @@ struct DukascopyCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dukascopy-cli",
         abstract: "Dukascopy native protocol prototyping CLI.",
-        subcommands: [JNLPCommand.self, AuthCommand.self]
+        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self]
     )
 }
 
@@ -111,5 +111,52 @@ struct AuthCommand: AsyncParsableCommand {
         if let blob = r.settingsBlob {
             print("settings:    \(blob.count) bytes (parsing deferred)")
         }
+    }
+}
+
+struct ConnectTestCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "connect-test",
+        abstract: "Authenticate, open a TLS connection to the first API server, and negotiate the transport version."
+    )
+
+    @Option(name: .long, help: "Target environment: demo or live")
+    var env: String = "demo"
+
+    @Option(name: .long, help: "Login (account number / username)")
+    var user: String
+
+    @Option(name: .long, help: "Password")
+    var pass: String
+
+    @Option(name: .long, help: "Connect timeout in seconds")
+    var timeout: Double = 15
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        let jnlp = try await JNLPClient.fetch(from: target.jnlpURL)
+        guard let serverURL = jnlp.srp6LoginURLs.first else {
+            throw ValidationError("JNLP returned no SRP6 servers")
+        }
+
+        print("auth:    \(serverURL.absoluteString)")
+        let auth = try await AuthClient().authenticate(
+            baseURL: serverURL,
+            credentials: AuthCredentials(login: user, password: pass)
+        )
+        guard let first = auth.authApiURLs.first,
+              let address = ServerAddress.parse(first) else {
+            throw ValidationError("no usable authApiURL")
+        }
+        print("api:     \(address)")
+        print("ticket:  \(auth.ticket)")
+
+        let transport = Transport(address: address)
+        try await transport.connect(timeout: timeout)
+        let version = await transport.negotiatedVersion ?? -1
+        print("version: \(version) negotiated.")
+        await transport.close()
     }
 }
