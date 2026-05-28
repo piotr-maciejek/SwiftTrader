@@ -11,14 +11,12 @@ import Foundation
 /// lifecycle and credential handling land.
 final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     let cache: CandleCache
-    private let environment: DukascopyEnvironment
-    private let credentials: AuthCredentials?
+    /// Connected session, supplied once standalone auth reaches `.ready`. Nil before
+    /// connect — data calls then fail with `.notImplemented`/`.notConnected`.
+    private let session: DukascopySession?
 
-    init(environment: DukascopyEnvironment = .demo,
-         credentials: AuthCredentials? = nil,
-         cache: CandleCache = CandleCache()) {
-        self.environment = environment
-        self.credentials = credentials
+    init(session: DukascopySession? = nil, cache: CandleCache = CandleCache()) {
+        self.session = session
         self.cache = cache
     }
 

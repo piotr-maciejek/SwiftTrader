@@ -7,7 +7,7 @@ struct DukascopyCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dukascopy-cli",
         abstract: "Dukascopy native protocol prototyping CLI.",
-        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self]
+        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self]
     )
 }
 
@@ -480,5 +480,42 @@ struct HistoryCommand: AsyncParsableCommand {
                          f.string(from: ts), bar.open, bar.high, bar.low, bar.close, bar.volume))
         }
         print("\(bars.count) bars total.")
+    }
+}
+
+struct SessionCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "session",
+        abstract: "Connect via DukascopySession, hold the socket open, and print state transitions."
+    )
+
+    @Option(name: .long, help: "Target environment: demo or live")
+    var env: String = "demo"
+
+    @Option(name: .long, help: "Login")
+    var user: String
+
+    @Option(name: .long, help: "Password")
+    var pass: String
+
+    @Option(name: .long, help: "Seconds to hold the connection open")
+    var seconds: Double = 8
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        let session = DukascopySession(
+            environment: target,
+            credentials: AuthCredentials(login: user, password: pass)
+        )
+        print("connecting …")
+        try await session.connect()
+        print("state: \(await session.state)")
+        print("holding for \(seconds)s (answering heartbeats) …")
+        try await Task.sleep(for: .seconds(seconds))
+        print("state: \(await session.state)")
+        await session.close()
+        print("closed. state: \(await session.state)")
     }
 }

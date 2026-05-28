@@ -1,12 +1,28 @@
+import DukascopyClient
 import SwiftUI
 
 struct ContentView: View {
     @State private var workspace = WorkspaceViewModel()
     @State private var auth = AuthViewModel(port: AppSettings.shared.port)
+    @State private var standaloneAuth = StandaloneAuthViewModel()
+    @State private var showLoginSheet = false
+
+    private var provider: DataProviderMode { AppSettings.shared.dataProvider }
 
     private var isAuthReady: Bool {
         if case .ready = auth.phase { return true }
         return false
+    }
+
+    private var isNativeReady: Bool {
+        if case .ready = standaloneAuth.phase { return true }
+        return false
+    }
+
+    /// In native mode the workspace gates on the native session; in server mode on
+    /// the jforex-server auth handshake.
+    private var isWorkspaceReady: Bool {
+        provider == .native ? isNativeReady : isAuthReady
     }
 
     @State private var showEMAPopover = false
@@ -21,37 +37,101 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            switch auth.phase {
-            case .ready:
-                mainContent
-            case .pinRequired, .failed:
-                PinEntrySheet(auth: auth)
-                    .frame(minWidth: 800, minHeight: 500)
-            case .checking, .connecting:
-                VStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading chart data...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(minWidth: 800, minHeight: 500)
+            switch provider {
+            case .server:
+                serverGatedContent
+            case .native:
+                nativeGatedContent
             }
         }
         .task {
-            await auth.start()
+            if provider == .server {
+                await auth.start()
+            } else {
+                // Auto-connect the selected account; if none, the gate opens the login sheet.
+                await standaloneAuth.connectSelected()
+            }
         }
         // Server returns 503 for /history until the strategy is ready, so any
         // history fetches that fire during the auth handshake are wasted retries
         // that count against `maxHistoryAttempts`. Defer startAll() until auth
         // reaches .ready (works for both cold-connect and post-PIN flows).
-        // startAll() is idempotent — guarded by hasStarted internally.
-        .onChange(of: isAuthReady, initial: true) { _, ready in
-            if ready { workspace.startAll() }
+        // In native mode the gate is the native session instead. startAll() is
+        // idempotent — guarded by hasStarted internally.
+        .onChange(of: isWorkspaceReady, initial: true) { _, ready in
+            guard ready else { return }
+            if provider == .native, let session = standaloneAuth.session {
+                workspace.attachNativeSession(session)
+            }
+            workspace.startAll()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             workspace.saveNow()
         }
+    }
+
+    @ViewBuilder
+    private var serverGatedContent: some View {
+        switch auth.phase {
+        case .ready:
+            mainContent
+        case .pinRequired, .failed:
+            PinEntrySheet(auth: auth)
+                .frame(minWidth: 800, minHeight: 500)
+        case .checking, .connecting:
+            loadingPlaceholder("Loading chart data...")
+        }
+    }
+
+    @ViewBuilder
+    private var nativeGatedContent: some View {
+        Group {
+            if isNativeReady {
+                mainContent
+            } else {
+                nativeConnectGate
+            }
+        }
+        .sheet(isPresented: $showLoginSheet) {
+            StandaloneLoginSheet(accounts: AccountStore.shared, auth: standaloneAuth)
+        }
+    }
+
+    private var nativeConnectGate: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "bolt.horizontal.circle")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text("Standalone mode")
+                .font(.headline)
+            switch standaloneAuth.phase {
+            case .connecting:
+                ProgressView().controlSize(.small)
+                Text("Connecting…").font(.caption).foregroundStyle(.secondary)
+            case .failed(let msg):
+                Text(msg)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
+                Button("Choose account") { showLoginSheet = true }
+            default:
+                Button("Choose account / Log in") { showLoginSheet = true }
+            }
+        }
+        .frame(minWidth: 800, minHeight: 500)
+        .onAppear { if !standaloneAuth.hasSelectedAccount { showLoginSheet = true } }
+    }
+
+    private func loadingPlaceholder(_ text: String) -> some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(minWidth: 800, minHeight: 500)
     }
 
     private var mainContent: some View {

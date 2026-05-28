@@ -1,6 +1,6 @@
 import Foundation
 
-public enum DukascopyEnvironment: String, Sendable {
+public enum DukascopyEnvironment: String, Sendable, Codable, CaseIterable {
     case demo
     case live
 

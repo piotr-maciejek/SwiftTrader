@@ -40,14 +40,21 @@ public enum AuthError: Error, CustomStringConvertible {
 
 public struct AuthCredentials: Sendable {
     public let login: String
-    public let password: String
-    public init(login: String, password: String) {
+    /// `UPPER(hex(SHA1(password)))` — the only password derivative the SRP6 flow uses.
+    /// Lets callers persist the hash instead of the plaintext password.
+    public let passwordHash: String
+
+    public init(login: String, passwordHash: String) {
         self.login = login
-        self.password = password
+        self.passwordHash = passwordHash
+    }
+
+    public init(login: String, password: String) {
+        self.init(login: login, passwordHash: AuthCredentialEncoder.hashIdentity(password))
     }
 }
 
-public struct AuthClient {
+public struct AuthClient: Sendable {
     public static let platform = "DDS3_JFOREX"
     public static let defaultVersion = "99.99.99"
     public static let service = "srp_api"
@@ -76,7 +83,7 @@ public struct AuthClient {
         let sessionId = UUID().uuidString
         let requestId = UUID().uuidString
         let loginHash = AuthCredentialEncoder.hashIdentity(credentials.login)
-        let passwordHash = AuthCredentialEncoder.hashIdentity(credentials.password)
+        let passwordHash = credentials.passwordHash
         let srpSession = SRP6ClientSession(loginHash: loginHash, passwordHash: passwordHash)
 
         let step1 = try await performStep1(

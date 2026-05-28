@@ -1,3 +1,4 @@
+import DukascopyClient
 import SwiftUI
 
 @Observable
@@ -290,6 +291,21 @@ final class WorkspaceViewModel {
             return MarketDataCoordinator(port: port, cache: cache)
         case .native:
             return NativeMarketDataCoordinator(cache: cache)
+        }
+    }
+
+    /// Swap in a freshly-connected native session: rebuild the native coordinator and
+    /// broadcast it to every tab (same atomic-swap pattern as `reconnectAll`). Called on
+    /// first native connect and on live account switches.
+    func attachNativeSession(_ session: DukascopySession) {
+        guard settings.dataProvider == .native else { return }
+        marketData = NativeMarketDataCoordinator(session: session, cache: candleCache)
+        for tab in tabs {
+            switch tab.content {
+            case .chart(let vm): vm.reconnect(coordinator: marketData)
+            case .correlation(let vm): vm.reconnect(coordinator: marketData)
+            case .multiTimeframe(let vm): vm.reconnect(coordinator: marketData)
+            }
         }
     }
 
