@@ -15,6 +15,18 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
     /// If non-nil, submit will await this continuation before returning — used to inspect mid-flight state.
     var submitGate: AsyncStream<Void>.Iterator?
 
+    /// Fires once per `submitOrder` entry, AFTER `submitCallCount` is bumped, so gated tests
+    /// can deterministically await "a submit is in flight" instead of polling `isSubmitting`.
+    /// The VM sets `isSubmitting` on the MainActor before the nonisolated submit hop, so
+    /// observing it true does NOT guarantee the call has been counted yet (the increment runs
+    /// post-hop on another thread) — that gap is the source of the old flake.
+    let submitEntered: AsyncStream<Void>
+    private let submitEnteredContinuation: AsyncStream<Void>.Continuation
+
+    init() {
+        (submitEntered, submitEnteredContinuation) = AsyncStream.makeStream(of: Void.self)
+    }
+
     var lastSubmitOrderType: String?
     var lastSubmitEntryPrice: Double?
 
@@ -27,6 +39,7 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
         submitCallCount += 1
         lastSubmitOrderType = orderType
         lastSubmitEntryPrice = entryPrice
+        submitEnteredContinuation.yield(())
         if var iterator = submitGate {
             _ = await iterator.next()
             submitGate = iterator
@@ -130,10 +143,8 @@ struct VisualOrderSubmitRaceTests {
 
         let task = Task { await vm.confirmVisualOrder(instrument: "EURUSD") }
         // Let the submit reach the gate before we assert.
-        for _ in 0..<20 {
-            if vm.isSubmitting { break }
-            await Task.yield()
-        }
+        var entered = fake.submitEntered.makeAsyncIterator()
+        _ = await entered.next()
         #expect(vm.isSubmitting == true)
         #expect(vm.visualOrder(for: "EURUSD") != nil)
 
@@ -154,10 +165,8 @@ struct VisualOrderSubmitRaceTests {
         vm.beginVisualOrder(direction: "BUY", instrument: "EURUSD", bars: makeBars(count: 50))
 
         let first = Task { await vm.confirmVisualOrder(instrument: "EURUSD") }
-        for _ in 0..<20 {
-            if vm.isSubmitting { break }
-            await Task.yield()
-        }
+        var entered = fake.submitEntered.makeAsyncIterator()
+        _ = await entered.next()
         // Second call while first still pending should short-circuit.
         await vm.confirmVisualOrder(instrument: "EURUSD")
         #expect(fake.submitCallCount == 1)
@@ -177,10 +186,8 @@ struct VisualOrderSubmitRaceTests {
         vm.beginVisualOrder(direction: "BUY", instrument: "EURUSD", bars: makeBars(count: 50))
 
         let task = Task { await vm.confirmVisualOrder(instrument: "EURUSD") }
-        for _ in 0..<20 {
-            if vm.isSubmitting { break }
-            await Task.yield()
-        }
+        var entered = fake.submitEntered.makeAsyncIterator()
+        _ = await entered.next()
 
         // While submit is in flight, cancel should be a no-op — user shouldn't be able
         // to discard a pending order and lose the ability to see its outcome.
