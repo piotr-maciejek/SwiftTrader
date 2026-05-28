@@ -38,7 +38,7 @@ final class WorkspaceViewModel {
     /// Shared by every ChartViewModel (regular tabs + correlation cells). One
     /// URLSession + connection pool instead of N + 6M, so a startup fan-out
     /// doesn't fragment HTTP traffic into separate per-tab pools.
-    private var marketData: MarketDataCoordinator
+    private var marketData: any MarketDataProviding
     private var newsCoordinator: NewsCoordinator
     private var newsTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
@@ -67,7 +67,10 @@ final class WorkspaceViewModel {
 
     init() {
         candleCache = CandleCache(diskCache: diskCache)
-        marketData = MarketDataCoordinator(port: settings.port, cache: candleCache)
+        marketData = Self.makeMarketDataCoordinator(
+            provider: settings.dataProvider, port: settings.port, cache: candleCache
+        )
+        // Orders always route through jforex-server, even in standalone market-data mode.
         trading = TradingViewModel(coordinator: TradingCoordinator(port: settings.port))
         tradeHistory = TradeHistoryViewModel(
             service: TradeHistoryService(
@@ -276,11 +279,27 @@ final class WorkspaceViewModel {
         }
     }
 
+    /// Builds the market-data coordinator for the active provider. Native mode
+    /// ignores `port` (it talks to Dukascopy directly); the shared cache is reused
+    /// either way so tabs keep one cache + connection pool.
+    private static func makeMarketDataCoordinator(
+        provider: DataProviderMode, port: Int, cache: CandleCache
+    ) -> any MarketDataProviding {
+        switch provider {
+        case .server:
+            return MarketDataCoordinator(port: port, cache: cache)
+        case .native:
+            return NativeMarketDataCoordinator(cache: cache)
+        }
+    }
+
     func reconnectAll(port: Int) {
-        // Build one fresh MarketDataCoordinator for the new port and broadcast it.
+        // Build one fresh coordinator for the new port and broadcast it.
         // All tabs swap to it atomically — no stale per-tab coordinators clinging
         // to the old endpoint, and they all share one URLSession again.
-        marketData = MarketDataCoordinator(port: port, cache: candleCache)
+        marketData = Self.makeMarketDataCoordinator(
+            provider: settings.dataProvider, port: port, cache: candleCache
+        )
         for tab in tabs {
             switch tab.content {
             case .chart(let vm): vm.reconnect(coordinator: marketData)

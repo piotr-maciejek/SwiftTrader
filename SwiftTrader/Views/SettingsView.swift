@@ -51,6 +51,20 @@ struct SettingsView: View {
             }
             .toggleStyle(.switch)
 
+            VStack(alignment: .leading, spacing: 2) {
+                Picker("Market data", selection: $settings.dataProvider) {
+                    ForEach(DataProviderMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("Standalone talks to Dukascopy directly (no jforex-server). Takes effect after restarting the app.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             if let errorMessage {
                 Text(errorMessage)
                     .font(.caption)

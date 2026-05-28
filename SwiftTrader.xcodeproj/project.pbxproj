@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -71,6 +71,8 @@
 		A1000042 /* MultiTimeframeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042; };
 		A1000050 /* Drawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050; };
 		A1000051 /* DrawingMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000051; };
+		A1000052 /* NativeMarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000052; };
+		A1000060 /* DukascopyClient in Frameworks */ = {isa = PBXBuildFile; productRef = AA000002 /* DukascopyClient */; };
 		B100000F /* NYTradingCalendarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000F; };
 		B1000010 /* BarAggregatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000010; };
 		B1000011 /* DiskCandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000011; };
@@ -173,6 +175,8 @@
 		A2000042 /* MultiTimeframeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiTimeframeView.swift; sourceTree = "<group>"; };
 		A2000050 /* Drawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Drawing.swift; sourceTree = "<group>"; };
 		A2000051 /* DrawingMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingMath.swift; sourceTree = "<group>"; };
+		A2000052 /* NativeMarketDataCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMarketDataCoordinator.swift; sourceTree = "<group>"; };
+		AA000001 /* DukascopyClient */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Packages/DukascopyClient; sourceTree = "<group>"; };
 		B200000F /* NYTradingCalendarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NYTradingCalendarTests.swift; sourceTree = "<group>"; };
 		B2000010 /* BarAggregatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarAggregatorTests.swift; sourceTree = "<group>"; };
 		B2000011 /* DiskCandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskCandleCacheTests.swift; sourceTree = "<group>"; };
@@ -196,10 +200,22 @@
 		B3000001 /* SwiftTraderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SwiftTraderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFrameworksBuildPhase section */
+		A6000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000060 /* DukascopyClient in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
 /* Begin PBXGroup section */
 		A4000001 = {
 			isa = PBXGroup;
 			children = (
+				AA000001 /* DukascopyClient */,
 				A4000002 /* SwiftTrader */,
 				B4000002 /* SwiftTraderTests */,
 				A4000006 /* Products */,
@@ -253,6 +269,7 @@
 				A2000004 /* ForexAPIService.swift */,
 				A2000005 /* ForexWebSocketService.swift */,
 				A200000B /* MarketDataCoordinator.swift */,
+				A2000052 /* NativeMarketDataCoordinator.swift */,
 				A2000013 /* TradingAPIService.swift */,
 				A2000014 /* TradingWebSocketService.swift */,
 				A2000039 /* PendingOrdersWebSocketService.swift */,
@@ -355,12 +372,16 @@
 			buildConfigurationList = A7000003 /* Build configuration list for PBXNativeTarget "SwiftTrader" */;
 			buildPhases = (
 				A6000001 /* Sources */,
+				A6000002 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			name = SwiftTrader;
+			packageProductDependencies = (
+				AA000002 /* DukascopyClient */,
+			);
 			productName = SwiftTrader;
 			productReference = A3000001 /* SwiftTrader.app */;
 			productType = "com.apple.product-type.application";
@@ -392,7 +413,6 @@
 				LastUpgradeCheck = 1600;
 			};
 			buildConfigurationList = A7000001 /* Build configuration list for PBXProject "SwiftTrader" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -479,6 +499,7 @@
 				A1000042 /* MultiTimeframeView.swift in Sources */,
 				A1000050 /* Drawing.swift in Sources */,
 				A1000051 /* DrawingMath.swift in Sources */,
+				A1000052 /* NativeMarketDataCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -664,6 +685,13 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA000002 /* DukascopyClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DukascopyClient;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 	};
 	rootObject = A8000001 /* Project object */;
