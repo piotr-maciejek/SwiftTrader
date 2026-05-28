@@ -114,6 +114,7 @@ struct ContentView: View {
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
+                    .textSelection(.enabled)
                 Button("Choose account") { showLoginSheet = true }
             default:
                 Button("Choose account / Log in") { showLoginSheet = true }

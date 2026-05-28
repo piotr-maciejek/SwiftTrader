@@ -6,8 +6,8 @@ public enum DukascopyEnvironment: String, Sendable, Codable, CaseIterable {
 
     public var jnlpURL: URL {
         switch self {
-        case .demo: URL(string: "http://platform.dukascopy.com/demo/jforex.jnlp")!
-        case .live: URL(string: "http://platform.dukascopy.com/live_3/jforex_3.jnlp")!
+        case .demo: URL(string: "https://platform.dukascopy.com/demo/jforex.jnlp")!
+        case .live: URL(string: "https://platform.dukascopy.com/live_3/jforex_3.jnlp")!
         }
     }
 }

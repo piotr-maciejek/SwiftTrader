@@ -38,6 +38,7 @@ struct StandaloneLoginSheet: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             default:
                 EmptyView()
             }

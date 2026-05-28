@@ -91,8 +91,8 @@ struct JNLPConfigTests {
     @Test("Environment JNLP URLs are correct")
     func environmentURLs() {
         #expect(DukascopyEnvironment.demo.jnlpURL.absoluteString
-            == "http://platform.dukascopy.com/demo/jforex.jnlp")
+            == "https://platform.dukascopy.com/demo/jforex.jnlp")
         #expect(DukascopyEnvironment.live.jnlpURL.absoluteString
-            == "http://platform.dukascopy.com/live_3/jforex_3.jnlp")
+            == "https://platform.dukascopy.com/live_3/jforex_3.jnlp")
     }
 }
