@@ -1,30 +1,37 @@
-import XCTest
+import Foundation
+import Testing
 @testable import DukascopyClient
 
-final class HexTests: XCTestCase {
-    func testRoundTripAllByteValues() {
+@Suite("Hex")
+struct HexTests {
+    @Test("Round-trips all 256 byte values")
+    func roundTripAllByteValues() {
         var bytes = Data()
         for i in 0..<256 { bytes.append(UInt8(i)) }
         let hex = Hex.encode(bytes)
-        XCTAssertEqual(hex.count, 512)
-        XCTAssertEqual(hex.prefix(6), "000102")
-        XCTAssertEqual(hex.suffix(6), "fdfeff")
-        XCTAssertEqual(Hex.decode(hex), bytes)
+        #expect(hex.count == 512)
+        #expect(hex.prefix(6) == "000102")
+        #expect(hex.suffix(6) == "fdfeff")
+        #expect(Hex.decode(hex) == bytes)
     }
 
-    func testDecodeAcceptsUppercase() {
-        XCTAssertEqual(Hex.decode("DEADBEEF"), Data([0xDE, 0xAD, 0xBE, 0xEF]))
+    @Test("Decode accepts uppercase")
+    func decodeAcceptsUppercase() {
+        #expect(Hex.decode("DEADBEEF") == Data([0xDE, 0xAD, 0xBE, 0xEF]))
     }
 
-    func testDecodeRejectsOddLength() {
-        XCTAssertNil(Hex.decode("abc"))
+    @Test("Decode rejects odd length")
+    func decodeRejectsOddLength() {
+        #expect(Hex.decode("abc") == nil)
     }
 
-    func testDecodeRejectsNonHex() {
-        XCTAssertNil(Hex.decode("zz"))
+    @Test("Decode rejects non-hex")
+    func decodeRejectsNonHex() {
+        #expect(Hex.decode("zz") == nil)
     }
 
-    func testDecodeEmpty() {
-        XCTAssertEqual(Hex.decode(""), Data())
+    @Test("Decode empty string")
+    func decodeEmpty() {
+        #expect(Hex.decode("") == Data())
     }
 }

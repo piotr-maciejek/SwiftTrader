@@ -1,109 +1,118 @@
-import XCTest
+import Foundation
+import Testing
 @testable import DukascopyClient
 
-final class BinaryCodecTests: XCTestCase {
-    func testJavaHashCodeKnownValues() {
-        // SHA reference values for Java's `String.hashCode()`:
-        XCTAssertEqual(javaStringHashCode(""), 0)
-        XCTAssertEqual(javaStringHashCode("a"), 97)
-        XCTAssertEqual(javaStringHashCode("abc"), 96354)
-        XCTAssertEqual(javaStringHashCode("Hello, World!"), 1498789909)
-        // Large strings hash with 32-bit wrap-around.
-        XCTAssertEqual(
-            javaStringHashCode("com.dukascopy.dds4.transport.msg.system.HaloRequestMessage"),
-            javaStringHashCode("com.dukascopy.dds4.transport.msg.system.HaloRequestMessage")
-        )
+@Suite("Binary codec")
+struct BinaryCodecTests {
+    @Test("Java String.hashCode matches known values")
+    func javaHashCodeKnownValues() {
+        #expect(javaStringHashCode("") == 0)
+        #expect(javaStringHashCode("a") == 97)
+        #expect(javaStringHashCode("abc") == 96354)
+        #expect(javaStringHashCode("Hello, World!") == 1498789909)
+        // Large strings hash with 32-bit wrap-around (deterministic).
+        #expect(javaStringHashCode("com.dukascopy.dds4.transport.msg.system.HaloRequestMessage")
+            == javaStringHashCode("com.dukascopy.dds4.transport.msg.system.HaloRequestMessage"))
     }
 
-    func testVarLenSingleByte() {
+    @Test("VarLen single-byte encoding")
+    func varLenSingleByte() {
         var w = BinaryWriter()
         w.writeVarLen(0)
-        XCTAssertEqual(w.data, Data([0xC0]))
+        #expect(w.data == Data([0xC0]))
         w = BinaryWriter()
         w.writeVarLen(63)
-        XCTAssertEqual(w.data, Data([0xFF]))
+        #expect(w.data == Data([0xFF]))
     }
 
-    func testVarLenTwoByteBoundary() {
+    @Test("VarLen two-byte boundary")
+    func varLenTwoByteBoundary() {
         var w = BinaryWriter()
         w.writeVarLen(64)
-        XCTAssertEqual(w.data, Data([0x80, 0x40]))
+        #expect(w.data == Data([0x80, 0x40]))
         w = BinaryWriter()
         w.writeVarLen(16383)
-        XCTAssertEqual(w.data, Data([0xBF, 0xFF]))
+        #expect(w.data == Data([0xBF, 0xFF]))
     }
 
-    func testVarLenRoundTrip() throws {
+    @Test("VarLen round-trips across size classes")
+    func varLenRoundTrip() throws {
         for value in [0, 1, 63, 64, 1000, 16383, 16384, 0x3F_FFFF, 0x40_0000, 1_000_000, 0x3FFF_FFFF] {
             var w = BinaryWriter()
             w.writeVarLen(value)
             var r = BinaryReader(w.data)
-            XCTAssertEqual(try r.readVarLen(), value)
-            XCTAssertEqual(r.remaining, 0)
+            #expect(try r.readVarLen() == value)
+            #expect(r.remaining == 0)
         }
     }
 
-    func testStringRoundTrip() throws {
+    @Test("String round-trips, including UTF-8 and long strings")
+    func stringRoundTrip() throws {
         for s in ["", "a", "EUR/USD", "héllo", String(repeating: "x", count: 1000)] {
             var w = BinaryWriter()
             w.writeString(s)
             var r = BinaryReader(w.data)
-            XCTAssertEqual(try r.readString(), s)
-            XCTAssertEqual(r.remaining, 0)
+            #expect(try r.readString() == s)
+            #expect(r.remaining == 0)
         }
     }
 
-    func testInt64RoundTrip() throws {
+    @Test("Int64 round-trips including extremes")
+    func int64RoundTrip() throws {
         for v: Int64 in [0, 1, -1, Int64.min, Int64.max, 1234567890123] {
             var w = BinaryWriter()
             w.writeInt64BE(v)
             var r = BinaryReader(w.data)
-            XCTAssertEqual(try r.readInt64BE(), v)
+            #expect(try r.readInt64BE() == v)
         }
     }
 
-    func testInt16RoundTripCoversFieldIdRange() throws {
+    @Test("Int16 round-trips across the field-id range")
+    func int16RoundTripCoversFieldIdRange() throws {
         for v: Int16 in [Int16.min, -1, 0, 1, Int16.max, -16397, 28132, -29489] {
             var w = BinaryWriter()
             w.writeInt16BE(v)
             var r = BinaryReader(w.data)
-            XCTAssertEqual(try r.readInt16BE(), v)
+            #expect(try r.readInt16BE() == v)
         }
     }
 
-    func testFieldRecordRoundTrip() throws {
+    @Test("Field record round-trips id + value pairs")
+    func fieldRecordRoundTrip() throws {
         var msgWriter = BinaryWriter()
         writeField(&msgWriter, fieldId: 17261) { sub in sub.writeString("req-1") }
         writeField(&msgWriter, fieldId: -28332) { sub in sub.writeInt64BE(1_700_000_000_000) }
 
         var reader = BinaryReader(msgWriter.data)
         let first = try readField(from: &reader)
-        XCTAssertEqual(first?.fieldId, 17261)
-        var firstValue = first!.value
-        XCTAssertEqual(try firstValue.readString(), "req-1")
+        #expect(first?.fieldId == 17261)
+        var firstValue = try #require(first).value
+        #expect(try firstValue.readString() == "req-1")
 
         let second = try readField(from: &reader)
-        XCTAssertEqual(second?.fieldId, -28332)
-        var secondValue = second!.value
-        XCTAssertEqual(try secondValue.readInt64BE(), 1_700_000_000_000)
+        #expect(second?.fieldId == -28332)
+        var secondValue = try #require(second).value
+        #expect(try secondValue.readInt64BE() == 1_700_000_000_000)
 
-        XCTAssertNil(try readField(from: &reader))
+        #expect(try readField(from: &reader) == nil)
     }
 }
 
-final class MessageEncodingTests: XCTestCase {
-    func testHaloRequestEncodesClassIdFirst() {
+@Suite("Message encoding")
+struct MessageEncodingTests {
+    @Test("HaloRequest encodes the classId first")
+    func haloRequestEncodesClassIdFirst() throws {
         var halo = HaloRequest()
         halo.useragent = "ua"
         halo.pingable = true
         let encoded = halo.encode()
         var reader = BinaryReader(encoded)
-        XCTAssertEqual(try reader.readInt32BE(), javaStringHashCode(WireClass.haloRequest))
-        XCTAssertGreaterThan(reader.remaining, 0)
+        #expect(try reader.readInt32BE() == javaStringHashCode(WireClass.haloRequest))
+        #expect(reader.remaining > 0)
     }
 
-    func testHaloResponseDecodesBackToFields() throws {
-        // Round-trip via a synthetic encoder: write classId + 3 fields, then decode.
+    @Test("HaloResponse decodes back into fields")
+    func haloResponseDecodesBackToFields() throws {
         var w = BinaryWriter()
         w.writeInt32BE(javaStringHashCode(WireClass.haloResponse))
         writeField(&w, fieldId: -3004)  { sub in sub.writeString("xyz") }
@@ -111,36 +120,51 @@ final class MessageEncodingTests: XCTestCase {
         writeField(&w, fieldId: -11686) { sub in sub.writeBoolean(true) }
 
         let msg = try MessageDecoder.decode(w.data)
-        guard case .halo(let halo) = msg else { return XCTFail("expected halo, got \(msg)") }
-        XCTAssertEqual(halo.challenge, "xyz")
-        XCTAssertEqual(halo.sessionId, "sess-123")
-        XCTAssertEqual(halo.udpSupportedByServer, true)
+        guard case .halo(let halo) = msg else {
+            Issue.record("expected halo, got \(msg)")
+            return
+        }
+        #expect(halo.challenge == "xyz")
+        #expect(halo.sessionId == "sess-123")
+        #expect(halo.udpSupportedByServer == true)
     }
 
-    func testOkResponseEmpty() throws {
+    @Test("OkResponse decodes when empty")
+    func okResponseEmpty() throws {
         var w = BinaryWriter()
         w.writeInt32BE(javaStringHashCode(WireClass.okResponse))
         let msg = try MessageDecoder.decode(w.data)
-        guard case .ok = msg else { return XCTFail("expected ok") }
+        guard case .ok = msg else {
+            Issue.record("expected ok, got \(msg)")
+            return
+        }
     }
 
-    func testErrorResponseDecodes() throws {
+    @Test("ErrorResponse decodes reason and fatal flag")
+    func errorResponseDecodes() throws {
         var w = BinaryWriter()
         w.writeInt32BE(javaStringHashCode(WireClass.errorResponse))
         writeField(&w, fieldId: -19257) { sub in sub.writeString("bad creds") }
         writeField(&w, fieldId: 31707)  { sub in sub.writeBoolean(true) }
 
         let msg = try MessageDecoder.decode(w.data)
-        guard case .error(let err) = msg else { return XCTFail("expected error") }
-        XCTAssertEqual(err.reason, "bad creds")
-        XCTAssertEqual(err.fatal, true)
+        guard case .error(let err) = msg else {
+            Issue.record("expected error, got \(msg)")
+            return
+        }
+        #expect(err.reason == "bad creds")
+        #expect(err.fatal == true)
     }
 
-    func testUnknownClassIsPreserved() throws {
+    @Test("Unknown class id is preserved")
+    func unknownClassIsPreserved() throws {
         var w = BinaryWriter()
         w.writeInt32BE(12345)
         let msg = try MessageDecoder.decode(w.data)
-        guard case .unknown(let classId, _) = msg else { return XCTFail("expected unknown") }
-        XCTAssertEqual(classId, 12345)
+        guard case .unknown(let classId, _) = msg else {
+            Issue.record("expected unknown, got \(msg)")
+            return
+        }
+        #expect(classId == 12345)
     }
 }

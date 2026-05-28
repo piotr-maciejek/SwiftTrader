@@ -1,9 +1,11 @@
 import BigInt
 import CryptoKit
-import XCTest
+import Foundation
+import Testing
 @testable import DukascopyClient
 
-final class SRP6Tests: XCTestCase {
+@Suite("SRP6")
+struct SRP6Tests {
     /// Standard RFC 5054 1024-bit group used as a baseline. The Dukascopy server
     /// actually sends N and g in step 1, but using a known group for the math
     /// tests keeps them deterministic.
@@ -20,21 +22,16 @@ final class SRP6Tests: XCTestCase {
         SRP6CryptoParams(N: N, g: g, hash: hash)
     }
 
-    func testIdentityHashMatchesJavaSHA1UpperHex() {
-        // Java AuthClientUtils.encodeString: UPPER(hex(SHA1(s)))
-        // SHA1("user")  = 12dea96fec20593566ab75692c9949596833adc9
-        XCTAssertEqual(
-            AuthCredentialEncoder.hashIdentity("user"),
-            "12DEA96FEC20593566AB75692C9949596833ADC9"
-        )
-        // SHA1("")      = da39a3ee5e6b4b0d3255bfef95601890afd80709
-        XCTAssertEqual(
-            AuthCredentialEncoder.hashIdentity(""),
-            "DA39A3EE5E6B4B0D3255BFEF95601890AFD80709"
-        )
+    @Test("Identity hash matches Java SHA1 upper-hex")
+    func identityHashMatchesJavaSHA1UpperHex() {
+        // SHA1("user") = 12dea96fec20593566ab75692c9949596833adc9
+        #expect(AuthCredentialEncoder.hashIdentity("user") == "12DEA96FEC20593566AB75692C9949596833ADC9")
+        // SHA1("") = da39a3ee5e6b4b0d3255bfef95601890afd80709
+        #expect(AuthCredentialEncoder.hashIdentity("") == "DA39A3EE5E6B4B0D3255BFEF95601890AFD80709")
     }
 
-    func testComputeKMatchesPaddedConcatenation() {
+    @Test("k = H(PAD(N) || PAD(g))")
+    func computeKMatchesPaddedConcatenation() {
         let session = SRP6ClientSession(loginHash: "L", passwordHash: "P")
         let params = params(.sha1)
         let k = session.computeK(params: params)
@@ -45,10 +42,11 @@ final class SRP6Tests: XCTestCase {
         expected.append(params.g.bytes(paddedTo: length))
         let expectedK = BigUInt(Data(Insecure.SHA1.hash(data: expected)))
 
-        XCTAssertEqual(k, expectedK)
+        #expect(k == expectedK)
     }
 
-    func testComputeUMatchesHexConcat() {
+    @Test("u = H(hex(A) || hex(B))")
+    func computeUMatchesHexConcat() {
         let session = SRP6ClientSession(loginHash: "L", passwordHash: "P")
         let A = BigUInt(42)
         let B = BigUInt(1729)
@@ -56,10 +54,11 @@ final class SRP6Tests: XCTestCase {
 
         let expectedInput = Data((A.lowercaseHex + B.lowercaseHex).utf8)
         let expectedU = BigUInt(Data(Insecure.SHA1.hash(data: expectedInput)))
-        XCTAssertEqual(u, expectedU)
+        #expect(u == expectedU)
     }
 
-    func testComputeM1MatchesHexConcat() {
+    @Test("M1 = H(hex(A) || hex(B) || hex(S))")
+    func computeM1MatchesHexConcat() {
         let session = SRP6ClientSession(loginHash: "L", passwordHash: "P")
         let A = BigUInt(0xDEADBEEF)
         let B = BigUInt(0xCAFEBABE)
@@ -67,54 +66,50 @@ final class SRP6Tests: XCTestCase {
         let m1 = session.computeM1(params: params(.sha1), A: A, B: B, S: S)
         let expectedInput = Data((A.lowercaseHex + B.lowercaseHex + S.lowercaseHex).utf8)
         let expected = BigUInt(Data(Insecure.SHA1.hash(data: expectedInput)))
-        XCTAssertEqual(m1, expected)
+        #expect(m1 == expected)
     }
 
-    func testComputeXMatchesDoubleHashFormula() {
+    @Test("x = H(UPPER(hex(salt) || lower(hex(H(login:pwd)))))")
+    func computeXMatchesDoubleHashFormula() {
         let loginHash = "ABCDEF"
         let passwordHash = "012345"
         let session = SRP6ClientSession(loginHash: loginHash, passwordHash: passwordHash)
         let salt = BigUInt(0x1234567890ABCDEF as UInt64)
         let x = session.computeX(params: params(.sha1), salt: salt)
 
-        // Reference computation: H(UPPER(hex(salt) || lower(hex( H("loginHash:passwordHash") ))))
         let h1 = Data(Insecure.SHA1.hash(data: Data("\(loginHash):\(passwordHash)".utf8)))
         let h1Hex = Hex.encode(h1)
         let concat = (salt.lowercaseHex + h1Hex).uppercased()
         let h2 = Data(Insecure.SHA1.hash(data: Data(concat.utf8)))
         let expectedX = BigUInt(hex: Hex.encode(h2))
-        XCTAssertEqual(x, expectedX)
+        #expect(x == expectedX)
     }
 
-    func testTicketIsHashOfHexS() throws {
+    @Test("Ticket is H(utf8(hex(S))) — 40 hex chars for SHA-1")
+    func ticketIsHashOfHexS() throws {
         let session = SRP6ClientSession(loginHash: "A", passwordHash: "B")
         // Deterministic: fixed `a` so step2 produces a fixed S/A.
         let fixedA: BigUInt = 12345
         let salt: BigUInt = 0x42
-        // Server picks B; for testing we want B coprime to N, B mod N != 0.
         let serverB: BigUInt = 0x999
 
         _ = try session.step2(params: params(.sha1), salt: salt, B: serverB) { fixedA }
 
-        // step3 verification needs a real M2 from the server. Skip that path here;
-        // ticket() will still compute from the stored S.
         let ticket = session.ticket()
-        XCTAssertNotNil(ticket)
-        XCTAssertEqual(ticket?.count, 40)  // SHA-1 = 20 bytes = 40 hex chars
+        #expect(ticket != nil)
+        #expect(ticket?.count == 40)  // SHA-1 = 20 bytes = 40 hex chars
     }
 
-    func testStep3VerifiesServerM2() throws {
+    @Test("step3 verifies a good server M2 and rejects a bad one")
+    func step3VerifiesServerM2() throws {
         let session = SRP6ClientSession(loginHash: "A", passwordHash: "B")
         let fixedA: BigUInt = 0xAA
         let salt: BigUInt = 0x42
         let serverB: BigUInt = 0x999
         _ = try session.step2(params: params(.sha1), salt: salt, B: serverB) { fixedA }
 
-        // Reach into the session state to recompute the expected M2 with the same routine.
-        // We do this by re-running computeM2 on the public fields we know.
-        // Easier: ask the session to compute the real M2 we'd expect.
+        // Re-derive A, M1, S the same way the session did, then the expected M2.
         let mirrorParams = params(.sha1)
-        // Re-derive A, M1, S the same way the session did:
         let aValue: BigUInt = fixedA
         let A = mirrorParams.g.power(aValue, modulus: mirrorParams.N)
         let k = session.computeK(params: mirrorParams)
@@ -127,29 +122,29 @@ final class SRP6Tests: XCTestCase {
         let M1 = session.computeM1(params: mirrorParams, A: A, B: serverB, S: S)
         let M2 = session.computeM2(params: mirrorParams, A: A, M1: M1, S: S)
 
-        // Good M2 verifies.
-        XCTAssertNoThrow(try session.step3(serverM2Hex: M2.lowercaseHex))
+        // Good M2 verifies (no throw).
+        try session.step3(serverM2Hex: M2.lowercaseHex)
 
         // Bad M2 throws.
         let badM2 = (M2 + 1).lowercaseHex
-        XCTAssertThrowsError(try session.step3(serverM2Hex: badM2)) { err in
-            XCTAssertEqual(err as? SRP6Error, .badServerEvidence)
+        #expect(throws: SRP6Error.badServerEvidence) {
+            try session.step3(serverM2Hex: badM2)
         }
     }
 
-    func testStep2RejectsZeroBModN() {
+    @Test("step2 rejects B ≡ 0 (mod N)")
+    func step2RejectsZeroBModN() {
         let session = SRP6ClientSession(loginHash: "A", passwordHash: "B")
-        XCTAssertThrowsError(
+        #expect(throws: SRP6Error.invalidServerPublicValue) {
             try session.step2(params: params(.sha1), salt: 1, B: N) { 1 }
-        ) { err in
-            XCTAssertEqual(err as? SRP6Error, .invalidServerPublicValue)
         }
     }
 
-    func testHashAlgorithmParsing() {
-        XCTAssertEqual(SRP6HashAlgorithm.parse("SHA-1"), .sha1)
-        XCTAssertEqual(SRP6HashAlgorithm.parse("sha-1"), .sha1)
-        XCTAssertEqual(SRP6HashAlgorithm.parse("SHA_256"), .sha256)
-        XCTAssertNil(SRP6HashAlgorithm.parse("MD5"))
+    @Test("Hash algorithm name parsing")
+    func hashAlgorithmParsing() {
+        #expect(SRP6HashAlgorithm.parse("SHA-1") == .sha1)
+        #expect(SRP6HashAlgorithm.parse("sha-1") == .sha1)
+        #expect(SRP6HashAlgorithm.parse("SHA_256") == .sha256)
+        #expect(SRP6HashAlgorithm.parse("MD5") == nil)
     }
 }

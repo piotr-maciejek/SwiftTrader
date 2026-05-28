@@ -1,8 +1,11 @@
-import XCTest
+import Foundation
+import Testing
 @testable import DukascopyClient
 
-final class JNLPConfigTests: XCTestCase {
-    func testParseMinimalDemo() throws {
+@Suite("JNLP config")
+struct JNLPConfigTests {
+    @Test("Parses a minimal DEMO config")
+    func parseMinimalDemo() throws {
         let xml = """
         <?xml version="1.0" encoding="UTF-8"?>
         <jnlp>
@@ -14,15 +17,16 @@ final class JNLPConfigTests: XCTestCase {
         </jnlp>
         """
         let config = try JNLPClient.parse(data: Data(xml.utf8))
-        XCTAssertEqual(config.clientMode, .demo)
-        XCTAssertEqual(config.srp6LoginURLs.map { $0.absoluteString }, [
+        #expect(config.clientMode == .demo)
+        #expect(config.srp6LoginURLs.map { $0.absoluteString } == [
             "https://platform.dukascopy.com/demo/",
             "https://platform2.dukascopy.com/demo/",
         ])
-        XCTAssertEqual(config.legacyLoginURLs.count, 2)
+        #expect(config.legacyLoginURLs.count == 2)
     }
 
-    func testParseLive() throws {
+    @Test("Parses a LIVE config with no legacy URLs")
+    func parseLive() throws {
         let xml = """
         <jnlp><resources>
           <property name="jnlp.client.mode" value="LIVE"/>
@@ -30,12 +34,13 @@ final class JNLPConfigTests: XCTestCase {
         </resources></jnlp>
         """
         let config = try JNLPClient.parse(data: Data(xml.utf8))
-        XCTAssertEqual(config.clientMode, .live)
-        XCTAssertEqual(config.srp6LoginURLs.count, 1)
-        XCTAssertTrue(config.legacyLoginURLs.isEmpty)
+        #expect(config.clientMode == .live)
+        #expect(config.srp6LoginURLs.count == 1)
+        #expect(config.legacyLoginURLs.isEmpty)
     }
 
-    func testTrimsWhitespaceInCSV() throws {
+    @Test("Trims whitespace in CSV URL lists")
+    func trimsWhitespaceInCSV() throws {
         let xml = """
         <jnlp><resources>
           <property name="jnlp.client.mode" value="DEMO"/>
@@ -43,53 +48,51 @@ final class JNLPConfigTests: XCTestCase {
         </resources></jnlp>
         """
         let config = try JNLPClient.parse(data: Data(xml.utf8))
-        XCTAssertEqual(config.srp6LoginURLs.map { $0.absoluteString }, [
-            "https://a/", "https://b/",
-        ])
+        #expect(config.srp6LoginURLs.map { $0.absoluteString } == ["https://a/", "https://b/"])
     }
 
-    func testMissingMode() {
+    @Test("Missing client.mode throws")
+    func missingMode() {
         let xml = """
         <jnlp><resources>
           <property name="jnlp.srp6.login.url" value="https://x/"/>
         </resources></jnlp>
         """
-        XCTAssertThrowsError(try JNLPClient.parse(data: Data(xml.utf8))) { err in
-            XCTAssertEqual(err as? JNLPError, .missingProperty("jnlp.client.mode"))
+        #expect(throws: JNLPError.missingProperty("jnlp.client.mode")) {
+            try JNLPClient.parse(data: Data(xml.utf8))
         }
     }
 
-    func testMissingSRP6URLs() {
+    @Test("Missing SRP6 URLs throws")
+    func missingSRP6URLs() {
         let xml = """
         <jnlp><resources>
           <property name="jnlp.client.mode" value="DEMO"/>
         </resources></jnlp>
         """
-        XCTAssertThrowsError(try JNLPClient.parse(data: Data(xml.utf8))) { err in
-            XCTAssertEqual(err as? JNLPError, .missingProperty("jnlp.srp6.login.url"))
+        #expect(throws: JNLPError.missingProperty("jnlp.srp6.login.url")) {
+            try JNLPClient.parse(data: Data(xml.utf8))
         }
     }
 
-    func testUnknownClientMode() {
+    @Test("Unknown client mode throws")
+    func unknownClientMode() {
         let xml = """
         <jnlp><resources>
           <property name="jnlp.client.mode" value="WAT"/>
           <property name="jnlp.srp6.login.url" value="https://x/"/>
         </resources></jnlp>
         """
-        XCTAssertThrowsError(try JNLPClient.parse(data: Data(xml.utf8))) { err in
-            XCTAssertEqual(err as? JNLPError, .unknownClientMode("WAT"))
+        #expect(throws: JNLPError.unknownClientMode("WAT")) {
+            try JNLPClient.parse(data: Data(xml.utf8))
         }
     }
 
-    func testEnvironmentURLs() {
-        XCTAssertEqual(
-            DukascopyEnvironment.demo.jnlpURL.absoluteString,
-            "http://platform.dukascopy.com/demo/jforex.jnlp"
-        )
-        XCTAssertEqual(
-            DukascopyEnvironment.live.jnlpURL.absoluteString,
-            "http://platform.dukascopy.com/live_3/jforex_3.jnlp"
-        )
+    @Test("Environment JNLP URLs are correct")
+    func environmentURLs() {
+        #expect(DukascopyEnvironment.demo.jnlpURL.absoluteString
+            == "http://platform.dukascopy.com/demo/jforex.jnlp")
+        #expect(DukascopyEnvironment.live.jnlpURL.absoluteString
+            == "http://platform.dukascopy.com/live_3/jforex_3.jnlp")
     }
 }
