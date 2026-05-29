@@ -30,6 +30,12 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     private let session: DukascopySession?
     private let rawFetch: RawFetch
     private let coalescer = HistoryCoalescer(limit: 4)
+    /// Per-instrument cache of the server's in-progress candle set (the wire path the
+    /// JForex SDK uses internally for `getHistory().getBar(period, BID, 0)`). Re-fetched
+    /// every `inProgressTtl` so the seed for a forming bucket reflects the server's
+    /// authoritative OHLC instead of being derived from our cached 1m bars.
+    private let inProgressStore = InProgressStore()
+    private let inProgressTtl: TimeInterval = 30
     /// Fills deep history for all pairs in the background, one idle-gated request at a
     /// time. Only present with a live session (a real `rawFetch`); nil for tests.
     private let prefetcher: HistoryPrefetcher?
@@ -83,6 +89,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         } else {
             self.prefetcher = nil
         }
+
     }
 
     /// Native mode talks to a single Dukascopy socket + bulk CDN, so a grid must cold-load
@@ -152,9 +159,181 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     func streamCandles(
         instrument: String, period: String, rebucketing: Bool
     ) -> AsyncThrowingStream<SwiftTrader.CandleBar, Error> {
-        // Live path lands with the native session. It will mirror the fetch policy:
-        // 4H/Daily/3m aggregated client-side from a raw 1H/1M bar stream.
-        AsyncThrowingStream { $0.finish(throwing: NativeProviderError.notImplemented("live bar stream")) }
+        guard let session else {
+            return AsyncThrowingStream { $0.finish(throwing: NativeProviderError.missingCredentials) }
+        }
+        let wireInstrument = Self.toSlashedPair(instrument)
+        return AsyncThrowingStream<SwiftTrader.CandleBar, Error> { continuation in
+            let task = Task {
+                // Subscribe to quotes for THIS instrument only. The session unions
+                // additions across all open streams, so opening AUD/CAD multi-tf
+                // doesn't pull ticks for the other 27 default pairs.
+                try? await session.ensureSubscribedQuotes([wireInstrument])
+                var current: SwiftTrader.CandleBar?
+                for await tick in await session.tickStream() {
+                    if Task.isCancelled { break }
+                    guard tick.instrument == wireInstrument else { continue }
+                    guard let bid = tick.bestBid?.doubleValue else { continue }
+                    let bucketMs = Self.liveBucketStartMs(tickMs: tick.creationTimestampMillis, period: period)
+                    if let c = current, c.time == bucketMs {
+                        current = SwiftTrader.CandleBar(
+                            time: c.time, open: c.open,
+                            high: max(c.high, bid), low: min(c.low, bid),
+                            close: bid, volume: c.volume, partial: true
+                        )
+                    } else {
+                        // New bucket: seed from the cached source bars that already fall in
+                        // this bucket (e.g., today's 1H bars for the live Daily candle), so
+                        // the live bar isn't a fresh open at the current tick price — it
+                        // inherits the bucket's accumulated OHLC and is only EXTENDED by the
+                        // tick. For raw 1H/1m (no in-bucket source) there's no history to
+                        // seed and the live bar opens at the tick price as before.
+                        current = await self.seedLiveBucket(
+                            instrument: instrument, period: period, bucketMs: bucketMs, bid: bid
+                        )
+                    }
+                    if let c = current { continuation.yield(c) }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Seed the live bar for `bucketMs` by fetching the server's authoritative
+    /// in-progress candle (the same wire path JForex SDK uses for
+    /// `getHistory().getBar(period, BID, 0)`), then routing it through `BarAggregator`
+    /// exactly the way server mode's `aggregatedStream` does. The server has been
+    /// accumulating the in-progress OHLC from real ticks since the bucket opened, so
+    /// the seed is correct to the tick (modulo network latency) — no "tick aggregation
+    /// from the cached 1m suffix" approximation. The live tick that triggered this
+    /// call is folded in as a `max(high,bid) / min(low,bid) / close=bid` extension.
+    /// Raw 1H/1m yield the server's partial directly; 4H/Daily feed the server's 1H
+    /// partial into `BarAggregator.aggregate(hourly:, openPartial:, target:)`; the
+    /// fixed-grid intraday periods (3m/5m/15m/30m) feed the server's 1m partial into
+    /// `aggregateFixedGrid(..., openPartial:)`.
+    private func seedLiveBucket(
+        instrument: String, period: String, bucketMs: Int64, bid: Double
+    ) async -> SwiftTrader.CandleBar {
+        let snap = await ensureInProgress(instrument: instrument)
+        func extend(_ bar: SwiftTrader.CandleBar?) -> SwiftTrader.CandleBar {
+            guard let b = bar else {
+                return SwiftTrader.CandleBar(
+                    time: bucketMs, open: bid, high: bid, low: bid, close: bid,
+                    volume: 0, partial: true
+                )
+            }
+            return SwiftTrader.CandleBar(
+                time: bucketMs, open: b.open,
+                high: max(b.high, bid), low: min(b.low, bid),
+                close: bid, volume: b.volume, partial: true
+            )
+        }
+        switch period {
+        case "ONE_HOUR":
+            return extend(snap?.oneHour)
+        case "ONE_MIN":
+            return extend(snap?.oneMin)
+        case "DAILY", "FOUR_HOURS":
+            // Only the trailing window of the source can affect the currently-forming
+            // bucket — mirrors server mode's `aggregatedStream` tail cap (Daily=30,
+            // 4H=6). Re-aggregating the full cache on every tick is exactly what
+            // pegged 1500% CPU the last two times.
+            let target: AggregatedPeriod = period == "DAILY" ? .daily : .fourHours
+            let tail = period == "DAILY" ? 30 : 6
+            let cached1H = await cache.getBars(
+                for: CandleCache.CacheKey(instrument: instrument, period: "ONE_HOUR", source: .server)
+            )
+            let inputs = Array(cached1H.suffix(tail))
+            let aggregated = BarAggregator.aggregate(
+                hourly: inputs, openPartial: snap?.oneHour, target: target
+            )
+            if let last = aggregated.last, last.time == bucketMs {
+                return extend(last)
+            }
+            return extend(snap?.oneHour)
+        case "THIRTY_MINS", "FIFTEEN_MINS", "FIVE_MINS", "THREE_MINS":
+            let granularityMs: Int64 = period == "THREE_MINS" ? 180_000
+                : period == "FIVE_MINS" ? 300_000
+                : period == "FIFTEEN_MINS" ? 900_000
+                : 1_800_000
+            // Tail = a few buckets' worth of 1m so re-aggregation is O(constant) not O(cache).
+            let tail = period == "THIRTY_MINS" ? 60
+                : period == "FIFTEEN_MINS" ? 30
+                : period == "FIVE_MINS" ? 15
+                : 10
+            let cached1m = await cache.getBars(
+                for: CandleCache.CacheKey(instrument: instrument, period: "ONE_MIN", source: .server)
+            )
+            let inputs = Array(cached1m.suffix(tail))
+            let aggregated = BarAggregator.aggregateFixedGrid(
+                inputs, granularityMs: granularityMs, openPartial: snap?.oneMin
+            )
+            if let last = aggregated.last, last.time == bucketMs {
+                return extend(last)
+            }
+            return extend(snap?.oneMin)
+        default:
+            return extend(nil)
+        }
+    }
+
+    /// Returns the cached or freshly-fetched in-progress snapshot for `instrument`,
+    /// re-fetching from the server every `inProgressTtl`. Bursty arrival is deduped
+    /// by `InProgressStore.awaitOrLaunch` — concurrent callers share one fetch.
+    private func ensureInProgress(instrument: String) async -> InProgressSnapshot? {
+        if let cached = await inProgressStore.freshSnapshot(instrument, ttl: inProgressTtl) {
+            return cached
+        }
+        guard let session else { return nil }
+        let wireInstrument = Self.toSlashedPair(instrument)
+        return await inProgressStore.awaitOrLaunch(instrument) {
+            do {
+                let bars = try await session.fetchInProgressCandles(instrument: wireInstrument)
+                // Positional layout (confirmed against live 2026-05-29 capture, ASK/BID interleaved):
+                //   [0,1] MONTHLY  [2,3] WEEKLY  [4,5] DAILY  [6,7] 4H  [8,9] 1H
+                //   [10,11] 30m  [12,13] 15m  [14,15] 10m  [16,17] 5m  [18,19] 1m  [20,21] 10s
+                // Even indices are ASK, odd indices are BID. We use BID.
+                func bid(at idx: Int) -> SwiftTrader.CandleBar? {
+                    guard bars.count > idx else { return nil }
+                    let b = bars[idx]
+                    return SwiftTrader.CandleBar(
+                        time: b.timeMillis, open: b.open, high: b.high, low: b.low,
+                        close: b.close, volume: b.volume, partial: true
+                    )
+                }
+                return InProgressSnapshot(
+                    oneHour: bid(at: 9), oneMin: bid(at: 19), fetchedAt: Date()
+                )
+            } catch {
+                nativeLog.error(
+                    "in-progress fetch failed for \(wireInstrument, privacy: .public): \(String(describing: error), privacy: .public)"
+                )
+                return nil
+            }
+        }
+    }
+
+    /// Bucket start (epoch ms) for a live tick under the given chart period — matches the
+    /// alignment of cached/historical bars so the chart's `handleBar` cleanly replaces or
+    /// appends. Most periods are simple epoch-grid floors; 4H/Daily defer to the NY session
+    /// calendar that the offline aggregator uses.
+    private static func liveBucketStartMs(tickMs: Int64, period: String) -> Int64 {
+        switch period {
+        case "ONE_MIN":      return (tickMs / 60_000) * 60_000
+        case "THREE_MINS":   return (tickMs / 180_000) * 180_000
+        case "FIVE_MINS":    return (tickMs / 300_000) * 300_000
+        case "FIFTEEN_MINS": return (tickMs / 900_000) * 900_000
+        case "THIRTY_MINS":  return (tickMs / 1_800_000) * 1_800_000
+        case "ONE_HOUR":     return (tickMs / 3_600_000) * 3_600_000
+        case "FOUR_HOURS":
+            let d = Date(timeIntervalSince1970: Double(tickMs) / 1000.0)
+            return Int64((NYTradingCalendar.fourHourBucketStart(at: d).timeIntervalSince1970 * 1000).rounded())
+        case "DAILY":
+            let d = Date(timeIntervalSince1970: Double(tickMs) / 1000.0)
+            return Int64((NYTradingCalendar.bucketStart(at: d, period: .daily).timeIntervalSince1970 * 1000).rounded())
+        default:             return (tickMs / 60_000) * 60_000
+        }
     }
 
     func clearServerCache(instrument: String) async throws -> Int {
@@ -563,5 +742,50 @@ enum NativeProviderError: LocalizedError {
         case .missingCredentials:
             return "Standalone mode requires Dukascopy credentials."
         }
+    }
+}
+
+/// Snapshot of the server's in-progress candle set for one instrument. Only the source
+/// periods we use are kept: 1H drives 4H/Daily/1H-raw seeds, 1m drives 3m/5m/15m/30m
+/// and 1m-raw seeds. Monthly/Weekly/4H/Daily/30m/15m/10m/5m/10s entries in the wire
+/// response are dropped — our chart bucketing is NY-session-aligned for 4H/Daily and
+/// epoch-grid for the fixed-grid intraday periods, but the server's in-progress 4H
+/// uses pure UTC alignment (verified 2026-05-29: server 4H @ 20:00 UTC ≠ NY 4H bucket
+/// which spans 17:00 ET → 21:00 ET). Aggregating from 1H/1m via `BarAggregator` keeps
+/// bucket alignment in our hands.
+struct InProgressSnapshot: Sendable {
+    let oneHour: SwiftTrader.CandleBar?
+    let oneMin: SwiftTrader.CandleBar?
+    let fetchedAt: Date
+}
+
+actor InProgressStore {
+    private var byInstrument: [String: InProgressSnapshot] = [:]
+    private var inFlight: [String: Task<InProgressSnapshot?, Never>] = [:]
+
+    /// Returns the cached snapshot only if it's still within `ttl`; otherwise nil.
+    func freshSnapshot(_ instrument: String, ttl: TimeInterval) -> InProgressSnapshot? {
+        guard let s = byInstrument[instrument],
+              Date().timeIntervalSince(s.fetchedAt) < ttl else { return nil }
+        return s
+    }
+
+    /// Run `work` once per instrument even under burst arrival: concurrent callers
+    /// for the same instrument share the in-flight task instead of stampeding the
+    /// server (verified 2026-05-29: pre-dedup, the first ticks of a session triggered
+    /// 4 parallel in-progress fetches per pair).
+    func awaitOrLaunch(
+        _ instrument: String,
+        work: @Sendable @escaping () async -> InProgressSnapshot?
+    ) async -> InProgressSnapshot? {
+        if let pending = inFlight[instrument] {
+            return await pending.value
+        }
+        let task = Task<InProgressSnapshot?, Never> { await work() }
+        inFlight[instrument] = task
+        let result = await task.value
+        inFlight[instrument] = nil
+        if let r = result { byInstrument[instrument] = r }
+        return result
     }
 }

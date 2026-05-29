@@ -70,6 +70,14 @@ public actor DukascopySession {
     private var pendingHistory: [String: PendingHistory] = [:]
     private var latestAccount: AccountInfo?
     private var accountWaiters: [UUID: CheckedContinuation<AccountInfo, Error>] = [:]
+    // Multicast: each consumer of `tickStream()` gets its own continuation, all yielded to
+    // when a CurrencyMarket message arrives. Consumers filter to the instruments they care
+    // about. Removed on stream termination so this dictionary stays bounded.
+    private var tickStreams: [UUID: AsyncStream<CurrencyMarket>.Continuation] = [:]
+    /// Slashed instrument names currently subscribed for quote ticks. Mutated only on
+    /// `subscribeQuotes` (which sends the full set to the server) so `ensureSubscribed`
+    /// can compute additions and skip the round-trip when nothing new is needed.
+    private var subscribedQuotes: Set<String> = []
 
     public init(
         environment: DukascopyEnvironment,
@@ -194,6 +202,57 @@ public actor DukascopySession {
             log.debug("fetchHistory \(instrument, privacy: .public) deep: \(socketBars.count) socket + \(bulkBars.count) bulk = \(combined.count)")
             return combined
         }
+    }
+
+    /// Fetch the server's in-progress candle for every supported period in one call —
+    /// the path JForex SDK uses (`CurvesJsonProtocolHandler.loadDataFromDFS` with
+    /// `inProgress=true`). Returns the raw positional `[CandleBar]` as the server
+    /// emits it; layout per the decompiled SDK is one candle per period × side, in
+    /// order MONTHLY, WEEKLY, DAILY, FOUR_HOURS, ONE_HOUR, THIRTY_MINS, FIFTEEN_MINS,
+    /// TEN_MINS, FIVE_MINS, ONE_MIN, TEN_SECS (with ASK and BID interleaved). We log
+    /// the bars verbatim on first call so the caller can verify the layout against a
+    /// live capture before relying on positional indexing.
+    public func fetchInProgressCandles(
+        instrument: String,
+        side: OfferSide = .bid,
+        untilMillis: Int64? = nil,
+        idleTimeout: TimeInterval = 30
+    ) async throws -> [CandleBar] {
+        guard state == .connected, let transport else { throw SessionError.notConnected }
+        let until = untilMillis ?? Int64(Date().timeIntervalSince1970 * 1000)
+        let reqId = UUID().uuidString
+        var req = CandleSubscribeRequest.inProgress(
+            instrument: instrument, side: side, untilMillis: until
+        )
+        req.requestId = reqId
+        req.userName = credentials.login
+        req.sessionId = authSessionId
+        req.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        log.debug("fetchInProgress \(instrument, privacy: .public)/\(side.rawValue, privacy: .public) until=\(until) req=\(reqId, privacy: .public)")
+
+        pendingHistory[reqId] = PendingHistory(lastActivity: Date())
+        do {
+            try await transport.sendFrame(req.encode())
+        } catch {
+            pendingHistory[reqId] = nil
+            throw error
+        }
+        let bars: [CandleBar] = try await withCheckedThrowingContinuation { cont in
+            guard pendingHistory[reqId] != nil else {
+                cont.resume(throwing: SessionError.notConnected)
+                return
+            }
+            pendingHistory[reqId]?.continuation = cont
+            resolveHistoryIfReady(reqId)
+            scheduleHistoryTimeout(reqId, idle: idleTimeout)
+        }
+        log.info("fetchInProgress \(instrument, privacy: .public) returned \(bars.count) candle(s)")
+        for (i, b) in bars.enumerated() {
+            log.info(
+                "  [\(i)] t=\(b.timeMillis) o=\(b.open) h=\(b.high) l=\(b.low) c=\(b.close) v=\(b.volume)"
+            )
+        }
+        return bars
     }
 
     /// Deep history from the bulk server (the part older than the socket's warm window).
@@ -359,6 +418,52 @@ public actor DukascopySession {
         return (Int64(d1.timeIntervalSince1970), Int64(d2.timeIntervalSince1970))
     }
 
+    // MARK: - Live quote subscription
+
+    /// Send a quote-subscribe for the given slashed instruments (e.g. "EUR/USD"). The server
+    /// then pushes `CurrencyMarket` messages on price changes, which are fanned out to all
+    /// `tickStream()` consumers via `dispatch`.
+    public func subscribeQuotes(instruments: Set<String>) async throws {
+        guard state == .connected, let transport else { throw SessionError.notConnected }
+        var req = QuoteSubscribeRequest(instruments: instruments)
+        req.requestId = UUID().uuidString
+        req.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        try await transport.sendFrame(req.encode())
+        subscribedQuotes = instruments
+        log.info("subscribed to \(instruments.count, privacy: .public) instruments")
+    }
+
+    /// Idempotent subscription union — adds any not-yet-subscribed instruments to the
+    /// existing set and re-sends the FULL set (the server replaces, not merges). No-op
+    /// if all of `instruments` are already subscribed. Call this from a chart's
+    /// streamCandles consumer so the session only subscribes to instruments actually
+    /// being viewed, instead of every pair in `defaultInstruments` up front.
+    public func ensureSubscribedQuotes(_ instruments: Set<String>) async throws {
+        let additions = instruments.subtracting(subscribedQuotes)
+        guard !additions.isEmpty else { return }
+        try await subscribeQuotes(instruments: subscribedQuotes.union(additions))
+    }
+
+    /// Multicast stream of incoming CurrencyMarket ticks. Each consumer gets its own
+    /// AsyncStream; all are yielded to on every tick. Consumers should filter by instrument.
+    public func tickStream() -> AsyncStream<CurrencyMarket> {
+        let id = UUID()
+        return AsyncStream<CurrencyMarket> { continuation in
+            Task { [weak self] in await self?.registerTickStream(id: id, continuation: continuation) }
+            continuation.onTermination = { [weak self] _ in
+                Task { [weak self] in await self?.unregisterTickStream(id: id) }
+            }
+        }
+    }
+
+    private func registerTickStream(id: UUID, continuation: AsyncStream<CurrencyMarket>.Continuation) {
+        tickStreams[id] = continuation
+    }
+
+    private func unregisterTickStream(id: UUID) {
+        tickStreams.removeValue(forKey: id)
+    }
+
     // MARK: - Account snapshot
 
     /// Returns the account snapshot delivered after INIT. Resolves immediately if one
@@ -501,6 +606,9 @@ public actor DukascopySession {
             handleHistoryGroup(g)
         case .packedAccountInfo(let p):
             handleAccountInfo(p.account)
+        case .currencyMarket(let cm):
+            log.debug("tick \(cm.instrument, privacy: .public) bid=\(cm.bestBid?.description ?? "-", privacy: .public)")
+            for (_, c) in tickStreams { c.yield(cm) }
         case .unknown(let classId, let body):
             // The server sends a primary-socket auth acceptor shortly after connect and
             // expects it echoed back verbatim to complete the primary connection; without

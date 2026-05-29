@@ -82,6 +82,21 @@ public struct CandleSubscribeRequest: Sendable {
         self.endTimeSeconds = endTimeSeconds
     }
 
+    /// "In-progress candles" form — matches `CurvesJsonProtocolHandler.loadDataFromDFS`
+    /// (decompiled SDK) when called with `inProgress=true`. Server returns the live
+    /// in-progress candle for every supported period in one positional response.
+    /// `untilMillis` IS in MILLIS, not seconds (the SDK passes `System.currentTimeMillis()`).
+    public static func inProgress(
+        instrument: String, side: OfferSide, untilMillis: Int64
+    ) -> CandleSubscribeRequest {
+        var r = CandleSubscribeRequest(
+            instrument: instrument, side: side, period: .oneMinute,
+            startTimeSeconds: 0, endTimeSeconds: untilMillis
+        )
+        r.lastCandleRequest = true
+        return r
+    }
+
     public func encode() -> Data {
         var w = BinaryWriter()
         w.writeInt32BE(javaStringHashCode(WireClass.candleSubscribe))
