@@ -36,6 +36,40 @@ struct DiskCandleCacheTests {
         #expect(loaded[1].close == 1.2)
     }
 
+    @Test("Binary roundtrip preserves every OHLCV field exactly")
+    func roundtripAllFields() async throws {
+        let dir = makeTempDir()
+        defer { cleanUp(dir) }
+        let cache = DiskCandleCache(directory: dir)
+        let key = DiskCacheKey(instrument: "USDJPY", period: "ONE_MIN", source: .server)
+        let bar = CandleBar(time: 1_780_000_000_000, open: 152.123, high: 152.987,
+                            low: 151.001, close: 152.456, volume: 12_345.5)
+        try await cache.save([bar], for: key)
+        let loaded = await cache.load(key)
+        #expect(loaded.count == 1)
+        let r = try #require(loaded.first)
+        #expect(r.time == bar.time)
+        #expect(r.open == bar.open)
+        #expect(r.high == bar.high)
+        #expect(r.low == bar.low)
+        #expect(r.close == bar.close)
+        #expect(r.volume == bar.volume)
+    }
+
+    @Test("Large series roundtrips without loss")
+    func roundtripLarge() async throws {
+        let dir = makeTempDir()
+        defer { cleanUp(dir) }
+        let cache = DiskCandleCache(directory: dir)
+        let key = DiskCacheKey(instrument: "EURUSD", period: "ONE_MIN", source: .server)
+        let bars = (0..<20_000).map { i in makeBar(time: Int64(i) * 60_000, close: 1.0 + Double(i) * 1e-6) }
+        try await cache.save(bars, for: key)
+        let loaded = await cache.load(key)
+        #expect(loaded.count == 20_000)
+        #expect(loaded.first?.time == 0)
+        #expect(loaded.last?.time == Int64(19_999) * 60_000)
+    }
+
     @Test("Load on missing file returns empty array")
     func loadMissing() async {
         let dir = makeTempDir()

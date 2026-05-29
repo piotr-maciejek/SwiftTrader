@@ -11,16 +11,28 @@ struct DiskCacheKey: Hashable, Sendable {
     let source: BarSource
 }
 
-/// On-disk layer for completed candle bars. Binary-plist per `(instrument, period, source)`.
+/// On-disk layer for completed candle bars — one **packed-binary** file per
+/// `(instrument, period, source)`. The format is a fixed-size record stream (no `Codable`
+/// reflection), so decoding tens of thousands of bars is a tight `Data` loop instead of the
+/// slow `PropertyListDecoder` / generic-metadata path that pegged the CPU at startup.
 /// Writes are atomic; repeated saves for the same key coalesce via a per-key debounce.
+/// Legacy binary-plist files are still readable and are rewritten in the packed format on
+/// first access, so an existing on-disk cache migrates transparently.
 actor DiskCandleCache {
+    /// Legacy (Codable / binary-plist) on-disk shape. Kept only to migrate old files on read.
     private struct CacheFile: Codable {
         let version: Int
         let bars: [CandleBar]
     }
 
+    // "SCB1" — SwiftTrader Candle Binary v1. A 4-byte magic, then N fixed records of
+    // `recordSize` bytes: time(Int64) + open/high/low/close/volume(Double), little-endian.
+    // Only non-partial bars are stored, so `partial` need not be persisted.
+    private static let magic: [UInt8] = [0x53, 0x43, 0x42, 0x31]
+    private static let recordSize = 48
+
     private let directory: URL
-    private let currentVersion = 1
+    private let legacyVersion = 1
     private let debounceInterval: TimeInterval
     private var pendingWrites: [DiskCacheKey: Task<Void, Never>] = [:]
     private var pendingBars: [DiskCacheKey: [CandleBar]] = [:]
@@ -36,24 +48,28 @@ actor DiskCandleCache {
         try? FileManager.default.createDirectory(at: resolved, withIntermediateDirectories: true)
     }
 
-    /// Load bars for a key from disk. Returns empty on missing/corrupt/version-mismatch.
+    /// Load bars for a key from disk. Returns empty on missing/corrupt files. A legacy
+    /// binary-plist file is decoded once (reflection) and rewritten packed so the next load
+    /// is fast and reflection-free.
     func load(_ key: DiskCacheKey) -> [CandleBar] {
         let url = fileURL(for: key)
         guard let data = try? Data(contentsOf: url) else { return [] }
-        let decoder = PropertyListDecoder()
-        guard let file = try? decoder.decode(CacheFile.self, from: data) else { return [] }
-        guard file.version == currentVersion else { return [] }
+        if data.count >= Self.magic.count, data.prefix(Self.magic.count).elementsEqual(Self.magic) {
+            return Self.decodePacked(data)
+        }
+        // Legacy path: decode the old binary-plist once, then convert to packed on disk.
+        guard let file = try? PropertyListDecoder().decode(CacheFile.self, from: data),
+              file.version == legacyVersion else {
+            return []
+        }
+        try? Self.encodePacked(file.bars).write(to: url, options: [.atomic])
         return file.bars
     }
 
     /// Save bars for a key to disk immediately. Drops any partial bars.
     func save(_ bars: [CandleBar], for key: DiskCacheKey) throws {
-        let file = CacheFile(version: currentVersion, bars: bars.filter { !$0.partial })
-        let encoder = PropertyListEncoder()
-        encoder.outputFormat = .binary
-        let data = try encoder.encode(file)
-        let url = fileURL(for: key)
-        try data.write(to: url, options: [.atomic])
+        let data = Self.encodePacked(bars.filter { !$0.partial })
+        try data.write(to: fileURL(for: key), options: [.atomic])
     }
 
     /// Schedule a debounced save. Successive calls for the same key within
@@ -125,7 +141,8 @@ actor DiskCandleCache {
         pendingWrites.removeAll()
     }
 
-    /// File URL used for a key; exposed for testing.
+    /// File URL used for a key; exposed for testing. (Extension stays `.plist` for backward
+    /// compatibility with existing files; the contents are the packed binary format.)
     nonisolated func fileURL(for key: DiskCacheKey) -> URL {
         let name = "\(Self.sanitize(key.instrument))-\(key.period).\(key.source.rawValue).plist"
         return directory.appendingPathComponent(name)
@@ -143,5 +160,54 @@ actor DiskCandleCache {
         let dashParts = instrumentPeriod.split(separator: "-", maxSplits: 1).map(String.init)
         guard dashParts.count == 2 else { return nil }
         return DiskCacheKey(instrument: dashParts[0], period: dashParts[1], source: source)
+    }
+
+    // MARK: - Packed binary codec (no Codable/reflection)
+
+    /// Encode bars to `magic` + N × 48-byte little-endian records.
+    static func encodePacked(_ bars: [CandleBar]) -> Data {
+        var data = Data(capacity: magic.count + bars.count * recordSize)
+        data.append(contentsOf: magic)
+        for b in bars {
+            appendLE(&data, UInt64(bitPattern: b.time))
+            appendLE(&data, b.open.bitPattern)
+            appendLE(&data, b.high.bitPattern)
+            appendLE(&data, b.low.bitPattern)
+            appendLE(&data, b.close.bitPattern)
+            appendLE(&data, b.volume.bitPattern)
+        }
+        return data
+    }
+
+    /// Decode a packed file (`magic` + N × 48-byte records) with a tight `Data` loop.
+    static func decodePacked(_ data: Data) -> [CandleBar] {
+        let count = (data.count - magic.count) / recordSize
+        guard count > 0 else { return [] }
+        var bars = [CandleBar]()
+        bars.reserveCapacity(count)
+        data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            var offset = magic.count
+            for _ in 0..<count {
+                func field(_ delta: Int) -> UInt64 {
+                    UInt64(littleEndian: raw.loadUnaligned(fromByteOffset: offset + delta, as: UInt64.self))
+                }
+                let bar = CandleBar(
+                    time: Int64(bitPattern: field(0)),
+                    open: Double(bitPattern: field(8)),
+                    high: Double(bitPattern: field(16)),
+                    low: Double(bitPattern: field(24)),
+                    close: Double(bitPattern: field(32)),
+                    volume: Double(bitPattern: field(40))
+                )
+                bars.append(bar)
+                offset += recordSize
+            }
+        }
+        return bars
+    }
+
+    private static func appendLE(_ data: inout Data, _ value: UInt64) {
+        var le = value.littleEndian
+        withUnsafeBytes(of: &le) { data.append(contentsOf: $0) }
     }
 }
