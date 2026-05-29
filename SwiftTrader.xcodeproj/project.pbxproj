@@ -673,6 +673,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 27QTQYPC29;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SwiftTrader/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
@@ -695,6 +696,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 27QTQYPC29;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SwiftTrader/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
