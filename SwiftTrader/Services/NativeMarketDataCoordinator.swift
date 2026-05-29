@@ -313,14 +313,14 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         let startSec = endSec - cp.seconds * Int64(count)
         let t0 = Date()
         let wireInstrument = Self.toSlashedPair(instrument)
-        nativeLog.info("history \(instrument, privacy: .public) \(period, privacy: .public) count=\(count) before=\(before ?? -1)")
+        nativeLog.debug("history \(instrument, privacy: .public) \(period, privacy: .public) count=\(count) before=\(before ?? -1)")
         do {
             let raw = try await session.fetchHistory(
                 instrument: wireInstrument, side: .bid, period: cp,
                 startSeconds: startSec, endSeconds: endSec
             )
             let ms = Int(Date().timeIntervalSince(t0) * 1000)
-            nativeLog.info("history \(instrument, privacy: .public) \(period, privacy: .public) -> \(raw.count) bars in \(ms)ms")
+            nativeLog.debug("history \(instrument, privacy: .public) \(period, privacy: .public) -> \(raw.count) bars in \(ms)ms")
             let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
             let periodMs = cp.seconds * 1000
             return raw

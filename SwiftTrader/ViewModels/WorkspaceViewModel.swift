@@ -109,8 +109,13 @@ final class WorkspaceViewModel {
                 availableInstruments = instruments
             }
         }
-        trading.start()
-        connectNews()
+        // Standalone mode is server-independent — don't open the jforex-server trading/news
+        // WebSockets (they'd just spam connection-refused while the server is down). Trading
+        // and news stay server-routed and only run in server mode.
+        if settings.dataProvider == .server {
+            trading.start()
+            connectNews()
+        }
     }
 
     /// Starts a tab's VM(s) on demand. Idempotent — safe to call repeatedly.
@@ -332,11 +337,14 @@ final class WorkspaceViewModel {
             case .multiTimeframe(let vm): vm.reconnect(coordinator: marketData)
             }
         }
-        trading.reconnect(port: port)
-        tradeHistory.reconnect(port: port)
-        newsCoordinator = NewsCoordinator(port: port)
-        newsItems = []
-        connectNews()
+        // Server-routed WebSockets only run in server mode (see startAll).
+        if settings.dataProvider == .server {
+            trading.reconnect(port: port)
+            tradeHistory.reconnect(port: port)
+            newsCoordinator = NewsCoordinator(port: port)
+            newsItems = []
+            connectNews()
+        }
     }
 
     func closeTab(_ id: UUID) {

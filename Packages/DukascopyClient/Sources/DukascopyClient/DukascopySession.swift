@@ -191,7 +191,7 @@ public actor DukascopySession {
             }
             let combined = Self.dedupSorted(bulk: bulkBars, socket: socketBars)
             if combined.isEmpty { throw e }
-            log.info("fetchHistory \(instrument, privacy: .public) deep: \(socketBars.count) socket + \(bulkBars.count) bulk = \(combined.count)")
+            log.debug("fetchHistory \(instrument, privacy: .public) deep: \(socketBars.count) socket + \(bulkBars.count) bulk = \(combined.count)")
             return combined
         }
     }
@@ -241,7 +241,7 @@ public actor DukascopySession {
         req.userName = credentials.login
         req.sessionId = authSessionId
         req.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
-        log.info("fetchHistory \(instrument, privacy: .public)/\(side.rawValue, privacy: .public) period=\(period.seconds)s window=[\(startSeconds),\(endSeconds)] req=\(reqId, privacy: .public)")
+        log.debug("fetchHistory \(instrument, privacy: .public)/\(side.rawValue, privacy: .public) period=\(period.seconds)s window=[\(startSeconds),\(endSeconds)] req=\(reqId, privacy: .public)")
 
         pendingHistory[reqId] = PendingHistory(lastActivity: Date())
         do {
@@ -291,7 +291,7 @@ public actor DukascopySession {
                     bars.append(contentsOf: try HistoryDecoder.decodeCandles(s))
                 }
             }
-            log.info("fetchHistory req=\(reqId, privacy: .public) done: \(bars.count) bars from \(pending.maxOrder + 1) chunk(s)")
+            log.debug("fetchHistory req=\(reqId, privacy: .public) done: \(bars.count) bars from \(pending.maxOrder + 1) chunk(s)")
             cont.resume(returning: bars)
         } catch {
             log.error("fetchHistory req=\(reqId, privacy: .public) decode failed: \(error.localizedDescription, privacy: .public)")
@@ -454,9 +454,6 @@ public actor DukascopySession {
                 if !Task.isCancelled { await markFailed("read: \(error)") }
                 return
             }
-            var peek = BinaryReader(frame)
-            let cid = (try? peek.readInt32BE()) ?? 0
-            log.debug("reader: frame classId=\(cid) bytes=\(frame.count)")
             guard let msg = try? MessageDecoder.decode(frame) else {
                 log.debug("reader: undecodable frame (\(frame.count) bytes), skipping")
                 continue
@@ -483,7 +480,17 @@ public actor DukascopySession {
             // error (e.g. one bad/oversized history request) is logged and routed to the
             // request it belongs to so that request fails fast instead of hanging until
             // its idle timeout — and so it can't take down every other chart's session.
-            log.error("server error: reason=\(e.reason ?? "-", privacy: .public) fatal=\(e.fatal == true)")
+            let routedToHistory = e.requestId.map { pendingHistory[$0] != nil } ?? false
+            if e.fatal == true {
+                log.error("server error (fatal): reason=\(e.reason ?? "-", privacy: .public)")
+            } else if routedToHistory {
+                // Expected control flow: a history request reached before the socket's warm
+                // window, so the server reports "not in cache" and the owning fetchHistory
+                // falls back to the bulk server. Debug-only so it doesn't flood the log.
+                log.debug("server error (non-fatal, routed): reason=\(e.reason ?? "-", privacy: .public)")
+            } else {
+                log.notice("server error (non-fatal): reason=\(e.reason ?? "-", privacy: .public)")
+            }
             if let reqId = e.requestId, pendingHistory[reqId] != nil {
                 failHistory(reqId, with: e)
             }
