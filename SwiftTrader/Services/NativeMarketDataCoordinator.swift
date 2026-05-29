@@ -489,7 +489,11 @@ private actor HistoryPrefetcher {
     func ensureStarted() {
         guard !started else { return }
         started = true
-        task = Task { [self] in await runLoop() }
+        // Background QoS: the warm-up does heavy bulk `.bi5` LZMA decoding. Running it at low
+        // priority lets the scheduler favour foreground (visible-chart) loads, so the prefetch
+        // can't peg every core and leave the user staring at empty charts. The whole fetch
+        // chain (coalescer task → bulk download → decode) inherits this priority.
+        task = Task(priority: .background) { [self] in await runLoop() }
     }
 
     func stop() { task?.cancel() }

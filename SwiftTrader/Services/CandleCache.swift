@@ -3,8 +3,9 @@ import Foundation
 /// Shared in-memory cache for completed candle bars, keyed by (instrument, period).
 /// Thread-safe via actor isolation. Used across all tabs to avoid redundant REST fetches.
 ///
-/// Optionally backed by `DiskCandleCache`: on `hydrate()`, every on-disk key is loaded
-/// into memory; every `merge` / `appendBar` schedules a debounced write-back.
+/// Optionally backed by `DiskCandleCache`: each key is loaded from disk **lazily on first
+/// access** (never all upfront — the on-disk cache can be hundreds of MB across all pairs),
+/// and every `merge` / `appendBar` schedules a debounced write-back.
 actor CandleCache {
     struct CacheKey: Hashable {
         let instrument: String
@@ -37,39 +38,47 @@ actor CandleCache {
     }
 
     private var store: [CacheKey: CacheEntry] = [:]
+    /// Keys already pulled from disk (or confirmed absent on disk), so we touch disk at most
+    /// once per key. Cleared for a key when it's evicted or wiped, so it can reload later.
+    private var diskLoaded: Set<CacheKey> = []
     // Scroll-back pagination adds bars to the OLD end; `suffix(maxBarsPerKey)` keeps
     // newest, so a too-small cap silently discards every newly-fetched earlier page
     // once the cap is hit. Sized for deep history: 200k ONE_MIN bars ≈ 139 days,
     // ONE_HOUR ≈ 22 years, FIFTEEN_MINS ≈ 5.7 years. ~200k × ~80B ≈ 16MB/key (only
     // actively-scrolled series approach the cap).
     private let maxBarsPerKey = 200_000
-    private let maxKeys = 50
+    // One key per (instrument, period, source). Standalone mode's background prefetcher
+    // warms all ~28 pairs across 1H/1m raw + 4H/Daily/3m/5m/15m/30m aggregated (~8 periods),
+    // i.e. ~220 keys. A smaller cap evicts deep loads mid-warm-up, so reads miss and the
+    // whole range re-fetches (cache thrash). Sized to hold the full working set.
+    private let maxKeys = 300
     private let diskCache: DiskCandleCache?
-    private var hydrated = false
 
     init(diskCache: DiskCandleCache? = nil) {
         self.diskCache = diskCache
     }
 
-    /// Load every persisted key from disk into memory. Safe to call multiple times —
-    /// subsequent calls are no-ops.
-    func hydrate() async {
-        guard !hydrated, let diskCache else {
-            hydrated = true
-            return
-        }
-        hydrated = true
-        let keys = await diskCache.allKeys()
-        for diskKey in keys {
-            let bars = await diskCache.load(diskKey)
-            guard !bars.isEmpty else { continue }
-            let key = CacheKey(instrument: diskKey.instrument, period: diskKey.period, source: diskKey.source)
+    /// Retained for callers, but a no-op: keys load lazily from disk on first access (see
+    /// `ensureLoaded`), so startup never blocks loading the entire on-disk cache into memory.
+    func hydrate() async {}
+
+    /// Pull this key from disk into memory the first time it's touched. Loads at most one
+    /// file per key; subsequent accesses hit memory directly.
+    private func ensureLoaded(_ key: CacheKey) async {
+        guard let diskCache, store[key] == nil, !diskLoaded.contains(key) else { return }
+        // Mark before the await so concurrent callers for the same key don't double-load.
+        diskLoaded.insert(key)
+        let diskKey = DiskCacheKey(instrument: key.instrument, period: key.period, source: key.source)
+        let bars = await diskCache.load(diskKey)
+        // A merge may have populated the key while we were awaiting — don't clobber it.
+        if !bars.isEmpty, store[key] == nil {
             store[key] = CacheEntry(bars: bars, lastAccess: .now)
         }
     }
 
     /// Returns cached completed bars for this key, or empty array.
-    func getBars(for key: CacheKey) -> [CandleBar] {
+    func getBars(for key: CacheKey) async -> [CandleBar] {
+        await ensureLoaded(key)
         guard var entry = store[key] else { return [] }
         entry.lastAccess = .now
         store[key] = entry
@@ -77,19 +86,22 @@ actor CandleCache {
     }
 
     /// Returns the earliest cached timestamp for the key, used to build `before` parameter.
-    func earliestTime(for key: CacheKey) -> Int64? {
-        store[key]?.bars.first?.time
+    func earliestTime(for key: CacheKey) async -> Int64? {
+        await ensureLoaded(key)
+        return store[key]?.bars.first?.time
     }
 
     /// Returns the latest cached timestamp for the key, used to build `after` parameter for gap-fill.
-    func latestTime(for key: CacheKey) -> Int64? {
-        store[key]?.bars.last?.time
+    func latestTime(for key: CacheKey) async -> Int64? {
+        await ensureLoaded(key)
+        return store[key]?.bars.last?.time
     }
 
     /// Merge fetched bars into cache. Only stores bars where partial == false.
     /// Returns the full merged array (cached + new).
     @discardableResult
-    func merge(_ fetchedBars: [CandleBar], for key: CacheKey) -> [CandleBar] {
+    func merge(_ fetchedBars: [CandleBar], for key: CacheKey) async -> [CandleBar] {
+        await ensureLoaded(key)
         let completed = fetchedBars.filter { !$0.partial }
         guard !completed.isEmpty else {
             return store[key]?.bars ?? []
@@ -124,8 +136,9 @@ actor CandleCache {
     }
 
     /// Append a single completed bar from WebSocket. Ignores partial bars.
-    func appendBar(_ bar: CandleBar, for key: CacheKey) {
+    func appendBar(_ bar: CandleBar, for key: CacheKey) async {
         guard !bar.partial else { return }
+        await ensureLoaded(key)
 
         var existing = store[key]?.bars ?? []
 
@@ -152,6 +165,7 @@ actor CandleCache {
     /// race ahead and have its freshly-written data deleted by a delayed wipe.
     func clear() async {
         store.removeAll()
+        diskLoaded.removeAll()
         if let diskCache {
             await diskCache.clearAll()
         }
@@ -161,6 +175,7 @@ actor CandleCache {
     /// button. Awaits the disk wipe — see `clear()` above for the race rationale.
     func clear(instrument: String) async {
         store = store.filter { $0.key.instrument != instrument }
+        diskLoaded = diskLoaded.filter { $0.instrument != instrument }
         if let diskCache {
             await diskCache.clear(instrument: instrument)
         }
@@ -170,6 +185,8 @@ actor CandleCache {
         while store.count > maxKeys {
             if let lruKey = store.min(by: { $0.value.lastAccess < $1.value.lastAccess })?.key {
                 store.removeValue(forKey: lruKey)
+                // Allow a future access to reload it from disk instead of re-fetching.
+                diskLoaded.remove(lruKey)
             }
         }
     }
