@@ -205,13 +205,18 @@ public struct AuthClient: Sendable {
         params["obsecro_id"] = requestId
 
         let (data, response) = try await get(baseURL: baseURL, params: params, step: 3)
+        if ProcessInfo.processInfo.environment["DUKASCOPY_DUMP_STEP3"] != nil {
+            try? data.write(to: URL(fileURLWithPath: "/tmp/step3.json"))
+        }
         let json = try parseJSON(data: data, step: 3)
 
         let urls = (json["authApiURLs"] as? [Any])?.compactMap { $0 as? String }
 
         var settingsBlob: Data?
         if let encoded = json["occasus"] as? String {
-            settingsBlob = Data(base64Encoded: encoded)
+            // The server wraps the base64 with CRLFs (MIME style); strict decoding fails,
+            // so ignore non-base64 characters.
+            settingsBlob = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters)
         }
 
         var headers: [String: String] = [:]

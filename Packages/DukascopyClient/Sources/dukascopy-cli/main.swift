@@ -1,13 +1,14 @@
 import ArgumentParser
 import DukascopyClient
 import Foundation
+import SWCompression
 
 @main
 struct DukascopyCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dukascopy-cli",
         abstract: "Dukascopy native protocol prototyping CLI.",
-        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self]
+        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self, BulkSpikeCommand.self]
     )
 }
 
@@ -385,6 +386,9 @@ struct HistoryCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Bid or Ask side")
     var side: String = "Bid"
 
+    @Option(name: .long, help: "End the window before this epoch-ms (test older windows)")
+    var before: Int64?
+
     func run() async throws {
         guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
             throw ValidationError("env must be 'demo' or 'live'")
@@ -395,81 +399,22 @@ struct HistoryCommand: AsyncParsableCommand {
         guard let offerSide = OfferSide(rawValue: side.capitalized) else {
             throw ValidationError("side must be Bid or Ask")
         }
-        let jnlp = try await JNLPClient.fetch(from: target.jnlpURL)
-        guard let serverURL = jnlp.srp6LoginURLs.first else {
-            throw ValidationError("JNLP returned no SRP6 servers")
-        }
-        let auth = try await AuthClient().authenticate(
-            baseURL: serverURL,
+
+        // Drives the same DukascopySession the app uses, so this exercises the real path:
+        // keepalive, clamp-to-cache retry, and per-request error routing.
+        let session = DukascopySession(
+            environment: target,
             credentials: AuthCredentials(login: user, password: pass)
         )
-        guard let first = auth.authApiURLs.first,
-              let address = ServerAddress.parse(first) else {
-            throw ValidationError("no usable authApiURL")
-        }
-        let transport = Transport(address: address)
-        try await transport.connect()
-        _ = try await transport.handshake(
-            login: user, ticket: auth.ticket, authSessionId: auth.authSessionId
-        )
+        try await session.connect()
 
-        var initReq = InitRequest()
-        initReq.requestId = UUID().uuidString
-        initReq.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
-        try await transport.sendFrame(initReq.encode())
-
-        let endSec = Int64(Date().timeIntervalSince1970)
+        let endSec = before.map { $0 / 1000 } ?? Int64(Date().timeIntervalSince1970)
         let startSec = endSec - cp.seconds * Int64(count)
-        let reqId = UUID().uuidString
-        var req = CandleSubscribeRequest(
-            instrument: instrument, side: offerSide,
-            period: cp,
-            startTimeSeconds: startSec, endTimeSeconds: endSec
+        let bars = try await session.fetchHistory(
+            instrument: instrument, side: offerSide, period: cp,
+            startSeconds: startSec, endSeconds: endSec
         )
-        req.requestId = reqId
-        req.userName = user
-        req.sessionId = auth.authSessionId
-        try await transport.sendFrame(req.encode())
-
-        var groupsByOrder: [Int32: CandleHistoryGroup] = [:]
-        var maxOrder: Int32 = -1
-        var finished = false
-
-        let deadline = Date().addingTimeInterval(30)
-        while !finished && Date() < deadline {
-            let frame = try await transport.receiveFrame()
-            let msg = try MessageDecoder.decode(frame)
-            switch msg {
-            case .candleHistoryGroup(let g):
-                if g.requestId == reqId, let order = g.messageOrder {
-                    groupsByOrder[order] = g
-                    if g.historyFinished == true { maxOrder = order; finished = true }
-                }
-            case .heartbeatRequest(let h):
-                let resp = HeartbeatOkResponse(
-                    requestTime: h.requestTime ?? 0,
-                    receiveTime: Int64(Date().timeIntervalSince1970 * 1000)
-                )
-                try await transport.sendFrame(resp.encode())
-            case .error(let e):
-                throw ValidationError("server error: \(e)")
-            default:
-                continue
-            }
-        }
-        if !finished {
-            throw ValidationError("history request did not complete within 30s")
-        }
-
-        var bars: [CandleBar] = []
-        for order in 0...maxOrder {
-            guard let g = groupsByOrder[order], let s = g.candles else {
-                FileHandle.standardError.write(Data("missing chunk \(order)\n".utf8))
-                continue
-            }
-            bars.append(contentsOf: try HistoryDecoder.decodeCandles(s))
-        }
-        await transport.close()
+        await session.close()
 
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -517,5 +462,129 @@ struct SessionCommand: AsyncParsableCommand {
         print("state: \(await session.state)")
         await session.close()
         print("closed. state: \(await session.state)")
+    }
+}
+
+/// Spike for the deep-history (.bi5) phase: authenticate, parse the settings blob to find
+/// `history.server.url`, download ONE per-period candle chunk file, LZMA-decode it, and
+/// decode the 24-byte candle records — printing enough to sanity-check the whole pipeline
+/// before building the real client.
+struct BulkSpikeCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "bulk-spike",
+        abstract: "Fetch + decode one candle .bi5 chunk from the history server (deep-history spike)."
+    )
+
+    @Option(name: .long, help: "Target environment: demo or live")
+    var env: String = "demo"
+
+    @Option(name: .long, help: "Login")
+    var user: String
+
+    @Option(name: .long, help: "Password")
+    var pass: String
+
+    @Option(name: .long, help: "Instrument, slashless (e.g. EURUSD)")
+    var instrument: String = "EURUSD"
+
+    @Option(name: .long, help: "Period token: min_15, min_5, min_30, hour_1")
+    var period: String = "min_15"
+
+    @Option(name: .long, help: "Calendar year of the chunk")
+    var year: Int = 2026
+
+    @Option(name: .long, help: "Calendar month 1-12 (converted to 0-based in the URL)")
+    var month: Int = 4
+
+    @Option(name: .long, help: "pipValue for price scaling (EURUSD 0.0001, USDJPY 0.01)")
+    var pip: Double = 0.0001
+
+    @Option(name: .long, help: "Dump the raw settings blob to this path")
+    var dumpBlob: String?
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        let jnlp = try await JNLPClient.fetch(from: target.jnlpURL)
+        guard let serverURL = jnlp.srp6LoginURLs.first else {
+            throw ValidationError("JNLP returned no SRP6 servers")
+        }
+        let auth = try await AuthClient().authenticate(
+            baseURL: serverURL, credentials: AuthCredentials(login: user, password: pass)
+        )
+        guard let blob = auth.settingsBlob else { throw ValidationError("no settings blob in auth response") }
+        print("settings blob: \(blob.count) bytes")
+        if let dumpBlob { try blob.write(to: URL(fileURLWithPath: dumpBlob)); print("blob written to \(dumpBlob)") }
+
+        let props = try JavaPropertiesParser.parse(blob)
+        print("parsed \(props.count) properties")
+        guard let historyURL = props["history.server.url"] else {
+            print("keys: \(props.keys.sorted().joined(separator: ", "))")
+            throw ValidationError("history.server.url not found in settings blob")
+        }
+        print("history.server.url = \(historyURL)")
+
+        // Build the chunk URL: <history>/INSTR/YYYY/MM(0-based,padded)/BID_candles_<period>.bi5
+        let base = historyURL.hasSuffix("/") ? String(historyURL.dropLast()) : historyURL
+        let mm0 = String(format: "%02d", month - 1)
+        let relative = "\(instrument)/\(year)/\(mm0)/BID_candles_\(period).bi5"
+        let urlString = "\(base)/\(relative)"
+        print("GET \(urlString)")
+        guard let url = URL(string: urlString) else { throw ValidationError("bad URL") }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        print("HTTP \(status), \(data.count) compressed bytes")
+        guard status == 200, !data.isEmpty else { throw ValidationError("no data (status \(status))") }
+        print("first 13 bytes: \(data.prefix(13).map { String(format: "%02x", $0) }.joined(separator: " "))")
+
+        let decompressed = try LZMA.decompress(data: data)
+        print("decompressed \(decompressed.count) bytes, %24 = \(decompressed.count % 24)")
+        guard decompressed.count % 24 == 0 else { throw ValidationError("not a multiple of 24 — wrong format") }
+
+        // chunk start = first day of the GMT month
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "GMT")!
+        let comps = DateComponents(year: year, month: month, day: 1, hour: 0, minute: 0, second: 0)
+        let chunkStartMs = Int64(cal.date(from: comps)!.timeIntervalSince1970 * 1000)
+
+        let bars = Self.decodeCandles(decompressed, chunkStartMs: chunkStartMs, pipValue: pip)
+        print("\(bars.count) candles decoded")
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.timeZone = TimeZone(identifier: "GMT")
+        for bar in bars.prefix(3) + bars.suffix(3) {
+            let ts = Date(timeIntervalSince1970: Double(bar.timeMillis) / 1000)
+            print(String(format: "%@  o=%.5f h=%.5f l=%.5f c=%.5f v=%.1f",
+                         f.string(from: ts), bar.open, bar.high, bar.low, bar.close, bar.volume))
+        }
+    }
+
+    /// Decodes v5 candle records (24 bytes, big-endian): int32 secOffset, int32 open,
+    /// int32 close, int32 low, int32 high, float32 volume. Price = round(raw/10*pip, 5dp).
+    static func decodeCandles(_ data: Data, chunkStartMs: Int64, pipValue: Double) -> [CandleBar] {
+        var reader = BinaryReader(data)
+        var bars: [CandleBar] = []
+        let count = data.count / 24
+        bars.reserveCapacity(count)
+        func price(_ raw: Int32) -> Double {
+            Double(Int64(Double(raw) / 10.0 * pipValue * 100000.0 + 0.5)) / 100000.0
+        }
+        for _ in 0..<count {
+            guard let secOffset = try? reader.readInt32BE(),
+                  let open = try? reader.readInt32BE(),
+                  let close = try? reader.readInt32BE(),
+                  let low = try? reader.readInt32BE(),
+                  let high = try? reader.readInt32BE(),
+                  let volBits = try? reader.readInt32BE() else { break }
+            let vol = Double(Float(bitPattern: UInt32(bitPattern: volBits)))
+            bars.append(CandleBar(
+                timeMillis: chunkStartMs + Int64(secOffset) * 1000,
+                open: price(open), high: price(high), low: price(low), close: price(close),
+                volume: vol
+            ))
+        }
+        return bars
     }
 }

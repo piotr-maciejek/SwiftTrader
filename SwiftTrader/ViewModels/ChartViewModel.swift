@@ -755,3 +755,26 @@ final class ChartViewModel {
         }
     }
 }
+
+extension Array where Element == ChartViewModel {
+    /// Cold-start each chart with bounded concurrency, in array order, so a grid loads
+    /// gradually instead of firing every cell's deep history fetch at once — which storms
+    /// the native client's single socket + bulk CDN and causes slow loads and gaps.
+    /// `maxConcurrent` comes from the coordinator (`.max` for server mode = unbounded,
+    /// matching the previous behaviour; a small number for native).
+    @MainActor
+    func startGradually(maxConcurrent: Int) async {
+        let limit = Swift.max(1, maxConcurrent)
+        await withTaskGroup(of: Void.self) { group in
+            var next = 0
+            func schedule() {
+                guard next < count else { return }
+                let vm = self[next]
+                next += 1
+                group.addTask { await vm.start() }
+            }
+            for _ in 0..<Swift.min(limit, count) { schedule() }
+            while await group.next() != nil { schedule() }
+        }
+    }
+}

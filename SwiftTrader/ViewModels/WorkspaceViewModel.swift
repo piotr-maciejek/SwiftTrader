@@ -43,6 +43,8 @@ final class WorkspaceViewModel {
     private var newsCoordinator: NewsCoordinator
     private var newsTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
+    /// Native-mode account-snapshot fetch; cancelled + relaunched on every (re)attach.
+    private var accountTask: Task<Void, Never>?
     var tabs: [Tab] = []
     var selectedTabID: UUID?
     var showBottomPanel = false {
@@ -306,6 +308,13 @@ final class WorkspaceViewModel {
             case .correlation(let vm): vm.reconnect(coordinator: marketData)
             case .multiTimeframe(let vm): vm.reconnect(coordinator: marketData)
             }
+        }
+        // Pull the native account snapshot into the shared trading VM so the status bar
+        // shows real balance/equity/margin without the server. Orders stay server-routed.
+        accountTask?.cancel()
+        accountTask = Task { @MainActor [weak self] in
+            guard let info = try? await session.accountSnapshot() else { return }
+            self?.trading.account = Account(native: info, connected: true)
         }
     }
 

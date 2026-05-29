@@ -75,8 +75,24 @@ public struct QuoteSubscribeRequest: Sendable {
 public struct HeartbeatRequest: Sendable {
     public var requestTime: Int64?
     public var requestId: String?
+    public var synchRequestId: Int64?
 
     public init() {}
+
+    public init(requestTime: Int64, requestId: String? = nil, synchRequestId: Int64? = nil) {
+        self.requestTime = requestTime
+        self.requestId = requestId
+        self.synchRequestId = synchRequestId
+    }
+
+    public func encode() -> Data {
+        var w = BinaryWriter()
+        w.writeInt32BE(javaStringHashCode(WireClass.heartbeatRequest))
+        if let requestTime { writeField(&w, fieldId: -22301) { sub in sub.writeInt64BE(requestTime) } }
+        if let requestId { writeField(&w, fieldId: 17261) { sub in sub.writeString(requestId) } }
+        if let synchRequestId { writeField(&w, fieldId: -29489) { sub in sub.writeInt64BE(synchRequestId) } }
+        return w.data
+    }
 
     public static func decode(from reader: inout BinaryReader) throws -> HeartbeatRequest {
         var msg = HeartbeatRequest()
@@ -85,6 +101,7 @@ public struct HeartbeatRequest: Sendable {
             switch field.fieldId {
             case -22301: msg.requestTime = try v.readInt64BE()
             case 17261:  msg.requestId = try v.readString()
+            case -29489: msg.synchRequestId = try v.readInt64BE()
             default: break
             }
         }
@@ -96,11 +113,16 @@ public struct HeartbeatOkResponse: Sendable {
     public var requestTime: Int64
     public var receiveTime: Int64
     public var socketWriteInterval: Int64?
+    public var synchRequestId: Int64?
 
-    public init(requestTime: Int64, receiveTime: Int64, socketWriteInterval: Int64? = nil) {
+    public init(
+        requestTime: Int64, receiveTime: Int64,
+        socketWriteInterval: Int64? = nil, synchRequestId: Int64? = nil
+    ) {
         self.requestTime = requestTime
         self.receiveTime = receiveTime
         self.socketWriteInterval = socketWriteInterval
+        self.synchRequestId = synchRequestId
     }
 
     public func encode() -> Data {
@@ -111,6 +133,9 @@ public struct HeartbeatOkResponse: Sendable {
         if let socketWriteInterval {
             writeField(&w, fieldId: -1189) { sub in sub.writeInt64BE(socketWriteInterval) }
         }
+        // The server correlates its heartbeat by synchRequestId; the reply must echo it
+        // back or the server treats the heartbeat as unanswered and drops the socket.
+        if let synchRequestId { writeField(&w, fieldId: -29489) { sub in sub.writeInt64BE(synchRequestId) } }
         return w.data
     }
 }

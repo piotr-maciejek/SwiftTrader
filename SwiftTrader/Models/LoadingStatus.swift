@@ -77,7 +77,7 @@ struct LoadingStatus: Equatable {
     private static func historyDetail(period: String, rebucketing: Bool, coldCache: Bool) -> String? {
         guard coldCache else { return nil }
         if rebucketing && period == "DAILY" {
-            return "Fetching 6000 1H bars from Dukascopy — first load is slow while the server populates its CDN cache."
+            return "Fetching 6000 1H bars from Dukascopy — first load is slow while the cache warms."
         }
         if rebucketing && period == "FOUR_HOURS" {
             return "Fetching 2000 1H bars from Dukascopy for aggregation."

@@ -44,6 +44,15 @@ public struct CandleBar: Sendable {
     public let low: Double
     public let close: Double
     public let volume: Double
+
+    public init(timeMillis: Int64, open: Double, high: Double, low: Double, close: Double, volume: Double) {
+        self.timeMillis = timeMillis
+        self.open = open
+        self.high = high
+        self.low = low
+        self.close = close
+        self.volume = volume
+    }
 }
 
 // MARK: - Request

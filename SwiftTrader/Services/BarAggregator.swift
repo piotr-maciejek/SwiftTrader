@@ -61,6 +61,48 @@ enum BarAggregator {
         }
     }
 
+    /// Aggregates source bars onto a fixed epoch grid of `granularityMs` (e.g. 5m/15m/30m
+    /// from 1m — used in native mode where the datafeed only stores 1m/1H/Daily). Like the
+    /// 3m path: pure epoch grid, no weekend-filler dropping, since the grid divides an hour
+    /// evenly and the source already excludes weekends.
+    static func aggregateFixedGrid(
+        _ source: [CandleBar], granularityMs: Int64, openPartial: CandleBar?
+    ) -> [CandleBar] {
+        var inputs = source
+        if let partial = openPartial {
+            let hasCompleted = inputs.contains { $0.time == partial.time && !$0.partial }
+            if !hasCompleted {
+                inputs.removeAll { $0.time == partial.time }
+                inputs.append(partial)
+            }
+        }
+        let sorted = inputs.sorted { $0.time < $1.time }
+        guard !sorted.isEmpty else { return [] }
+
+        var buckets: [(startMs: Int64, bars: [CandleBar])] = []
+        for bar in sorted {
+            let bStart = fixedGridBucketStartMs(bar.time, granularityMs)
+            if let lastIdx = buckets.indices.last, buckets[lastIdx].startMs == bStart {
+                buckets[lastIdx].bars.append(bar)
+            } else {
+                buckets.append((bStart, [bar]))
+            }
+        }
+
+        return buckets.map { bucket in
+            let bars = bucket.bars
+            return CandleBar(
+                time: bucket.startMs,
+                open: bars.first!.open,
+                high: bars.map(\.high).max()!,
+                low: bars.map(\.low).min()!,
+                close: bars.last!.close,
+                volume: bars.map(\.volume).reduce(0, +),
+                partial: bars.contains { $0.partial }
+            )
+        }
+    }
+
     /// Bucket-start epoch ms for `bar` under `target`. Session-aligned periods
     /// (4H/Daily) defer to `NYTradingCalendar`; fixed-grid periods (3m) use a
     /// pure epoch grid that needs no timezone/DST/session logic.

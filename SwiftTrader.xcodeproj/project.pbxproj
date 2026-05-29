@@ -7,98 +7,99 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1000001 /* SwiftTraderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001; };
-		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002; };
-		A1000003 /* CandleBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003; };
-		A1000004 /* ForexAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004; };
-		A1000005 /* ForexWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005; };
-		A1000006 /* ChartViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000006; };
-		A1000007 /* ChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000007; };
-		A1000008 /* ChartTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000008; };
-		A1000009 /* ScrollWheelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000A; };
-		A100000A /* MarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000B; };
-		A100000B /* WorkspaceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000C; };
-		A100000C /* WindowAccessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000D; };
-		A100000D /* BottomPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000E; };
-		A100000E /* RightPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000F; };
-		A100000F /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010; };
-		A1000010 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011; };
-		A1000011 /* Position.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012; };
-		A1000012 /* TradingAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000013; };
-		A1000013 /* TradingWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014; };
-		A1000014 /* TradingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000015; };
-		A1000015 /* TradingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000016; };
-		A1000016 /* OrderEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000017; };
-		A1000017 /* CandleCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000018; };
-		A1000018 /* CurrencyCorrelation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000019; };
-		A1000019 /* CorrelationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001A; };
-		A100001A /* CorrelationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001B; };
-		A100001B /* MarketSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001C; };
-		A100001C /* SessionCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001D; };
-		A100001D /* EMAConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001E; };
-		A100001E /* EMAPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001F; };
-		A100001F /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020; };
-		A1000020 /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021; };
-		A1000021 /* PinEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000022; };
-		A1000022 /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023; };
-		A1000023 /* TabState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024; };
-		A1000024 /* WorkspaceStateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025; };
-		A1000025 /* MarketDataProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000027; };
-		A1000026 /* TradingDayATR.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000028; };
-		A1000027 /* ATRPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000029; };
-		A1000028 /* VolumeMAPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002A; };
-		A1000029 /* VisualOrderState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002B; };
-		A100002A /* NewsItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002C; };
-		A100002B /* NewsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002D; };
-		A100002D /* ShortcutsPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002F; };
-		A100002E /* PositionSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030; };
-		A100002F /* WebSocketStreamError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031; };
-		A1000030 /* WebSocketStreamDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000032; };
-		A1000031 /* NYTradingCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000033; };
-		A1000032 /* BarAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000034; };
-		A1000033 /* DiskCandleCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000035; };
-		A1000034 /* LoadingStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000036; };
-		A1000035 /* ChartLoadingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000037; };
-		A1000036 /* PendingOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000038; };
-		A1000037 /* PendingOrdersWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000039; };
-		A1000038 /* TradeRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003A; };
-		A1000039 /* DateRangePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003B; };
-		A100003A /* TradeHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003C; };
-		A100003B /* TradeHistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003D; };
-		A100003C /* TradeHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003E; };
-		A1000040 /* LeftSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040; };
-		A1000041 /* MultiTimeframeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000041; };
-		A1000042 /* MultiTimeframeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042; };
-		A1000050 /* Drawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050; };
-		A1000051 /* DrawingMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000051; };
-		A1000052 /* NativeMarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000052; };
+		A1000001 /* SwiftTraderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* SwiftTraderApp.swift */; };
+		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
+		A1000003 /* CandleBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* CandleBar.swift */; };
+		A1000004 /* ForexAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* ForexAPIService.swift */; };
+		A1000005 /* ForexWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005 /* ForexWebSocketService.swift */; };
+		A1000006 /* ChartViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000006 /* ChartViewModel.swift */; };
+		A1000007 /* ChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000007 /* ChartView.swift */; };
+		A1000008 /* ChartTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000008 /* ChartTransform.swift */; };
+		A1000009 /* ScrollWheelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000A /* ScrollWheelView.swift */; };
+		A100000A /* MarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000B /* MarketDataCoordinator.swift */; };
+		A100000B /* WorkspaceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000C /* WorkspaceViewModel.swift */; };
+		A100000C /* WindowAccessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000D /* WindowAccessor.swift */; };
+		A100000D /* BottomPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000E /* BottomPanel.swift */; };
+		A100000E /* RightPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000F /* RightPanel.swift */; };
+		A100000F /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010 /* AppSettings.swift */; };
+		A1000010 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* SettingsView.swift */; };
+		A1000011 /* Position.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012 /* Position.swift */; };
+		A1000012 /* TradingAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000013 /* TradingAPIService.swift */; };
+		A1000013 /* TradingWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014 /* TradingWebSocketService.swift */; };
+		A1000014 /* TradingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000015 /* TradingCoordinator.swift */; };
+		A1000015 /* TradingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000016 /* TradingViewModel.swift */; };
+		A1000016 /* OrderEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000017 /* OrderEntryView.swift */; };
+		A1000017 /* CandleCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000018 /* CandleCache.swift */; };
+		A1000018 /* CurrencyCorrelation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000019 /* CurrencyCorrelation.swift */; };
+		A1000019 /* CorrelationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001A /* CorrelationViewModel.swift */; };
+		A100001A /* CorrelationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001B /* CorrelationView.swift */; };
+		A100001B /* MarketSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001C /* MarketSession.swift */; };
+		A100001C /* SessionCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001D /* SessionCalculator.swift */; };
+		A100001D /* EMAConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001E /* EMAConfig.swift */; };
+		A100001E /* EMAPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200001F /* EMAPopover.swift */; };
+		A100001F /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020 /* AuthService.swift */; };
+		A1000020 /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021 /* AuthViewModel.swift */; };
+		A1000021 /* PinEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000022 /* PinEntrySheet.swift */; };
+		A1000022 /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023 /* Account.swift */; };
+		A1000023 /* TabState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024 /* TabState.swift */; };
+		A1000024 /* WorkspaceStateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025 /* WorkspaceStateService.swift */; };
+		A1000025 /* MarketDataProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000027 /* MarketDataProviding.swift */; };
+		A1000026 /* TradingDayATR.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000028 /* TradingDayATR.swift */; };
+		A1000027 /* ATRPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000029 /* ATRPopover.swift */; };
+		A1000028 /* VolumeMAPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002A /* VolumeMAPopover.swift */; };
+		A1000029 /* VisualOrderState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002B /* VisualOrderState.swift */; };
+		A100002A /* NewsItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002C /* NewsItem.swift */; };
+		A100002B /* NewsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002D /* NewsCoordinator.swift */; };
+		A100002D /* ShortcutsPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002F /* ShortcutsPopover.swift */; };
+		A100002E /* PositionSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030 /* PositionSizing.swift */; };
+		A100002F /* WebSocketStreamError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031 /* WebSocketStreamError.swift */; };
+		A1000030 /* WebSocketStreamDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000032 /* WebSocketStreamDriver.swift */; };
+		A1000031 /* NYTradingCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000033 /* NYTradingCalendar.swift */; };
+		A1000032 /* BarAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000034 /* BarAggregator.swift */; };
+		A1000033 /* DiskCandleCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000035 /* DiskCandleCache.swift */; };
+		A1000034 /* LoadingStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000036 /* LoadingStatus.swift */; };
+		A1000035 /* ChartLoadingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000037 /* ChartLoadingCard.swift */; };
+		A1000036 /* PendingOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000038 /* PendingOrder.swift */; };
+		A1000037 /* PendingOrdersWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000039 /* PendingOrdersWebSocketService.swift */; };
+		A1000038 /* TradeRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003A /* TradeRecord.swift */; };
+		A1000039 /* DateRangePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003B /* DateRangePreset.swift */; };
+		A100003A /* TradeHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003C /* TradeHistoryService.swift */; };
+		A100003B /* TradeHistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003D /* TradeHistoryViewModel.swift */; };
+		A100003C /* TradeHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003E /* TradeHistoryView.swift */; };
+		A1000040 /* LeftSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* LeftSidebar.swift */; };
+		A1000041 /* MultiTimeframeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000041 /* MultiTimeframeViewModel.swift */; };
+		A1000042 /* MultiTimeframeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000042 /* MultiTimeframeView.swift */; };
+		A1000050 /* Drawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000050 /* Drawing.swift */; };
+		A1000051 /* DrawingMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000051 /* DrawingMath.swift */; };
+		A1000052 /* NativeMarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000052 /* NativeMarketDataCoordinator.swift */; };
 		A1000060 /* DukascopyClient in Frameworks */ = {isa = PBXBuildFile; productRef = AA000002 /* DukascopyClient */; };
-		AA000010 /* DukascopyAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000011; };
-		AA000012 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000013; };
-		AA000014 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000015; };
-		AA000016 /* StandaloneAuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000017; };
-		AA000018 /* StandaloneLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000019; };
-		B100000F /* NYTradingCalendarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000F; };
-		B1000010 /* BarAggregatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000010; };
-		B1000011 /* DiskCandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000011; };
-		B1000012 /* BarAggregatorEndToEndTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000012; };
-		B1000013 /* TradeHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000013; };
-		B100000C /* PositionSizingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000C; };
-		B100000A /* WorkspaceSidebarSortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000A; };
-		B100000B /* WorkspacePeriodCycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000B; };
-		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001; };
-		B1000002 /* CandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002; };
-		B1000003 /* ForexAPIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003; };
-		B1000004 /* MockMarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000004; };
-		B1000005 /* ChartViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000005; };
-		B1000006 /* OneClickOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000006; };
-		B1000007 /* TradingDayATRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000007; };
-		B1000008 /* TabStateBackwardCompatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000008; };
-		B100000D /* TradingViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000D; };
-		B100000E /* WebSocketStreamDriverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000E; };
-		B1000014 /* MultiTimeframeViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000014; };
-		B1000050 /* DrawingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000050; };
-		B1000051 /* LeftSidebarGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000051; };
+		AA000010 /* DukascopyAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000011 /* DukascopyAccount.swift */; };
+		AA000012 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000013 /* KeychainStore.swift */; };
+		AA000014 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000015 /* AccountStore.swift */; };
+		AA000016 /* StandaloneAuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000017 /* StandaloneAuthViewModel.swift */; };
+		AA000018 /* StandaloneLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000019 /* StandaloneLoginSheet.swift */; };
+		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001 /* SessionCalculatorTests.swift */; };
+		B1000002 /* CandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002 /* CandleCacheTests.swift */; };
+		B1000003 /* ForexAPIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003 /* ForexAPIServiceTests.swift */; };
+		B1000004 /* MockMarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000004 /* MockMarketDataCoordinator.swift */; };
+		B1000005 /* ChartViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000005 /* ChartViewModelTests.swift */; };
+		B1000006 /* OneClickOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000006 /* OneClickOrderTests.swift */; };
+		B1000007 /* TradingDayATRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000007 /* TradingDayATRTests.swift */; };
+		B1000008 /* TabStateBackwardCompatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000008 /* TabStateBackwardCompatTests.swift */; };
+		B100000A /* WorkspaceSidebarSortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000A /* WorkspaceSidebarSortTests.swift */; };
+		B100000B /* WorkspacePeriodCycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000B /* WorkspacePeriodCycleTests.swift */; };
+		B100000C /* PositionSizingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000C /* PositionSizingTests.swift */; };
+		B100000D /* TradingViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000D /* TradingViewModelTests.swift */; };
+		B100000E /* WebSocketStreamDriverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000E /* WebSocketStreamDriverTests.swift */; };
+		B100000F /* NYTradingCalendarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000F /* NYTradingCalendarTests.swift */; };
+		B1000010 /* BarAggregatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000010 /* BarAggregatorTests.swift */; };
+		B1000011 /* DiskCandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000011 /* DiskCandleCacheTests.swift */; };
+		B1000012 /* BarAggregatorEndToEndTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000012 /* BarAggregatorEndToEndTests.swift */; };
+		B1000013 /* TradeHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000013 /* TradeHistoryTests.swift */; };
+		B1000014 /* MultiTimeframeViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000014 /* MultiTimeframeViewModelTests.swift */; };
+		B1000050 /* DrawingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000050 /* DrawingTests.swift */; };
+		B1000051 /* LeftSidebarGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000051 /* LeftSidebarGroupingTests.swift */; };
+		B1000060 /* NativeStandaloneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000060 /* NativeStandaloneTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -149,7 +150,6 @@
 		A2000023 /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
 		A2000024 /* TabState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabState.swift; sourceTree = "<group>"; };
 		A2000025 /* WorkspaceStateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStateService.swift; sourceTree = "<group>"; };
-		A2000026 /* SwiftTrader.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SwiftTrader.entitlements; sourceTree = "<group>"; };
 		A2000027 /* MarketDataProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketDataProviding.swift; sourceTree = "<group>"; };
 		A2000028 /* TradingDayATR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingDayATR.swift; sourceTree = "<group>"; };
 		A2000029 /* ATRPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ATRPopover.swift; sourceTree = "<group>"; };
@@ -158,8 +158,6 @@
 		A200002C /* NewsItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsItem.swift; sourceTree = "<group>"; };
 		A200002D /* NewsCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsCoordinator.swift; sourceTree = "<group>"; };
 		A200002F /* ShortcutsPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsPopover.swift; sourceTree = "<group>"; };
-		B200000A /* WorkspaceSidebarSortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSidebarSortTests.swift; sourceTree = "<group>"; };
-		B200000B /* WorkspacePeriodCycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePeriodCycleTests.swift; sourceTree = "<group>"; };
 		A2000030 /* PositionSizing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionSizing.swift; sourceTree = "<group>"; };
 		A2000031 /* WebSocketStreamError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketStreamError.swift; sourceTree = "<group>"; };
 		A2000032 /* WebSocketStreamDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketStreamDriver.swift; sourceTree = "<group>"; };
@@ -181,19 +179,13 @@
 		A2000050 /* Drawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Drawing.swift; sourceTree = "<group>"; };
 		A2000051 /* DrawingMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingMath.swift; sourceTree = "<group>"; };
 		A2000052 /* NativeMarketDataCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMarketDataCoordinator.swift; sourceTree = "<group>"; };
-		AA000001 /* DukascopyClient */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Packages/DukascopyClient; sourceTree = "<group>"; };
+		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA000001 /* Packages/DukascopyClient */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Packages/DukascopyClient; sourceTree = "<group>"; };
 		AA000011 /* DukascopyAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DukascopyAccount.swift; sourceTree = "<group>"; };
 		AA000013 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		AA000015 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		AA000017 /* StandaloneAuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandaloneAuthViewModel.swift; sourceTree = "<group>"; };
 		AA000019 /* StandaloneLoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandaloneLoginSheet.swift; sourceTree = "<group>"; };
-		B200000F /* NYTradingCalendarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NYTradingCalendarTests.swift; sourceTree = "<group>"; };
-		B2000010 /* BarAggregatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarAggregatorTests.swift; sourceTree = "<group>"; };
-		B2000011 /* DiskCandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskCandleCacheTests.swift; sourceTree = "<group>"; };
-		B2000012 /* BarAggregatorEndToEndTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarAggregatorEndToEndTests.swift; sourceTree = "<group>"; };
-		B2000013 /* TradeHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeHistoryTests.swift; sourceTree = "<group>"; };
-		B200000C /* PositionSizingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionSizingTests.swift; sourceTree = "<group>"; };
-		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
 		B2000002 /* CandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCacheTests.swift; sourceTree = "<group>"; };
 		B2000003 /* ForexAPIServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForexAPIServiceTests.swift; sourceTree = "<group>"; };
@@ -202,11 +194,20 @@
 		B2000006 /* OneClickOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneClickOrderTests.swift; sourceTree = "<group>"; };
 		B2000007 /* TradingDayATRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingDayATRTests.swift; sourceTree = "<group>"; };
 		B2000008 /* TabStateBackwardCompatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStateBackwardCompatTests.swift; sourceTree = "<group>"; };
+		B200000A /* WorkspaceSidebarSortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSidebarSortTests.swift; sourceTree = "<group>"; };
+		B200000B /* WorkspacePeriodCycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePeriodCycleTests.swift; sourceTree = "<group>"; };
+		B200000C /* PositionSizingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionSizingTests.swift; sourceTree = "<group>"; };
 		B200000D /* TradingViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingViewModelTests.swift; sourceTree = "<group>"; };
 		B200000E /* WebSocketStreamDriverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketStreamDriverTests.swift; sourceTree = "<group>"; };
+		B200000F /* NYTradingCalendarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NYTradingCalendarTests.swift; sourceTree = "<group>"; };
+		B2000010 /* BarAggregatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarAggregatorTests.swift; sourceTree = "<group>"; };
+		B2000011 /* DiskCandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskCandleCacheTests.swift; sourceTree = "<group>"; };
+		B2000012 /* BarAggregatorEndToEndTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarAggregatorEndToEndTests.swift; sourceTree = "<group>"; };
+		B2000013 /* TradeHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeHistoryTests.swift; sourceTree = "<group>"; };
 		B2000014 /* MultiTimeframeViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiTimeframeViewModelTests.swift; sourceTree = "<group>"; };
 		B2000050 /* DrawingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTests.swift; sourceTree = "<group>"; };
 		B2000051 /* LeftSidebarGroupingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftSidebarGroupingTests.swift; sourceTree = "<group>"; };
+		B2000060 /* NativeStandaloneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStandaloneTests.swift; sourceTree = "<group>"; };
 		B3000001 /* SwiftTraderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SwiftTraderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -225,7 +226,7 @@
 		A4000001 = {
 			isa = PBXGroup;
 			children = (
-				AA000001 /* DukascopyClient */,
+				AA000001 /* Packages/DukascopyClient */,
 				A4000002 /* SwiftTrader */,
 				B4000002 /* SwiftTraderTests */,
 				A4000006 /* Products */,
@@ -356,6 +357,7 @@
 			children = (
 				B2000001 /* SessionCalculatorTests.swift */,
 				B2000002 /* CandleCacheTests.swift */,
+				B2000060 /* NativeStandaloneTests.swift */,
 				B2000003 /* ForexAPIServiceTests.swift */,
 				B2000004 /* MockMarketDataCoordinator.swift */,
 				B2000005 /* ChartViewModelTests.swift */,
@@ -435,6 +437,7 @@
 				Base,
 			);
 			mainGroup = A4000001;
+			preferredProjectObjectVersion = 77;
 			productRefGroup = A4000006 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -529,6 +532,7 @@
 			files = (
 				B1000001 /* SessionCalculatorTests.swift in Sources */,
 				B1000002 /* CandleCacheTests.swift in Sources */,
+				B1000060 /* NativeStandaloneTests.swift in Sources */,
 				B1000003 /* ForexAPIServiceTests.swift in Sources */,
 				B1000004 /* MockMarketDataCoordinator.swift in Sources */,
 				B1000005 /* ChartViewModelTests.swift in Sources */,
@@ -610,13 +614,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SwiftTrader/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_NSMainStoryboardFile = "";
 				INFOPLIST_KEY_NSPrincipalClass = "";
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.trading.SwiftTrader;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -630,13 +634,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SwiftTrader/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_NSMainStoryboardFile = "";
 				INFOPLIST_KEY_NSPrincipalClass = "";
 				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.trading.SwiftTrader;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -649,9 +653,10 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 27QTQYPC29;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.trading.SwiftTraderTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.trading.SwiftTrader;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 6.0;
@@ -664,9 +669,10 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 27QTQYPC29;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.trading.SwiftTraderTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.trading.SwiftTrader;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 6.0;
@@ -712,7 +718,6 @@
 			productName = DukascopyClient;
 		};
 /* End XCSwiftPackageProductDependency section */
-
 	};
 	rootObject = A8000001 /* Project object */;
 }

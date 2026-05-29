@@ -9,6 +9,7 @@ public enum WireClass {
     public static let errorResponse  = "com.dukascopy.dds4.transport.msg.system.ErrorResponseMessage"
     public static let pingRequest    = "com.dukascopy.dds4.transport.msg.system.PingRequestMessage"
     public static let pingResponse   = "com.dukascopy.dds4.transport.msg.system.PingResponseMessage"
+    public static let primarySocketAuthAcceptor = "com.dukascopy.dds4.transport.msg.system.PrimarySocketAuthAcceptorMessage"
 }
 
 // MARK: - HaloRequest
@@ -171,6 +172,8 @@ public struct ErrorResponse: Sendable, Error, CustomStringConvertible {
     public var reason: String?
     public var fatal: Bool?
     public var sessionId: String?
+    public var requestId: String?
+    public var synchRequestId: Int64?
 
     public init() {}
 
@@ -182,6 +185,8 @@ public struct ErrorResponse: Sendable, Error, CustomStringConvertible {
             case -19257: msg.reason = try v.readString()
             case 31707:  msg.fatal = try v.readBoolean()
             case 28132:  msg.sessionId = try v.readString()
+            case 17261:  msg.requestId = try v.readString()
+            case -29489: msg.synchRequestId = try v.readInt64BE()
             default: break
             }
         }
@@ -189,7 +194,7 @@ public struct ErrorResponse: Sendable, Error, CustomStringConvertible {
     }
 
     public var description: String {
-        "ErrorResponse(reason=\(reason ?? "nil"), fatal=\(fatal.map(String.init) ?? "nil"))"
+        "ErrorResponse(reason=\(reason ?? "nil"), fatal=\(fatal.map(String.init) ?? "nil"), requestId=\(requestId ?? "nil"))"
     }
 }
 

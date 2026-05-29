@@ -12,6 +12,7 @@ final class MultiTimeframeViewModel {
         }
     }
     let chartViewModels: [ChartViewModel]
+    private let coordinator: any MarketDataProviding
 
     var showSessions = true {
         didSet {
@@ -72,6 +73,7 @@ final class MultiTimeframeViewModel {
     init(instrument: String, zoom: TFZoom = .standard, coordinator: any MarketDataProviding) {
         self.instrument = instrument
         self.zoom = zoom
+        self.coordinator = coordinator
         self.chartViewModels = zoom.periods.map { period in
             let vm = ChartViewModel(coordinator: coordinator)
             vm.currentInstrument = instrument
@@ -86,11 +88,7 @@ final class MultiTimeframeViewModel {
     }
 
     func startAll() async {
-        await withTaskGroup(of: Void.self) { group in
-            for vm in chartViewModels {
-                group.addTask { await vm.start() }
-            }
-        }
+        await chartViewModels.startGradually(maxConcurrent: coordinator.maxConcurrentColdLoads)
     }
 
     func stopAll() {

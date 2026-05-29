@@ -6,6 +6,7 @@ final class CorrelationViewModel {
     let currency: String
     let instruments: [String]
     let chartViewModels: [ChartViewModel]
+    private let coordinator: any MarketDataProviding
     var currentPeriod: String
     var showSessions = true {
         didSet {
@@ -66,6 +67,7 @@ final class CorrelationViewModel {
     init(currency: String, period: String, coordinator: any MarketDataProviding) {
         self.currency = currency
         self.currentPeriod = period
+        self.coordinator = coordinator
         let pairs = (CurrencyCorrelation.pairs[currency] ?? []).sorted()
         self.instruments = pairs
         self.chartViewModels = pairs.map { instrument in
@@ -77,11 +79,7 @@ final class CorrelationViewModel {
     }
 
     func startAll() async {
-        await withTaskGroup(of: Void.self) { group in
-            for vm in chartViewModels {
-                group.addTask { await vm.start() }
-            }
-        }
+        await chartViewModels.startGradually(maxConcurrent: coordinator.maxConcurrentColdLoads)
     }
 
     func switchPeriod(_ period: String) {

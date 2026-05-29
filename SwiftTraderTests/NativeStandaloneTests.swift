@@ -1,0 +1,281 @@
+import BigInt
+import DukascopyClient
+import Foundation
+import Testing
+@testable import SwiftTrader
+
+@Suite("NativeMarketDataCoordinator routing")
+struct NativeMarketDataCoordinatorRoutingTests {
+    /// Records every raw-fetch call so we can assert what period/count/before the
+    /// coordinator routed to, without a live Dukascopy session.
+    actor Spy {
+        struct Call: Equatable, Sendable {
+            let instrument: String
+            let period: String
+            let count: Int
+            let before: Int64?
+        }
+        private(set) var calls: [Call] = []
+        func record(_ c: Call) { calls.append(c) }
+    }
+
+    private func make(
+        cache: CandleCache = CandleCache(),
+        bars: @escaping @Sendable (_ period: String) -> [SwiftTrader.CandleBar]
+    ) -> (NativeMarketDataCoordinator, Spy) {
+        let spy = Spy()
+        let coord = NativeMarketDataCoordinator(cache: cache, rawFetch: { instrument, period, count, before in
+            await spy.record(.init(instrument: instrument, period: period, count: count, before: before))
+            return bars(period)
+        })
+        return (coord, spy)
+    }
+
+    @Test("Cold raw period fetches exactly `count` (no over-fetch), caches completed bars, appends the live partial")
+    func rawFetchCachesAndAppendsPartial() async throws {
+        let hourly: [SwiftTrader.CandleBar] = [
+            SwiftTrader.CandleBar(time: 0, open: 1, high: 1, low: 1, close: 1, volume: 1),
+            SwiftTrader.CandleBar(time: 3_600_000, open: 1, high: 1, low: 1, close: 1, volume: 1),
+            SwiftTrader.CandleBar(time: 7_200_000, open: 1, high: 1, low: 1, close: 1, volume: 1, partial: true),
+        ]
+        let (coord, spy) = make { _ in hourly }
+        let result = try await coord.fetchCandles(
+            instrument: "EURUSD", period: "ONE_HOUR", count: 10, rebucketing: false
+        )
+        let calls = await spy.calls
+        // Forward (before==nil) loads pull exactly the requested count — no minFetchCount
+        // floor, so a 1H chart's window stays small instead of storming the socket+CDN.
+        #expect(calls == [.init(instrument: "EURUSD", period: "ONE_HOUR", count: 10, before: nil)])
+        // 2 completed bars are cached; the partial is appended (not cached).
+        #expect(result.count == 3)
+        #expect(result.last?.partial == true)
+        #expect(result.dropLast().allSatisfy { !$0.partial })
+    }
+
+    @Test("A fresh, deep-enough cache is served without any network fetch (no startup storm)")
+    func warmCacheSkipsFetch() async throws {
+        let cache = CandleCache()
+        let key = CandleCache.CacheKey(instrument: "EURUSD", period: "ONE_HOUR", source: .server)
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // 600 hourly bars reach back further than a 500-bar request's window, so the
+        // depth-aware cache-first check is satisfied and no fetch happens.
+        let bars = (0..<600).map { i in
+            SwiftTrader.CandleBar(
+                time: nowMs - Int64(i) * 3_600_000, open: 1, high: 1, low: 1, close: 1, volume: 1
+            )
+        }.sorted { $0.time < $1.time }
+        _ = await cache.merge(bars, for: key)
+        let (coord, spy) = make(cache: cache) { _ in [] }
+        let result = try await coord.fetchCandles(
+            instrument: "EURUSD", period: "ONE_HOUR", count: 500, rebucketing: false
+        )
+        let calls = await spy.calls
+        #expect(calls.isEmpty)         // cache-first: no network fetch
+        #expect(result.count == 600)   // served straight from cache
+    }
+
+    @Test("A fresh but too-shallow cache triggers a refetch (depth-aware cache-first)")
+    func shallowCacheTriggersRefetch() async throws {
+        let cache = CandleCache()
+        let key = CandleCache.CacheKey(instrument: "EURUSD", period: "ONE_HOUR", source: .server)
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // 100 recent hourly bars (~4 days): fresh, but nowhere near a 500-bar window deep.
+        let bars = (0..<100).map { i in
+            SwiftTrader.CandleBar(
+                time: nowMs - Int64(i) * 3_600_000, open: 1, high: 1, low: 1, close: 1, volume: 1
+            )
+        }.sorted { $0.time < $1.time }
+        _ = await cache.merge(bars, for: key)
+        let (coord, spy) = make(cache: cache) { _ in [] }
+        _ = try await coord.fetchCandles(
+            instrument: "EURUSD", period: "ONE_HOUR", count: 500, rebucketing: false
+        )
+        let calls = await spy.calls
+        // Shallow cache can't satisfy 500 bars back → exactly one forward fetch for 500.
+        #expect(calls == [.init(instrument: "EURUSD", period: "ONE_HOUR", count: 500, before: nil)])
+    }
+
+    @Test("Weekend filler bars are stripped from native raw fetches (server-mode parity)")
+    func stripsWeekendFillers() async throws {
+        func ts(_ iso: String) -> Int64 {
+            Int64(ISO8601DateFormatter().date(from: iso)!.timeIntervalSince1970 * 1000)
+        }
+        let wednesday = ts("2026-05-20T12:00:00Z")  // weekday → kept
+        let saturday = ts("2026-05-23T12:00:00Z")   // Fri 17:00 ET → Sun 17:00 ET closure → dropped
+        let raw = [
+            SwiftTrader.CandleBar(time: wednesday, open: 1, high: 1, low: 1, close: 1, volume: 1),
+            SwiftTrader.CandleBar(time: saturday, open: 1, high: 1, low: 1, close: 1, volume: 1),
+        ]
+        let (coord, _) = make { _ in raw }
+        let result = try await coord.fetchCandles(
+            instrument: "EURUSD", period: "ONE_HOUR", count: 2, rebucketing: false
+        )
+        #expect(result.map(\.time) == [wednesday])   // weekend filler removed, matching server mode
+    }
+
+    @Test("fetchEarlierCandles requests bars before the earliest cached timestamp")
+    func earlierUsesBefore() async throws {
+        let cache = CandleCache()
+        let key = CandleCache.CacheKey(instrument: "EURUSD", period: "ONE_HOUR", source: .server)
+        _ = await cache.merge(
+            [SwiftTrader.CandleBar(time: 5_000_000, open: 1, high: 1, low: 1, close: 1, volume: 1)], for: key
+        )
+        let (coord, spy) = make(cache: cache) { _ in
+            [SwiftTrader.CandleBar(time: 1_000_000, open: 1, high: 1, low: 1, close: 1, volume: 1)]
+        }
+        _ = try await coord.fetchEarlierCandles(
+            instrument: "EURUSD", period: "ONE_HOUR", count: 100, rebucketing: false
+        )
+        let calls = await spy.calls
+        #expect(calls.count == 1)
+        #expect(calls.first?.before == 5_000_000)
+    }
+
+    @Test("4H/Daily aggregate from 1H; 3m/5m/15m/30m aggregate from 1m (native)")
+    func aggregatedRoutesToSource() async throws {
+        // Cold cache → one source fetch sized to exactly count × sourceSpan (no over-fetch).
+        // The datafeed has no 5m/15m/30m files, so native builds them from ONE_MIN.
+        let count = 5
+        let cases: [(period: String, source: String, span: Int)] = [
+            ("FOUR_HOURS", "ONE_HOUR", 4),
+            ("DAILY", "ONE_HOUR", 24),
+            ("THREE_MINS", "ONE_MIN", 3),
+            ("FIVE_MINS", "ONE_MIN", 5),
+            ("FIFTEEN_MINS", "ONE_MIN", 15),
+            ("THIRTY_MINS", "ONE_MIN", 30),
+        ]
+        for c in cases {
+            for rebucketing in [true, false] {
+                let (coord, spy) = make { _ in [] }
+                _ = try await coord.fetchCandles(
+                    instrument: "EURUSD", period: c.period, count: count, rebucketing: rebucketing
+                )
+                let calls = await spy.calls
+                let label = "\(c.period) rebucketing=\(rebucketing)"
+                #expect(calls.count == 1, "\(label)")
+                #expect(calls.first?.period == c.source, "\(label)")
+                #expect(calls.first?.count == count * c.span, "\(label)")
+            }
+        }
+    }
+
+    @Test("A shallow source cache does not satisfy a deeper aggregated request")
+    func shallowSourceCacheTriggersDeepFetch() async throws {
+        let cache = CandleCache()
+        let key = CandleCache.CacheKey(instrument: "EURUSD", period: "ONE_HOUR", source: .server)
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // 100 recent 1H bars: enough for a small 1H window, far too shallow for Daily (250d).
+        let bars = (0..<100).map { i in
+            SwiftTrader.CandleBar(
+                time: nowMs - Int64(i) * 3_600_000, open: 1, high: 1, low: 1, close: 1, volume: 1
+            )
+        }.sorted { $0.time < $1.time }
+        _ = await cache.merge(bars, for: key)
+        let (coord, spy) = make(cache: cache) { _ in [] }
+        _ = try await coord.fetchCandles(
+            instrument: "EURUSD", period: "DAILY", count: 250, rebucketing: false
+        )
+        let calls = await spy.calls
+        // Daily needs 250×24 = 6000 source 1H bars; the 100-bar cache can't cover it → refetch.
+        #expect(calls == [.init(instrument: "EURUSD", period: "ONE_HOUR", count: 6000, before: nil)])
+    }
+
+    @Test("Native mode throttles cold grid loads (server mode stays unbounded)")
+    func nativeThrottlesColdLoads() {
+        #expect(NativeMarketDataCoordinator().maxConcurrentColdLoads == 3)
+    }
+}
+
+@Suite("Native instrument wire form")
+struct NativeInstrumentWireFormTests {
+    @Test("Slashless 6-char FX codes get a slash; other forms pass through unchanged")
+    func slashedPairConversion() {
+        // The candle subscribe needs the slashed pair, else history comes back empty.
+        #expect(NativeMarketDataCoordinator.toSlashedPair("EURUSD") == "EUR/USD")
+        #expect(NativeMarketDataCoordinator.toSlashedPair("GBPJPY") == "GBP/JPY")
+        // Already slashed → unchanged.
+        #expect(NativeMarketDataCoordinator.toSlashedPair("EUR/USD") == "EUR/USD")
+        // Non-6-char (e.g. metals/indices) → left as-is, no guessing.
+        #expect(NativeMarketDataCoordinator.toSlashedPair("XAUUSD") == "XAU/USD")
+        #expect(NativeMarketDataCoordinator.toSlashedPair("US500") == "US500")
+    }
+}
+
+@Suite("Account native mapping")
+struct AccountNativeMappingTests {
+    @Test("Maps native AccountInfo fields, deriving usedMargin and freeMargin")
+    func mapsFields() {
+        var info = AccountInfo()
+        info.balance = BigDecimalValue(unscaled: BigInt(100_000), scale: 2)      // 1000.00
+        info.equity = BigDecimalValue(unscaled: BigInt(99_500), scale: 2)        //  995.00
+        info.usableMargin = BigDecimalValue(unscaled: BigInt(90_000), scale: 2)  //  900.00
+        info.currency = "EUR"
+        info.leverage = 30
+
+        let acct = Account(native: info, connected: true)
+        #expect(acct.balance == 1000)
+        #expect(acct.equity == 995)
+        #expect(acct.freeMargin == 900)
+        #expect(abs(acct.usedMargin - 95) < 1e-9)  // equity − usableMargin
+        #expect(acct.currency == "EUR")
+        #expect(acct.leverage == 30)
+        #expect(acct.connected)
+        #expect(acct.lastTickAgeMs == 0)
+    }
+
+    @Test("Missing fields fall back to safe defaults")
+    func defaults() {
+        let acct = Account(native: AccountInfo(), connected: false)
+        #expect(acct.balance == 0)
+        #expect(acct.equity == 0)
+        #expect(acct.currency == "USD")
+        #expect(acct.leverage == 30)
+        #expect(!acct.connected)
+    }
+}
+
+@Suite("BarAggregator fixed grid")
+struct BarAggregatorFixedGridTests {
+    @Test("Builds 15m buckets from 1m bars on a fixed epoch grid")
+    func fifteenMinFromOneMin() {
+        // Five 1m bars: three in the [0, 900000) bucket, two in [900000, 1800000).
+        func bar(_ tMin: Int64, o: Double, h: Double, l: Double, c: Double, v: Double) -> SwiftTrader.CandleBar {
+            SwiftTrader.CandleBar(time: tMin * 60_000, open: o, high: h, low: l, close: c, volume: v)
+        }
+        let source = [
+            bar(0,  o: 1.0, h: 1.2, l: 0.9, c: 1.1, v: 10),
+            bar(1,  o: 1.1, h: 1.3, l: 1.0, c: 1.2, v: 20),
+            bar(14, o: 1.2, h: 1.25, l: 1.15, c: 1.18, v: 5),
+            bar(15, o: 1.18, h: 1.4, l: 1.18, c: 1.35, v: 8),
+            bar(29, o: 1.35, h: 1.36, l: 1.30, c: 1.31, v: 3),
+        ]
+        let out = BarAggregator.aggregateFixedGrid(source, granularityMs: 900_000, openPartial: nil)
+        #expect(out.count == 2)
+        // Bucket 0 = first 3 bars.
+        #expect(out[0].time == 0)
+        #expect(out[0].open == 1.0)            // first bar's open
+        #expect(out[0].close == 1.18)          // last bar's close
+        #expect(out[0].high == 1.3)            // max high
+        #expect(out[0].low == 0.9)             // min low
+        #expect(out[0].volume == 35)           // 10+20+5
+        // Bucket 1 = last 2 bars, starting at 900000ms.
+        #expect(out[1].time == 900_000)
+        #expect(out[1].open == 1.18)
+        #expect(out[1].close == 1.31)
+        #expect(out[1].high == 1.4)
+        #expect(out[1].volume == 11)
+    }
+
+    @Test("5m and 30m use their own grid granularity")
+    func fiveAndThirtyMinGranularity() {
+        func bar(_ tMin: Int64) -> SwiftTrader.CandleBar {
+            SwiftTrader.CandleBar(time: tMin * 60_000, open: 1, high: 1, low: 1, close: 1, volume: 1)
+        }
+        // Bars at 0,4 → one 5m bucket; at 5 → next 5m bucket.
+        let fiveMin = BarAggregator.aggregateFixedGrid([bar(0), bar(4), bar(5)], granularityMs: 300_000, openPartial: nil)
+        #expect(fiveMin.map(\.time) == [0, 300_000])
+        // Bars at 0,29 → one 30m bucket; at 30 → next.
+        let thirtyMin = BarAggregator.aggregateFixedGrid([bar(0), bar(29), bar(30)], granularityMs: 1_800_000, openPartial: nil)
+        #expect(thirtyMin.map(\.time) == [0, 1_800_000])
+    }
+}
