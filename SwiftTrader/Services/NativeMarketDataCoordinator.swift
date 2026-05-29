@@ -116,7 +116,8 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         // via the stream (Slice C).
         if let latest = await cache.latestTime(for: key),
            Self.isCacheFresh(latestMs: latest, period: period),
-           await cacheCoversWindow(key: key, period: period, count: count) {
+           let periodSeconds = CandlePeriod.parse(period)?.seconds,
+           await cacheCoversWindow(key: key, periodSeconds: periodSeconds, count: count) {
             return await cache.getBars(for: key)
         }
         let fetched = try await fetchRawCandles(instrument: instrument, period: period, count: count)
@@ -204,17 +205,35 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     ) async throws -> [SwiftTrader.CandleBar] {
         let source = spec.sourcePeriod  // ONE_HOUR (4H/Daily) or ONE_MIN (3m/5m/15m/30m)
         let sourceKey = CandleCache.CacheKey(instrument: instrument, period: source, source: .server)
-
+        let aggKey = CandleCache.CacheKey(instrument: instrument, period: spec.periodCode, source: .aggregated)
         let neededSource = count * spec.sourceSpan
+        let sourceSeconds = CandlePeriod.parse(source)?.seconds ?? (source == "ONE_HOUR" ? 3600 : 60)
+        let targetSeconds = sourceSeconds * Int64(spec.sourceSpan)
+
+        // Is the raw source already fresh AND deep enough (so we wouldn't refetch it)?
+        var sourceFresh = false
+        if let srcLatest = await cache.latestTime(for: sourceKey),
+           Self.isCacheFresh(latestMs: srcLatest, period: source),
+           await cacheCoversWindow(key: sourceKey, periodSeconds: sourceSeconds, count: neededSource) {
+            sourceFresh = true
+        }
+
+        // Aggregated-cache-first: the derived series (4H/Daily/3m/5m/15m/30m) is itself cached
+        // and persisted to disk. When the source is already up-to-date, a fresh, deep-enough
+        // cached aggregation is authoritative — serve it directly instead of re-running the
+        // per-bar NY-calendar bucketing over the deep source on every launch (the dominant
+        // startup CPU cost). Gating on `sourceFresh` keeps the derived series consistent with
+        // the raw series: if the source is stale and about to be refetched, we re-aggregate.
+        if sourceFresh,
+           let aggLatest = await cache.latestTime(for: aggKey),
+           Self.isCacheFresh(latestMs: aggLatest, period: spec.periodCode),
+           await cacheCoversWindow(key: aggKey, periodSeconds: targetSeconds, count: count) {
+            return await cache.getBars(for: aggKey)
+        }
+
         let merged: [SwiftTrader.CandleBar]
         var partial: SwiftTrader.CandleBar?
-        // Cache-first on the SOURCE series. All periods sharing a source (e.g. D/4H/1H on
-        // ONE_HOUR; 3m/5m/15m/30m on ONE_MIN) reuse it — but only when the cached source
-        // is fresh AND reaches back far enough for `neededSource` bars. A Daily request
-        // (6000 1H) must not be served from a 1H chart's shallow 500-bar cache.
-        if let latest = await cache.latestTime(for: sourceKey),
-           Self.isCacheFresh(latestMs: latest, period: source),
-           await cacheCoversWindow(key: sourceKey, period: source, count: neededSource) {
+        if sourceFresh {
             merged = await cache.getBars(for: sourceKey)
         } else {
             let fetched = try await fetchRawCandles(
@@ -224,10 +243,12 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             partial = fetched.last.flatMap { $0.partial ? $0 : nil }
         }
 
-        let aggregated = spec.bucket(merged, partial)
-        let aggKey = CandleCache.CacheKey(
-            instrument: instrument, period: spec.periodCode, source: .aggregated
-        )
+        // Aggregate only the recent `neededSource` bars, not the entire (possibly years-deep,
+        // prefetched) source cache. Otherwise every chart re-runs per-bar NY-calendar bucket
+        // math over ~12k source bars at startup — the dominant CPU cost. Scroll-back fills
+        // older buckets on demand via fetchEarlierAggregated.
+        let window = merged.count > neededSource ? Array(merged.suffix(neededSource)) : merged
+        let aggregated = spec.bucket(window, partial)
         let cached = await cache.merge(aggregated, for: aggKey)
         if let last = aggregated.last, last.partial { return cached + [last] }
         return cached
@@ -285,11 +306,10 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// fetch itself would request, so once that window is filled the gate stays satisfied
     /// (weekend gaps make the bar count smaller than `count`, so a count-based test would
     /// refetch forever). Unknown periods (no `CandlePeriod`) report "not covered".
-    private func cacheCoversWindow(key: CandleCache.CacheKey, period: String, count: Int) async -> Bool {
-        guard let earliest = await cache.earliestTime(for: key),
-              let seconds = CandlePeriod.parse(period)?.seconds else { return false }
+    private func cacheCoversWindow(key: CandleCache.CacheKey, periodSeconds: Int64, count: Int) async -> Bool {
+        guard let earliest = await cache.earliestTime(for: key) else { return false }
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let windowStartMs = nowMs - Int64(count) * seconds * 1000
+        let windowStartMs = nowMs - Int64(count) * periodSeconds * 1000
         // After weekend-filler stripping the oldest real bar can sit a closure (weekend or
         // holiday) past the requested window start even when fully fetched, so allow ~4 days
         // of slack. A genuinely too-shallow cache misses by weeks/months and still refetches.

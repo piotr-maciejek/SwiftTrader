@@ -485,10 +485,15 @@ final class ChartViewModel {
                 let tradingDaysNeeded = self.atrPeriod + 2
                 let calendarDays = Int(ceil(Double(tradingDaysNeeded) * 7.0 / 5.0))
                 let count = calendarDays * 24
-                let hourlyBars = try await coordinator.fetchCandles(
+                let fetched = try await coordinator.fetchCandles(
                     instrument: instrument, period: "ONE_HOUR", count: count
                 )
                 guard !Task.isCancelled, instrument == currentInstrument else { return }
+                // The cache can hold years of deep 1H history (the background prefetcher warms
+                // it), but ATR only needs the recent window. Slice to the newest `count` bars
+                // so the per-bar Calendar math in TradingDayATR stays cheap regardless of how
+                // deep the cache is — otherwise every chart re-scans ~12k bars on each load.
+                let hourlyBars = fetched.count > count ? Array(fetched.suffix(count)) : fetched
                 if let result = TradingDayATR.compute(from: hourlyBars, instrument: instrument, period: self.atrPeriod) {
                     atrValue = result.atr
                     atrPips = result.pips

@@ -130,8 +130,11 @@ public final class SRP6ClientSession {
     // MARK: - Internals (visible for testing)
 
     static func generatePrivateValue(N: BigUInt) -> BigUInt {
-        let minBits = max(256, N.bitWidth)
-        let byteCount = (minBits + 7) / 8
+        // RFC 5054 §3: the client private exponent `a` SHOULD be at least 256 bits. Sizing it
+        // to the full width of N (Dukascopy uses a 4096-bit group) makes `g^a mod N` ~16x
+        // slower for ZERO security gain — the server only ever sees `A = g^a mod N`, never `a`.
+        // A 256-bit exponent is the standard choice and keeps auth fast.
+        let byteCount = 256 / 8
         var raw = Data(count: byteCount)
         while true {
             _ = raw.withUnsafeMutableBytes { buf in
