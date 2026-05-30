@@ -6,6 +6,10 @@ protocol MarketDataProviding: Sendable {
     /// Native mode throttles this to protect its single socket + bulk CDN; server mode keeps
     /// the effectively-unbounded default (its own cache absorbs the burst).
     var maxConcurrentColdLoads: Int { get }
+    /// Seconds the chart should wait after a hard refresh (cache wipe + reconnect) before
+    /// reloading. Server mode needs ~12s for JForex to restart; native mode does no
+    /// reconnect, so the chart can reload immediately.
+    var hardRefreshGraceSeconds: TimeInterval { get }
     func fetchInstruments() async throws -> [String]
     func fetchCandles(instrument: String, period: String, count: Int, rebucketing: Bool) async throws -> [CandleBar]
     func fetchEarlierCandles(instrument: String, period: String, count: Int, rebucketing: Bool) async throws -> [CandleBar]
@@ -18,6 +22,9 @@ protocol MarketDataProviding: Sendable {
 extension MarketDataProviding {
     /// Server mode (and any provider that doesn't opt in) loads grid cells unthrottled.
     var maxConcurrentColdLoads: Int { .max }
+    /// Server mode defaults — overridden by native (instant) and any provider with
+    /// a different reconnect cycle.
+    var hardRefreshGraceSeconds: TimeInterval { 12 }
 
     // Convenience defaults so existing tests that pass `rebucketing: false` implicitly keep working.
     func fetchCandles(instrument: String, period: String, count: Int) async throws -> [CandleBar] {

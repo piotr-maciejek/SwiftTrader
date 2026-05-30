@@ -336,14 +336,25 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         }
     }
 
+    /// Standalone has a single shared disk cache (no JForex-server cache to purge
+    /// remotely), so a "hard refresh" wipes both layers here: disk plist + in-memory
+    /// for the instrument, plus the in-progress candle snapshot the live-bar seed
+    /// would otherwise reuse for up to 30s. The session itself isn't reconnected —
+    /// that would kill every other chart's live tick feed, and a healthy session
+    /// re-fetching after a clean cache is what actually fixes a gap.
     func clearServerCache(instrument: String) async throws -> Int {
         await cache.clear(instrument: instrument)
+        await inProgressStore.clear(instrument)
         return 0
     }
 
-    func forceReconnect() async throws {
-        throw NativeProviderError.notImplemented("reconnect")
-    }
+    /// Intentional no-op: see `clearServerCache`. The session stays up; the cache
+    /// wipe above is what gives the user a recovery action.
+    func forceReconnect() async throws {}
+
+    /// Server mode waits ~12s for the JForex restart cycle; native has no
+    /// reconnect step, so the chart can reload immediately after the cache wipe.
+    var hardRefreshGraceSeconds: TimeInterval { 0 }
 
     // MARK: - Client-side aggregation
 
@@ -496,11 +507,13 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         return earliest <= windowStartMs + closureSlackMs
     }
 
-    /// Bridges a raw history request to `DukascopySession.fetchHistory`: computes the
+    /// Bridges a raw history request to `DukascopySession.fetchHistoryDetailed`: computes the
     /// `[start, end]` window and maps `DukascopyClient.CandleBar` → `SwiftTrader.CandleBar`.
     /// History is fetched on the **Bid** side to match server mode. The newest bar is
     /// flagged `partial` only when its bucket hasn't closed (the live-forming candle);
-    /// scroll-back windows (`before` set) never trip it.
+    /// scroll-back windows (`before` set) never trip it. A non-empty `missingWindows`
+    /// on the result is logged as a warning — the gap-detection / recovery pass picks
+    /// these up via `CandleCache.findGaps` rather than the call-site retrying inline.
     private static func fetchViaSession(
         _ session: DukascopySession,
         instrument: String, period: String, count: Int, before: Int64?
@@ -514,15 +527,18 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         let wireInstrument = Self.toSlashedPair(instrument)
         nativeLog.debug("history \(instrument, privacy: .public) \(period, privacy: .public) count=\(count) before=\(before ?? -1)")
         do {
-            let raw = try await session.fetchHistory(
+            let result = try await session.fetchHistoryDetailed(
                 instrument: wireInstrument, side: .bid, period: cp,
                 startSeconds: startSec, endSeconds: endSec
             )
             let ms = Int(Date().timeIntervalSince(t0) * 1000)
-            nativeLog.debug("history \(instrument, privacy: .public) \(period, privacy: .public) -> \(raw.count) bars in \(ms)ms")
+            nativeLog.debug("history \(instrument, privacy: .public) \(period, privacy: .public) -> \(result.bars.count) bars in \(ms)ms (missing=\(result.missingWindows.count))")
+            if !result.isComplete {
+                nativeLog.warning("history \(instrument, privacy: .public) \(period, privacy: .public) PARTIAL: \(result.missingWindows.count) window(s) still missing after retry")
+            }
             let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
             let periodMs = cp.seconds * 1000
-            return raw
+            return result.bars
                 .sorted { $0.timeMillis < $1.timeMillis }
                 .map { bar in
                     SwiftTrader.CandleBar(
@@ -768,6 +784,14 @@ actor InProgressStore {
         guard let s = byInstrument[instrument],
               Date().timeIntervalSince(s.fetchedAt) < ttl else { return nil }
         return s
+    }
+
+    /// Drop the cached snapshot for one instrument so the next live-bar seed
+    /// re-fetches from the server. Used by hard refresh to ensure a wiped chart
+    /// doesn't immediately repopulate the just-cleared 4H/Daily live bar from a
+    /// stale in-progress snapshot.
+    func clear(_ instrument: String) {
+        byInstrument.removeValue(forKey: instrument)
     }
 
     /// Run `work` once per instrument even under burst arrival: concurrent callers

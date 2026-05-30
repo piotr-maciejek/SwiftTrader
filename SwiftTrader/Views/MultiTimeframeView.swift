@@ -46,21 +46,42 @@ struct MultiTimeframeView: View {
 
                 Spacer()
 
-                Button(action: { vm.refreshCache() }) {
-                    Group {
-                        if vm.isRefreshingCache {
-                            ProgressView().controlSize(.mini)
-                        } else {
-                            Image(systemName: "arrow.clockwise.circle")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
+                // Match the chart-toolbar pattern: server mode shows a soft button;
+                // native mode collapses to a single orange "hard" refresh since the
+                // disk cache is the only cache.
+                if AppSettings.shared.dataProvider == .server {
+                    Button(action: { vm.refreshCache() }) {
+                        Group {
+                            if vm.isRefreshingCache {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "arrow.clockwise.circle")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
+                        .frame(width: 12, height: 12)
                     }
-                    .frame(width: 12, height: 12)
+                    .buttonStyle(.borderless)
+                    .disabled(vm.isRefreshingCache)
+                    .help("Refresh cache for \(formatInstrument(instrument)) \(label)")
+                } else {
+                    Button(action: { vm.hardRefresh() }) {
+                        Group {
+                            if vm.isRefreshingCache {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "arrow.clockwise.circle.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                        .frame(width: 12, height: 12)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(vm.isRefreshingCache)
+                    .help("Refresh — wipe local cache for \(formatInstrument(instrument)) \(label) and re-fetch")
                 }
-                .buttonStyle(.borderless)
-                .disabled(vm.isRefreshingCache)
-                .help("Refresh cache for \(formatInstrument(instrument)) \(label)")
 
                 Circle()
                     .fill(vm.isConnected ? .green : (vm.bars.isEmpty ? .red : .yellow))

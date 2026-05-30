@@ -102,31 +102,42 @@ struct CorrelationView: View {
 
                 Spacer()
 
-                Button(action: { vm.refreshCache() }) {
+                // Server mode: soft + hard. Native mode: one orange "hard" button only.
+                if AppSettings.shared.dataProvider == .server {
+                    Button(action: { vm.refreshCache() }) {
+                        Group {
+                            if vm.isRefreshingCache {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "arrow.clockwise.circle")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .frame(width: 12, height: 12)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(vm.isRefreshingCache)
+                    .help("Refresh cache for \(formatInstrument(instrument))")
+                }
+
+                Button(action: { vm.hardRefresh() }) {
                     Group {
-                        if vm.isRefreshingCache {
+                        if vm.isRefreshingCache && AppSettings.shared.dataProvider == .native {
                             ProgressView().controlSize(.mini)
                         } else {
-                            Image(systemName: "arrow.clockwise.circle")
+                            Image(systemName: "arrow.clockwise.circle.fill")
                                 .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.orange)
                         }
                     }
                     .frame(width: 12, height: 12)
                 }
                 .buttonStyle(.borderless)
                 .disabled(vm.isRefreshingCache)
-                .help("Refresh cache for \(formatInstrument(instrument))")
-
-                Button(action: { vm.hardRefresh() }) {
-                    Image(systemName: "arrow.clockwise.circle.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.orange)
-                        .frame(width: 12, height: 12)
-                }
-                .buttonStyle(.borderless)
-                .disabled(vm.isRefreshingCache)
-                .help("Hard refresh — purge cache AND reconnect (~5–30s outage)")
+                .help(AppSettings.shared.dataProvider == .native
+                    ? "Refresh — wipe local cache for \(formatInstrument(instrument)) and re-fetch"
+                    : "Hard refresh — purge cache AND reconnect (~5–30s outage)")
 
                 Circle()
                     .fill(vm.isConnected ? .green : (vm.bars.isEmpty ? .red : .yellow))

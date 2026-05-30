@@ -155,9 +155,10 @@ public actor DukascopySession {
 
     // MARK: - History
 
-    /// Fetch historical candles for `[startSeconds, endSeconds]`. Sends a candle
-    /// subscribe request and reassembles the chunked `CandleHistoryGroup` response
-    /// (correlated by request id) into bars.
+    /// Fetch historical candles for `[startSeconds, endSeconds]`. Returns just the bars
+    /// the call produced — failed bulk chunks are surfaced via `fetchHistoryDetailed`,
+    /// not lost silently. Callers that need the gap list (cache layer, gap-recovery)
+    /// should call `fetchHistoryDetailed` directly.
     public func fetchHistory(
         instrument: String,
         side: OfferSide = .bid,
@@ -166,11 +167,31 @@ public actor DukascopySession {
         endSeconds: Int64,
         idleTimeout: TimeInterval = 120
     ) async throws -> [CandleBar] {
+        try await fetchHistoryDetailed(
+            instrument: instrument, side: side, period: period,
+            startSeconds: startSeconds, endSeconds: endSeconds, idleTimeout: idleTimeout
+        ).bars
+    }
+
+    /// Like `fetchHistory`, but returns a `HistoryResult` whose `missingWindows` lists
+    /// any bulk chunks that still couldn't be downloaded after an inner retry pass.
+    /// When `missingWindows` is empty the result is complete; otherwise the caller
+    /// should either retry later or avoid caching `bars` as authoritative — the gap
+    /// would otherwise be stored on disk and never noticed.
+    public func fetchHistoryDetailed(
+        instrument: String,
+        side: OfferSide = .bid,
+        period: CandlePeriod,
+        startSeconds: Int64,
+        endSeconds: Int64,
+        idleTimeout: TimeInterval = 120
+    ) async throws -> HistoryResult {
         do {
-            return try await subscribeHistory(
+            let bars = try await subscribeHistory(
                 instrument: instrument, side: side, period: period,
                 startSeconds: startSeconds, endSeconds: endSeconds, idleTimeout: idleTimeout
             )
+            return HistoryResult(bars: bars)
         } catch let e as ErrorResponse {
             // The socket only caches a recent window and rejects a request reaching before
             // it with "data not in cache" (reporting the range it *does* have). Serve the
@@ -191,16 +212,24 @@ public actor DukascopySession {
                 bulkEndSeconds = min(endSeconds, cacheStart)
             }
             var bulkBars: [CandleBar] = []
+            var missing: [HistoryWindow] = []
             if startSeconds < bulkEndSeconds {
-                bulkBars = await fetchBulkHistory(
+                let result = await fetchBulkHistory(
                     instrument: instrument, side: side, period: period,
                     fromMs: startSeconds * 1000, toMs: bulkEndSeconds * 1000
                 )
+                bulkBars = result.bars
+                missing = result.failedChunks.map {
+                    HistoryWindow(fromMs: $0.chunkStartMs, toMs: $0.chunkEndMs)
+                }
             }
             let combined = Self.dedupSorted(bulk: bulkBars, socket: socketBars)
-            if combined.isEmpty { throw e }
+            if combined.isEmpty, missing.isEmpty { throw e }
+            if !missing.isEmpty {
+                log.warning("fetchHistory \(instrument, privacy: .public) PARTIAL: \(combined.count) bars, \(missing.count) chunk(s) still missing after retry")
+            }
             log.debug("fetchHistory \(instrument, privacy: .public) deep: \(socketBars.count) socket + \(bulkBars.count) bulk = \(combined.count)")
-            return combined
+            return HistoryResult(bars: combined, missingWindows: missing)
         }
     }
 
@@ -256,22 +285,43 @@ public actor DukascopySession {
     }
 
     /// Deep history from the bulk server (the part older than the socket's warm window).
-    /// Returns [] when no history URL was parsed or the period isn't a basic downloadable
-    /// one (1m/1H/Daily) — non-basic periods are built from those by the caller.
+    /// Returns empty bars + empty failedChunks when no history URL was parsed or the period
+    /// isn't a basic downloadable one (1m/1H/Daily) — non-basic periods are built from those
+    /// by the caller. Failed chunks get a single inner retry pass before surfacing; anything
+    /// still missing comes back via `failedChunks` so the caller knows the result is partial.
     private func fetchBulkHistory(
         instrument: String, side: OfferSide, period: CandlePeriod, fromMs: Int64, toMs: Int64
-    ) async -> [CandleBar] {
-        guard let historyServerURL else { return [] }
+    ) async -> BulkHistoryClient.BulkResult {
+        guard let historyServerURL else {
+            return BulkHistoryClient.BulkResult(bars: [], failedChunks: [])
+        }
         let pip = InstrumentPipValue.pipValue(for: instrument)
+        let first: BulkHistoryClient.BulkResult
         do {
-            return try await bulkClient.fetchCandles(
+            first = try await bulkClient.fetchCandles(
                 instrument: instrument, side: side, period: period,
                 fromMs: fromMs, toMs: toMs, historyServerURL: historyServerURL, pipValue: pip
             )
         } catch {
             log.error("bulk history failed for \(instrument, privacy: .public): \(String(describing: error), privacy: .public)")
-            return []
+            return BulkHistoryClient.BulkResult(bars: [], failedChunks: [])
         }
+        guard !first.failedChunks.isEmpty else { return first }
+        // One inner retry pass so a flaky moment doesn't become a permanent cached gap.
+        log.info("bulk history \(instrument, privacy: .public): retrying \(first.failedChunks.count) failed chunk(s)")
+        let retry: BulkHistoryClient.BulkResult
+        do {
+            retry = try await bulkClient.retryChunks(
+                first.failedChunks, historyServerURL: historyServerURL, pipValue: pip
+            )
+        } catch {
+            log.error("bulk history retry failed for \(instrument, privacy: .public): \(String(describing: error), privacy: .public)")
+            return first   // keep the partial result + surface the failures
+        }
+        return BulkHistoryClient.BulkResult(
+            bars: Self.dedupSorted(bulk: first.bars, socket: retry.bars),
+            failedChunks: retry.failedChunks
+        )
     }
 
     /// Merges bulk + socket bars by timestamp, socket winning on overlap (fresher).

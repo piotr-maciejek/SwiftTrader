@@ -32,9 +32,18 @@ public struct BulkHistoryClient: Sendable {
         self.maxConcurrent = maxConcurrent
     }
 
+    /// A fetch's outcome including any chunks that failed transiently. The session
+    /// retries `failedChunks` once more before surfacing them as `HistoryResult.missingWindows`.
+    public struct BulkResult: Sendable {
+        public let bars: [CandleBar]
+        public let failedChunks: [ChunkDescriptor]
+    }
+
     /// Fetches candles for a basic `period` over `[fromMs, toMs]` by downloading every
-    /// chunk file spanning the range, decoding each, and clipping to the window. Chunks
-    /// that 404 or come back empty (weekends, before listing, future) are skipped.
+    /// chunk file spanning the range. Chunks that 404 or return empty data are treated
+    /// as "no data" (weekends, before listing, future). Chunks that fail transiently
+    /// (network/timeout, 5xx after retries) are reported in `failedChunks` so the caller
+    /// can retry them or surface the gap — rather than silently returning a partial result.
     public func fetchCandles(
         instrument: String,
         side: OfferSide,
@@ -43,41 +52,81 @@ public struct BulkHistoryClient: Sendable {
         toMs: Int64,
         historyServerURL: String,
         pipValue: Double
-    ) async throws -> [CandleBar] {
-        guard fromMs < toMs else { return [] }
+    ) async throws -> BulkResult {
+        guard fromMs < toMs else { return BulkResult(bars: [], failedChunks: []) }
         let base = historyServerURL.hasSuffix("/") ? String(historyServerURL.dropLast()) : historyServerURL
         let descriptors = try Self.chunkDescriptors(
             instrument: instrument, side: side, period: period, fromMs: fromMs, toMs: toMs
         )
-        guard !descriptors.isEmpty else { return [] }
+        guard !descriptors.isEmpty else { return BulkResult(bars: [], failedChunks: []) }
+        return try await fetchChunks(
+            descriptors: descriptors, base: base, pipValue: pipValue, fromMs: fromMs, toMs: toMs
+        )
+    }
 
+    /// Re-attempts a list of previously-failed chunks. Used by the session as a single
+    /// inner retry pass before surfacing remaining failures via `missingWindows`. Same
+    /// concurrency cap and per-chunk retry budget as the initial pass.
+    public func retryChunks(
+        _ failed: [ChunkDescriptor],
+        historyServerURL: String,
+        pipValue: Double
+    ) async throws -> BulkResult {
+        guard !failed.isEmpty else { return BulkResult(bars: [], failedChunks: []) }
+        let base = historyServerURL.hasSuffix("/") ? String(historyServerURL.dropLast()) : historyServerURL
+        return try await fetchChunks(
+            descriptors: failed, base: base, pipValue: pipValue,
+            fromMs: failed.map(\.chunkStartMs).min() ?? Int64.min,
+            toMs: failed.map(\.chunkEndMs).max() ?? Int64.max
+        )
+    }
+
+    private func fetchChunks(
+        descriptors: [ChunkDescriptor], base: String, pipValue: Double,
+        fromMs: Int64, toMs: Int64
+    ) async throws -> BulkResult {
         // Download chunks with a bounded number of concurrent requests, preserving order.
-        var perChunk = [[CandleBar]](repeating: [], count: descriptors.count)
-        try await withThrowingTaskGroup(of: (Int, [CandleBar]).self) { group in
+        var perChunk = [ChunkOutcome](repeating: .bars([]), count: descriptors.count)
+        try await withThrowingTaskGroup(of: (Int, ChunkOutcome).self) { group in
             var next = 0
             func schedule(_ i: Int) {
                 let d = descriptors[i]
                 let urlString = "\(base)/\(d.relativePath)"
                 group.addTask {
-                    let bars = try await Self.fetchOne(
+                    let outcome = try await Self.fetchOne(
                         urlString: urlString, chunkStartMs: d.chunkStartMs,
                         pipValue: pipValue, session: urlSession
                     )
-                    return (i, bars)
+                    return (i, outcome)
                 }
             }
             for _ in 0..<min(maxConcurrent, descriptors.count) { schedule(next); next += 1 }
-            while let (idx, bars) = try await group.next() {
-                perChunk[idx] = bars
+            while let (idx, outcome) = try await group.next() {
+                perChunk[idx] = outcome
                 if next < descriptors.count { schedule(next); next += 1 }
             }
         }
 
-        // Flatten (already in chunk order), clip to the window, ensure ascending.
-        let bars = perChunk.flatMap { $0 }
+        var bars: [CandleBar] = []
+        var failedChunks: [ChunkDescriptor] = []
+        for (i, outcome) in perChunk.enumerated() {
+            switch outcome {
+            case .bars(let chunkBars): bars.append(contentsOf: chunkBars)
+            case .failed: failedChunks.append(descriptors[i])
+            }
+        }
+        // Already in chunk order; clip to the window, ensure ascending.
+        bars = bars
             .filter { $0.timeMillis >= fromMs && $0.timeMillis <= toMs }
             .sorted { $0.timeMillis < $1.timeMillis }
-        return bars
+        return BulkResult(bars: bars, failedChunks: failedChunks)
+    }
+
+    /// Per-chunk result. `.bars([])` means "this chunk genuinely has no data" (404,
+    /// empty response, weekend); `.failed` means "we couldn't determine — try again."
+    private enum ChunkOutcome {
+        case bars([CandleBar])
+        case failed(String)
     }
 
     // MARK: - One chunk
@@ -85,11 +134,11 @@ public struct BulkHistoryClient: Sendable {
     private static func fetchOne(
         urlString: String, chunkStartMs: Int64, pipValue: Double, session: URLSession,
         maxAttempts: Int = 3
-    ) async throws -> [CandleBar] {
+    ) async throws -> ChunkOutcome {
         guard let url = URL(string: urlString) else { throw BulkError.badURL(urlString) }
         var attempt = 1
         while true {
-            if Task.isCancelled { return [] }
+            if Task.isCancelled { return .bars([]) }
             var request = URLRequest(url: url)
             request.timeoutInterval = 30
             let data: Data
@@ -97,20 +146,21 @@ public struct BulkHistoryClient: Sendable {
             do {
                 (data, response) = try await session.data(for: request)
             } catch {
-                // Transient network error (usually a timeout while the cold-start grid is
-                // downloading many chunks). A silently-dropped chunk surfaces as a chart
-                // gap, so retry a few times before giving up.
+                // Transient network error (usually a timeout during a cold-start grid
+                // fetching many chunks at once). Retry a few times; if it still fails,
+                // surface the chunk as `.failed` so the caller can refetch or flag the
+                // gap — rather than silently dropping it.
                 if attempt < maxAttempts, !Task.isCancelled {
                     try? await Task.sleep(for: .milliseconds(400 * attempt))
                     attempt += 1
                     continue
                 }
                 log.error("bulk chunk fetch error \(urlString, privacy: .public) after \(attempt) attempts: \(error.localizedDescription, privacy: .public)")
-                return []
+                return .failed("network: \(error.localizedDescription)")
             }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if status == 200 {
-                guard !data.isEmpty else { return [] }   // empty = no data for this chunk
+                guard !data.isEmpty else { return .bars([]) }   // empty = no data for this chunk
                 let raw: Data
                 do {
                     raw = try LZMA.decompress(data: data)
@@ -120,16 +170,21 @@ public struct BulkHistoryClient: Sendable {
                 guard raw.count % 24 == 0 else {
                     throw BulkError.decodeFailed("\(urlString): \(raw.count) bytes not a multiple of 24")
                 }
-                return decodeCandles(raw, chunkStartMs: chunkStartMs, pipValue: pipValue)
+                return .bars(decodeCandles(raw, chunkStartMs: chunkStartMs, pipValue: pipValue))
             }
-            // 5xx / 429 are transient (server busy under load) — retry. 404 / other non-200
-            // mean the chunk genuinely isn't there (weekend, before listing, future) — skip.
-            if (status >= 500 || status == 429), attempt < maxAttempts {
-                try? await Task.sleep(for: .milliseconds(400 * attempt))
-                attempt += 1
-                continue
+            // 5xx / 429 are transient (server busy under load) — retry, then surface as
+            // .failed if we still can't get through. 404 / other non-200 mean the chunk
+            // genuinely isn't there (weekend, before listing, future) — treat as no data.
+            if (status >= 500 || status == 429) {
+                if attempt < maxAttempts {
+                    try? await Task.sleep(for: .milliseconds(400 * attempt))
+                    attempt += 1
+                    continue
+                }
+                log.error("bulk chunk \(urlString, privacy: .public) status=\(status) after \(attempt) attempts")
+                return .failed("status \(status)")
             }
-            return []
+            return .bars([])
         }
     }
 
@@ -162,9 +217,16 @@ public struct BulkHistoryClient: Sendable {
 
     // MARK: - Chunk enumeration
 
-    struct ChunkDescriptor: Equatable {
-        let relativePath: String
-        let chunkStartMs: Int64
+    public struct ChunkDescriptor: Sendable, Equatable {
+        public let relativePath: String
+        public let chunkStartMs: Int64
+        public let chunkEndMs: Int64
+
+        public init(relativePath: String, chunkStartMs: Int64, chunkEndMs: Int64) {
+            self.relativePath = relativePath
+            self.chunkStartMs = chunkStartMs
+            self.chunkEndMs = chunkEndMs
+        }
     }
 
     private static let gmt = TimeZone(identifier: "GMT")!
@@ -211,11 +273,12 @@ public struct BulkHistoryClient: Sendable {
             case .month: path = "\(instr)/\(year)/\(mm0)/\(sideStr)_candles_\(token).bi5"
             default:     path = "\(instr)/\(year)/\(sideStr)_candles_\(token).bi5"
             }
+            guard let advanced = cal.date(byAdding: unit, value: 1, to: cursor) else { break }
             out.append(ChunkDescriptor(
                 relativePath: path,
-                chunkStartMs: Int64(cursor.timeIntervalSince1970 * 1000)
+                chunkStartMs: Int64(cursor.timeIntervalSince1970 * 1000),
+                chunkEndMs: Int64(advanced.timeIntervalSince1970 * 1000)
             ))
-            guard let advanced = cal.date(byAdding: unit, value: 1, to: cursor) else { break }
             cursor = advanced
         }
         return out

@@ -325,11 +325,13 @@ final class ChartViewModel {
                 loadingStatus = nil
                 return
             }
-            // The server's scheduleReconnect uses a ~10s delay, plus a few
-            // seconds for the LIVE direct-connect handshake and strategy init.
-            // Sleeping past that window means the chart's first history
+            // Server mode: wait past the JForex restart cycle (~10s scheduleReconnect
+            // delay + LIVE handshake + strategy init) so the chart's first history
             // request hits a ready strategy instead of cycling through 503s.
-            try? await Task.sleep(for: .seconds(12))
+            // Native mode: no reconnect, so this resolves to zero — see
+            // `MarketDataProviding.hardRefreshGraceSeconds`.
+            let grace = coordinator.hardRefreshGraceSeconds
+            if grace > 0 { try? await Task.sleep(for: .seconds(grace)) }
             reloadChart()
         }
     }

@@ -480,31 +480,44 @@ struct ContentView: View {
 
             Divider().frame(height: 16)
 
-            Button(action: { vm.refreshCache() }) {
+            // Server mode has two layers (client cache + JForex/.bi5 cache) so the
+            // light-weight soft refresh is useful. Native mode has a single shared
+            // disk cache, so the soft button is redundant — one orange button only.
+            if provider == .server {
+                Button(action: { vm.refreshCache() }) {
+                    Group {
+                        if vm.isRefreshingCache {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "arrow.clockwise.circle")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .frame(width: 16, height: 16)
+                }
+                .buttonStyle(.borderless)
+                .disabled(vm.isRefreshingCache)
+                .help("Refresh — drop the local chart cache and re-fetch from the server")
+            }
+
+            Button(action: { vm.hardRefresh() }) {
                 Group {
-                    if vm.isRefreshingCache {
+                    if vm.isRefreshingCache && provider == .native {
                         ProgressView().controlSize(.mini)
                     } else {
-                        Image(systemName: "arrow.clockwise.circle")
+                        Image(systemName: "arrow.clockwise.circle.fill")
                             .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.orange)
                     }
                 }
                 .frame(width: 16, height: 16)
             }
             .buttonStyle(.borderless)
             .disabled(vm.isRefreshingCache)
-            .help("Refresh — drop the local chart cache and re-fetch from the server")
-
-            Button(action: { vm.hardRefresh() }) {
-                Image(systemName: "arrow.clockwise.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
-                    .frame(width: 16, height: 16)
-            }
-            .buttonStyle(.borderless)
-            .disabled(vm.isRefreshingCache)
-            .help("Hard refresh — purge server cache AND force JForex to reconnect (~5–30s outage on all charts)")
+            .help(provider == .native
+                ? "Refresh — wipe local cache for this instrument and re-fetch from Dukascopy"
+                : "Hard refresh — purge server cache AND force JForex to reconnect (~5–30s outage on all charts)")
         }
         .padding(.horizontal)
         .padding(.vertical, 8)

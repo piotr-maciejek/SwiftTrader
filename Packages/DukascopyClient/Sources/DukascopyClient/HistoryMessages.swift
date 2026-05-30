@@ -55,6 +55,35 @@ public struct CandleBar: Sendable {
     }
 }
 
+/// Half-open epoch-ms window `[fromMs, toMs)`. Used to describe a bulk-history chunk
+/// that could not be downloaded after all retries, so the caller can decide whether
+/// to accept the partial result, refetch later, or flag the cache as incomplete.
+public struct HistoryWindow: Sendable, Equatable {
+    public let fromMs: Int64
+    public let toMs: Int64
+
+    public init(fromMs: Int64, toMs: Int64) {
+        self.fromMs = fromMs
+        self.toMs = toMs
+    }
+}
+
+/// Result of a `DukascopySession.fetchHistory` call. `bars` is what we got;
+/// `missingWindows` is non-empty when bulk chunks failed transiently and couldn't be
+/// recovered — the caller should treat `bars` as partial and schedule a refetch for
+/// those windows rather than caching the response as complete.
+public struct HistoryResult: Sendable {
+    public let bars: [CandleBar]
+    public let missingWindows: [HistoryWindow]
+
+    public init(bars: [CandleBar], missingWindows: [HistoryWindow] = []) {
+        self.bars = bars
+        self.missingWindows = missingWindows
+    }
+
+    public var isComplete: Bool { missingWindows.isEmpty }
+}
+
 // MARK: - Request
 
 public struct CandleSubscribeRequest: Sendable {
