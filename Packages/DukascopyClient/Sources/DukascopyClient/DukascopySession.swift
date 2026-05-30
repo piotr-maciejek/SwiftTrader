@@ -74,6 +74,12 @@ public actor DukascopySession {
     // when a CurrencyMarket message arrives. Consumers filter to the instruments they care
     // about. Removed on stream termination so this dictionary stays bounded.
     private var tickStreams: [UUID: AsyncStream<CurrencyMarket>.Continuation] = [:]
+    /// Debounce flag for the silent-DDS watchdog: when a fetchHistory idle-times-out
+    /// every subsequent fetchHistory is hung on the same wedged channel, so we trigger
+    /// a forced reconnect — but multiple in-flight requests hitting their timeouts
+    /// simultaneously must collapse to a single rebuild cycle, not stack on each other.
+    private var reconnectInProgress = false
+
     /// Slashed instrument names currently subscribed for quote ticks. Mutated only on
     /// `subscribeQuotes` (which sends the full set to the server) so `ensureSubscribed`
     /// can compute additions and skip the round-trip when nothing new is needed.
@@ -153,6 +159,32 @@ public actor DukascopySession {
         state = .disconnected
     }
 
+    /// Tear down the current transport and rebuild the session in-place — used by the
+    /// history-idle watchdog when the DDS channel goes silent (heartbeats still flowing,
+    /// but every fetchHistory hangs without ever receiving its first chunk). Existing
+    /// tick-stream consumers stay registered through the cycle; previously-subscribed
+    /// quotes are re-issued after the new INIT so live ticks flow again. Debounced so
+    /// concurrent watchdog triggers from multiple in-flight requests collapse to one
+    /// rebuild.
+    public func reconnect() async throws {
+        if reconnectInProgress {
+            log.info("reconnect: already in progress, skipping duplicate trigger")
+            return
+        }
+        reconnectInProgress = true
+        defer { reconnectInProgress = false }
+        log.info("reconnect: tearing down session for forced rebuild")
+        let toResubscribe = subscribedQuotes
+        subscribedQuotes = []
+        await teardown()
+        state = .disconnected
+        try await connect()
+        if !toResubscribe.isEmpty {
+            log.info("reconnect: re-subscribing \(toResubscribe.count) quote(s) after rebuild")
+            try await subscribeQuotes(instruments: toResubscribe)
+        }
+    }
+
     // MARK: - History
 
     /// Fetch historical candles for `[startSeconds, endSeconds]`. Returns just the bars
@@ -165,7 +197,7 @@ public actor DukascopySession {
         period: CandlePeriod,
         startSeconds: Int64,
         endSeconds: Int64,
-        idleTimeout: TimeInterval = 120
+        idleTimeout: TimeInterval = 30
     ) async throws -> [CandleBar] {
         try await fetchHistoryDetailed(
             instrument: instrument, side: side, period: period,
@@ -184,7 +216,7 @@ public actor DukascopySession {
         period: CandlePeriod,
         startSeconds: Int64,
         endSeconds: Int64,
-        idleTimeout: TimeInterval = 120
+        idleTimeout: TimeInterval = 30
     ) async throws -> HistoryResult {
         do {
             let bars = try await subscribeHistory(
@@ -434,9 +466,21 @@ public actor DukascopySession {
 
     private func timeoutHistory(_ reqId: String) {
         guard let cont = pendingHistory[reqId]?.continuation else { return }
-        log.error("fetchHistory req=\(reqId, privacy: .public) idle-timed-out (no data)")
+        log.error("fetchHistory req=\(reqId, privacy: .public) idle-timed-out — DDS channel likely dead, triggering watchdog reconnect")
         pendingHistory[reqId] = nil
         cont.resume(throwing: SessionError.timedOut("history request (no data received)"))
+        // The DDS chart-data channel doesn't self-recover from this state: every
+        // subsequent fetchHistory hangs identically until the socket is rebuilt. Fire a
+        // reconnect now; the debounce flag inside `reconnect()` collapses simultaneous
+        // timeouts to one cycle. Caller's catch sees the .timedOut error and can retry —
+        // by the time it does, the rebuilt session is up and the retry succeeds.
+        Task { [weak self] in
+            do {
+                try await self?.reconnect()
+            } catch {
+                log.error("watchdog reconnect failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     /// Resolve a single pending history request with an error (e.g. a server error
