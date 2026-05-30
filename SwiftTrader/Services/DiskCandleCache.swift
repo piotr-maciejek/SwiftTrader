@@ -13,18 +13,9 @@ struct DiskCacheKey: Hashable, Sendable {
 
 /// On-disk layer for completed candle bars — one **packed-binary** file per
 /// `(instrument, period, source)`. The format is a fixed-size record stream (no `Codable`
-/// reflection), so decoding tens of thousands of bars is a tight `Data` loop instead of the
-/// slow `PropertyListDecoder` / generic-metadata path that pegged the CPU at startup.
-/// Writes are atomic; repeated saves for the same key coalesce via a per-key debounce.
-/// Legacy binary-plist files are still readable and are rewritten in the packed format on
-/// first access, so an existing on-disk cache migrates transparently.
+/// reflection), so decoding tens of thousands of bars is a tight `Data` loop. Writes are
+/// atomic; repeated saves for the same key coalesce via a per-key debounce.
 actor DiskCandleCache {
-    /// Legacy (Codable / binary-plist) on-disk shape. Kept only to migrate old files on read.
-    private struct CacheFile: Codable {
-        let version: Int
-        let bars: [CandleBar]
-    }
-
     // "SCB1" — SwiftTrader Candle Binary v1. A 4-byte magic, then N fixed records of
     // `recordSize` bytes: time(Int64) + open/high/low/close/volume(Double), little-endian.
     // Only non-partial bars are stored, so `partial` need not be persisted.
@@ -32,7 +23,6 @@ actor DiskCandleCache {
     private static let recordSize = 48
 
     private let directory: URL
-    private let legacyVersion = 1
     private let debounceInterval: TimeInterval
     private var pendingWrites: [DiskCacheKey: Task<Void, Never>] = [:]
     private var pendingBars: [DiskCacheKey: [CandleBar]] = [:]
@@ -48,22 +38,16 @@ actor DiskCandleCache {
         try? FileManager.default.createDirectory(at: resolved, withIntermediateDirectories: true)
     }
 
-    /// Load bars for a key from disk. Returns empty on missing/corrupt files. A legacy
-    /// binary-plist file is decoded once (reflection) and rewritten packed so the next load
-    /// is fast and reflection-free.
+    /// Load bars for a key from disk. Returns empty on missing/corrupt files (anything
+    /// whose header doesn't match the `SCB1` magic).
     func load(_ key: DiskCacheKey) -> [CandleBar] {
         let url = fileURL(for: key)
-        guard let data = try? Data(contentsOf: url) else { return [] }
-        if data.count >= Self.magic.count, data.prefix(Self.magic.count).elementsEqual(Self.magic) {
-            return Self.decodePacked(data)
-        }
-        // Legacy path: decode the old binary-plist once, then convert to packed on disk.
-        guard let file = try? PropertyListDecoder().decode(CacheFile.self, from: data),
-              file.version == legacyVersion else {
+        guard let data = try? Data(contentsOf: url),
+              data.count >= Self.magic.count,
+              data.prefix(Self.magic.count).elementsEqual(Self.magic) else {
             return []
         }
-        try? Self.encodePacked(file.bars).write(to: url, options: [.atomic])
-        return file.bars
+        return Self.decodePacked(data)
     }
 
     /// Save bars for a key to disk immediately. Drops any partial bars.
@@ -141,8 +125,8 @@ actor DiskCandleCache {
         pendingWrites.removeAll()
     }
 
-    /// File URL used for a key; exposed for testing. (Extension stays `.plist` for backward
-    /// compatibility with existing files; the contents are the packed binary format.)
+    /// File URL used for a key; exposed for testing. The `.plist` extension is historical
+    /// — existing on-disk caches use it, and the contents are the packed SCB1 binary format.
     nonisolated func fileURL(for key: DiskCacheKey) -> URL {
         let name = "\(Self.sanitize(key.instrument))-\(key.period).\(key.source.rawValue).plist"
         return directory.appendingPathComponent(name)
