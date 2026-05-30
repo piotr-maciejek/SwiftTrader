@@ -43,6 +43,37 @@ enum NYTradingCalendar {
         return false
     }
 
+    /// Whether `at` falls inside one of the two truly global FX-wide closures —
+    /// Christmas Day and New Year's Day. Every other "holiday" (Good Friday,
+    /// Independence Day, Thanksgiving, etc.) only closes one venue while London/
+    /// Tokyo/Sydney keep trading, so Dukascopy still publishes bars and we don't
+    /// want to call those slots a gap. NY-calendar-relative so a Christmas window
+    /// is the full local 24h regardless of DST.
+    static func isFXHoliday(at: Date) -> Bool {
+        let comps = calendar.dateComponents([.month, .day], from: at)
+        guard let m = comps.month, let d = comps.day else { return false }
+        if m == 12 && d == 25 { return true }   // Christmas Day
+        if m == 1  && d == 1  { return true }   // New Year's Day
+        return false
+    }
+
+    /// True iff every slot in `[fromMs, toMs]` (stepped hour-by-hour) is either a
+    /// weekend closure or a global FX holiday — i.e. no real trading window exists
+    /// inside the range. Used by gap detection to discard "gaps" that are nothing
+    /// but a Fri 17 ET → Sun 17 ET weekend, or a weekend extended by Dec 25 / Jan 1.
+    /// Early-exits on the first trading slot, so an unrelated 60-day gap takes ~hours
+    /// to first Monday morning, not 1440 iterations.
+    static func isClosedThroughout(fromMs: Int64, toMs: Int64) -> Bool {
+        guard fromMs <= toMs else { return true }
+        var t = fromMs
+        while t <= toMs {
+            let d = Date(timeIntervalSince1970: Double(t) / 1000)
+            if !isMarketClosed(at: d) && !isFXHoliday(at: d) { return false }
+            t += 3_600_000
+        }
+        return true
+    }
+
     /// Epoch ms of the newest bar that can possibly exist as of `at`: if the
     /// market is open, `at` itself; if closed, the Friday 17:00 ET that began
     /// the current weekend closure. Used to clamp the gap-fill target so the

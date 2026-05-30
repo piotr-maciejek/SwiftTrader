@@ -63,16 +63,24 @@ actor CandleCache {
     func hydrate() async {}
 
     /// Pull this key from disk into memory the first time it's touched. Loads at most one
-    /// file per key; subsequent accesses hit memory directly.
+    /// file per key; subsequent accesses hit memory directly. Bars with non-positive OHLC
+    /// (a transient Dukascopy boundary-filler bug we now filter at fetch time) are
+    /// dropped here and the cleaned set written back, so corrupted bars from a previous
+    /// run self-heal on next load instead of needing a manual hard refresh.
     private func ensureLoaded(_ key: CacheKey) async {
         guard let diskCache, store[key] == nil, !diskLoaded.contains(key) else { return }
         // Mark before the await so concurrent callers for the same key don't double-load.
         diskLoaded.insert(key)
         let diskKey = DiskCacheKey(instrument: key.instrument, period: key.period, source: key.source)
         let bars = await diskCache.load(diskKey)
+        let valid = bars.filter { $0.low > 0 && $0.high > 0 && $0.open > 0 && $0.close > 0 }
         // A merge may have populated the key while we were awaiting — don't clobber it.
-        if !bars.isEmpty, store[key] == nil {
-            store[key] = CacheEntry(bars: bars, lastAccess: .now)
+        if !valid.isEmpty, store[key] == nil {
+            store[key] = CacheEntry(bars: valid, lastAccess: .now)
+            // Persist the cleanup so subsequent launches don't re-filter the same bars.
+            if valid.count != bars.count {
+                scheduleDiskWrite(key: key, bars: valid)
+            }
         }
     }
 

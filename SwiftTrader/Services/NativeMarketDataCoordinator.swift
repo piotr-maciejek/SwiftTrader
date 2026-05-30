@@ -29,6 +29,12 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// connect — data calls then fail with `.missingCredentials`.
     private let session: DukascopySession?
     private let rawFetch: RawFetch
+    /// True when this coordinator has a real network path (session or injected closure).
+    /// Used to short-circuit proactive operations (forward gap-fill, prefetch) on the
+    /// stub coordinator that exists before standalone auth completes — without this,
+    /// every cached-data chart load before auth fires a noisy "missing credentials"
+    /// error from `forwardGapFillIfNeeded`.
+    private let canFetch: Bool
     private let coalescer = HistoryCoalescer(limit: 4)
     /// Per-instrument cache of the server's in-progress candle set (the wire path the
     /// JForex SDK uses internally for `getHistory().getBar(period, BID, 0)`). Re-fetched
@@ -49,14 +55,17 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         self.cache = cache
         if let rawFetch {
             self.rawFetch = rawFetch
+            self.canFetch = true
         } else if let session {
             self.rawFetch = { instrument, period, count, before in
                 try await Self.fetchViaSession(
                     session, instrument: instrument, period: period, count: count, before: before
                 )
             }
+            self.canFetch = true
         } else {
             self.rawFetch = { _, _, _, _ in throw NativeProviderError.missingCredentials }
+            self.canFetch = false
         }
 
         // The background prefetcher only makes sense against a live session. Its closures
@@ -109,6 +118,15 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         // (idempotent). It waits for foreground idle before each request, so it never
         // competes with the cells the user is actually looking at.
         await prefetcher?.ensureStarted()
+        // Forward gap-fill: when the app sat closed during a trading session (e.g.
+        // overnight, or for a few hours on Friday afternoon), the disk cache ends well
+        // before the last session close. `isCacheFresh` only decides "do we need a full
+        // refetch" — without a forward fill, a 5-hour-behind cache stays 5 hours behind
+        // every launch. Mirrors server mode's `MarketDataCoordinator.gapFill`. For
+        // aggregated targets (4H/Daily/3m/5m/15m/30m) we fill the SOURCE (1H or 1m) so
+        // the re-aggregation below builds on fresh data.
+        let sourcePeriod = Self.aggSpec(for: period)?.sourcePeriod ?? period
+        await forwardGapFillIfNeeded(instrument: instrument, period: sourcePeriod)
         // Native mode aggregates everything except the two periods the datafeed actually
         // stores (1H, 1m): 4H/Daily from 1H; 3m/5m/15m/30m from 1m. The datafeed has no
         // 5m/15m/30m candle files, so they MUST be built from 1m (exactly as JForex does).
@@ -174,6 +192,17 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                     if Task.isCancelled { break }
                     guard tick.instrument == wireInstrument else { continue }
                     guard let bid = tick.bestBid?.doubleValue else { continue }
+                    // FX is 24/5 — over Fri 17 ET → Sun 17 ET (and Dec 25 / Jan 1) any
+                    // tick that arrives is a stale "last quote" replay from Dukascopy.
+                    // Yielding it creates a flat partial bar (no in-progress snapshot
+                    // exists when market is closed, so `seedLiveBucket` falls back to
+                    // open=high=low=close=bid) that overwrites the real last-closed bar's
+                    // OHLC in the chart's display via `handleBar`'s same-timestamp swap.
+                    let nowDate = Date()
+                    if NYTradingCalendar.isMarketClosed(at: nowDate)
+                        || NYTradingCalendar.isFXHoliday(at: nowDate) {
+                        continue
+                    }
                     let bucketMs = Self.liveBucketStartMs(tickMs: tick.creationTimestampMillis, period: period)
                     if let c = current, c.time == bucketMs {
                         current = SwiftTrader.CandleBar(
@@ -418,7 +447,19 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
            let aggLatest = await cache.latestTime(for: aggKey),
            Self.isCacheFresh(latestMs: aggLatest, period: spec.periodCode),
            await cacheCoversWindow(key: aggKey, periodSeconds: targetSeconds, count: count) {
-            return await cache.getBars(for: aggKey)
+            // Also gate on "has the source produced any complete target-bucket beyond what
+            // we've already rolled up?" — without this, a forward gap-fill that brings 1m
+            // through Friday 22:59 still leaves the 15m cache ending at 22:30 (the last
+            // bucket produced before the previous session closed), because the
+            // freshness/coverage gates above accept it as current. Re-aggregate in that case.
+            let srcLatest = await cache.latestTime(for: sourceKey) ?? aggLatest
+            let nextBucketMs = aggLatest + targetSeconds * 1000
+            if srcLatest < nextBucketMs {
+                return await cache.getBars(for: aggKey)
+            }
+            nativeLog.info(
+                "fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): rebuilding — source advanced past agg latest by \((srcLatest - aggLatest) / 1000)s"
+            )
         }
 
         let merged: [SwiftTrader.CandleBar]
@@ -464,6 +505,80 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             instrument: instrument, period: spec.periodCode, source: .aggregated
         )
         return await cache.merge(aggregated, for: aggKey)
+    }
+
+    /// Pull any bars between the cache's latest and the most recent possible bar (the
+    /// last session close, since FX is 24/5). No-op when the cache is current. Skipped
+    /// for caches more than `forwardGapFillCap` bars behind — those land on the regular
+    /// fresh-fetch path via `isCacheFresh` instead of paging forever. Called at the top
+    /// of every `fetchCandles` (raw periods directly; aggregated targets fill the source
+    /// 1H/1m so the re-aggregation below builds on fresh data).
+    private func forwardGapFillIfNeeded(
+        instrument: String, period: String
+    ) async {
+        // Pre-auth (no session, no injected fetch) the stub `rawFetch` always throws —
+        // running it logs a misleading "missing credentials" error per call across all
+        // 28 default instruments. The live coordinator that gets built post-auth runs
+        // the fill for real.
+        guard canFetch else { return }
+        // Only the basic stored periods make sense to forward-fill — aggregated targets
+        // get fixed via their source. Unknown periods fall through.
+        guard let cp = CandlePeriod.parse(period) else { return }
+        let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server)
+        guard let latestMs = await cache.latestTime(for: key) else { return }
+        let cadenceMs = cp.seconds * 1000
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // Clamp expected-newest to the last session close — over a weekend that's Friday
+        // 17:00 ET, not "now," so a cache already at Friday close doesn't refetch.
+        let referenceMs = min(nowMs, NYTradingCalendar.lastSessionCloseMs(at: Date()))
+        let gapMs = referenceMs - latestMs
+        if gapMs <= cadenceMs { return }
+        // Bounded incremental fill. A 14-day window @ 1H = 336 bars; @ 1m = 20k — past
+        // that, let the staleness gate take over with a clean fetch instead.
+        let cap = Self.forwardGapFillCap(period: period)
+        let count = Int(gapMs / cadenceMs) + 2
+        guard count <= cap else { return }
+        // Anchor the fetch window to the last session close, NOT to "now." When the app
+        // launches over a weekend, "now" sits in closed time — the window
+        // [now − count·cadence, now] is entirely Sat/Sun, every returned bar is flagged
+        // by `stripWeekendFillers`, and we'd merge zero bars while observing
+        // `history ... -> N bars in Xms` in the log. `before = referenceMs + cadenceMs`
+        // gives us a window ending at the slot after the close, so the server returns
+        // the actual final-hour Friday bars we're missing.
+        let beforeMs = referenceMs + cadenceMs
+        nativeLog.info(
+            "forwardGapFill \(instrument, privacy: .public) \(period, privacy: .public): gap=\(gapMs / 1000)s, fetching count=\(count) before=\(beforeMs)"
+        )
+        do {
+            let bars = try await fetchRawCandles(
+                instrument: instrument, period: period, count: count, before: beforeMs
+            )
+            if !bars.isEmpty {
+                _ = await cache.merge(bars, for: key)
+                nativeLog.info(
+                    "forwardGapFill \(instrument, privacy: .public) \(period, privacy: .public): pulled \(bars.count) bars to catch up \(gapMs / 1000)s"
+                )
+            } else {
+                nativeLog.warning(
+                    "forwardGapFill \(instrument, privacy: .public) \(period, privacy: .public): fetch returned 0 bars (window may have been all weekend / stripped)"
+                )
+            }
+        } catch {
+            nativeLog.warning(
+                "forwardGapFill \(instrument, privacy: .public) \(period, privacy: .public) failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    /// Max bars a single forward-fill will pull. Past this the staleness gate is the
+    /// right tool (one clean fetch) instead of paging incrementally — chosen so a
+    /// typical "app was off for a few days" closes cleanly without a long catch-up.
+    private static func forwardGapFillCap(period: String) -> Int {
+        switch period {
+        case "ONE_MIN": return 20_000     // ~14 days
+        case "ONE_HOUR": return 5_000     // ~7 months (FX trading hours)
+        default: return 2_000
+        }
     }
 
     /// The single leaf that talks to the native Dukascopy client. Each forward load pulls
@@ -540,8 +655,19 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             let periodMs = cp.seconds * 1000
             return result.bars
                 .sorted { $0.timeMillis < $1.timeMillis }
-                .map { bar in
-                    SwiftTrader.CandleBar(
+                .compactMap { bar -> SwiftTrader.CandleBar? in
+                    // Dukascopy occasionally emits boundary/filler bars with zero or
+                    // negative OHLC values around session close — slipping one through
+                    // collapses the chart's price scale (a single 0-prefixed bar makes
+                    // every other candle invisible) and corrupts EMA/ATR. Drop them at
+                    // the wire boundary so the cache never sees a non-positive price.
+                    guard bar.low > 0, bar.high > 0, bar.open > 0, bar.close > 0 else {
+                        nativeLog.warning(
+                            "history \(instrument, privacy: .public) \(period, privacy: .public): dropping bar t=\(bar.timeMillis) with non-positive price (o=\(bar.open) h=\(bar.high) l=\(bar.low) c=\(bar.close))"
+                        )
+                        return nil
+                    }
+                    return SwiftTrader.CandleBar(
                         time: bar.timeMillis,
                         open: bar.open, high: bar.high, low: bar.low, close: bar.close,
                         volume: bar.volume,
