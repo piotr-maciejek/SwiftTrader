@@ -78,6 +78,7 @@
 		AA000014 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000015 /* AccountStore.swift */; };
 		AA000016 /* StandaloneAuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000017 /* StandaloneAuthViewModel.swift */; };
 		AA000018 /* StandaloneLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000019 /* StandaloneLoginSheet.swift */; };
+		AA000020 /* NativePinSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000021 /* NativePinSheet.swift */; };
 		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001 /* SessionCalculatorTests.swift */; };
 		B1000002 /* CandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002 /* CandleCacheTests.swift */; };
 		B1000003 /* ForexAPIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003 /* ForexAPIServiceTests.swift */; };
@@ -100,6 +101,7 @@
 		B1000050 /* DrawingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000050 /* DrawingTests.swift */; };
 		B1000051 /* LeftSidebarGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000051 /* LeftSidebarGroupingTests.swift */; };
 		B1000060 /* NativeStandaloneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000060 /* NativeStandaloneTests.swift */; };
+		B1000061 /* StandaloneAuthViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000061 /* StandaloneAuthViewModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -186,6 +188,7 @@
 		AA000015 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		AA000017 /* StandaloneAuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandaloneAuthViewModel.swift; sourceTree = "<group>"; };
 		AA000019 /* StandaloneLoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandaloneLoginSheet.swift; sourceTree = "<group>"; };
+		AA000021 /* NativePinSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePinSheet.swift; sourceTree = "<group>"; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
 		B2000002 /* CandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCacheTests.swift; sourceTree = "<group>"; };
 		B2000003 /* ForexAPIServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForexAPIServiceTests.swift; sourceTree = "<group>"; };
@@ -208,6 +211,7 @@
 		B2000050 /* DrawingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrawingTests.swift; sourceTree = "<group>"; };
 		B2000051 /* LeftSidebarGroupingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftSidebarGroupingTests.swift; sourceTree = "<group>"; };
 		B2000060 /* NativeStandaloneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStandaloneTests.swift; sourceTree = "<group>"; };
+		B2000061 /* StandaloneAuthViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandaloneAuthViewModelTests.swift; sourceTree = "<group>"; };
 		B3000001 /* SwiftTraderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SwiftTraderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -341,6 +345,7 @@
 				A200001B /* CorrelationView.swift */,
 				A200001F /* EMAPopover.swift */,
 				A2000022 /* PinEntrySheet.swift */,
+				AA000021 /* NativePinSheet.swift */,
 				A2000029 /* ATRPopover.swift */,
 				A200002A /* VolumeMAPopover.swift */,
 				A200002F /* ShortcutsPopover.swift */,
@@ -358,6 +363,7 @@
 				B2000001 /* SessionCalculatorTests.swift */,
 				B2000002 /* CandleCacheTests.swift */,
 				B2000060 /* NativeStandaloneTests.swift */,
+				B2000061 /* StandaloneAuthViewModelTests.swift */,
 				B2000003 /* ForexAPIServiceTests.swift */,
 				B2000004 /* MockMarketDataCoordinator.swift */,
 				B2000005 /* ChartViewModelTests.swift */,
@@ -523,6 +529,7 @@
 				AA000014 /* AccountStore.swift in Sources */,
 				AA000016 /* StandaloneAuthViewModel.swift in Sources */,
 				AA000018 /* StandaloneLoginSheet.swift in Sources */,
+				AA000020 /* NativePinSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -533,6 +540,7 @@
 				B1000001 /* SessionCalculatorTests.swift in Sources */,
 				B1000002 /* CandleCacheTests.swift in Sources */,
 				B1000060 /* NativeStandaloneTests.swift in Sources */,
+				B1000061 /* StandaloneAuthViewModelTests.swift in Sources */,
 				B1000003 /* ForexAPIServiceTests.swift in Sources */,
 				B1000004 /* MockMarketDataCoordinator.swift in Sources */,
 				B1000005 /* ChartViewModelTests.swift in Sources */,

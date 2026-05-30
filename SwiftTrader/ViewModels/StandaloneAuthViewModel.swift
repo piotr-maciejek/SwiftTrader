@@ -5,19 +5,34 @@ import Foundation
 /// server-mode `AuthViewModel` phase model so `ContentView` can gate the workspace
 /// the same way. The connected `DukascopySession` is handed to the market-data
 /// coordinator once `phase == .ready`.
+///
+/// LIVE accounts on a non-whitelisted IP require a captcha PIN. The session calls
+/// back through a `pinProvider` closure mid-connect; this VM bridges that callback
+/// to SwiftUI by publishing the captcha image, flipping to `.pinRequired`, and
+/// suspending on a continuation that `submitPin()` / `cancelPin()` resume.
 @Observable
 @MainActor
 final class StandaloneAuthViewModel {
     enum Phase: Equatable {
         case idle          // no account selected, or not yet connected
         case connecting
-        case pinRequired   // captcha/PIN challenge (slice D)
+        case pinRequired   // captcha/PIN challenge awaiting user input
         case ready
         case failed(String)
     }
 
     var phase: Phase = .idle
     private(set) var session: DukascopySession?
+
+    /// The captcha PNG to display while `phase == .pinRequired`.
+    var captchaImageData: Data?
+    /// The PIN the user is typing into the sheet.
+    var pin: String = ""
+    /// Non-nil after a rejected PIN, to message the user on the re-prompt.
+    private(set) var pinError: String?
+
+    /// Resumed by `submitPin()` (with the typed PIN) or `cancelPin()` (throwing).
+    private var pinContinuation: CheckedContinuation<String, Error>?
 
     private let accounts: AccountStore
 
@@ -28,22 +43,74 @@ final class StandaloneAuthViewModel {
     var hasSelectedAccount: Bool { accounts.selectedAccount != nil }
 
     /// Connect the currently selected account. No-op while connecting or already ready.
+    /// On a wrong PIN the loop rebuilds the session and re-prompts with a fresh captcha
+    /// (captcha ids are single-use), mirroring server mode's retry.
     func connectSelected() async {
-        if phase == .connecting || phase == .ready { return }
+        if phase == .connecting || phase == .pinRequired || phase == .ready { return }
         guard let account = accounts.selectedAccount,
               let creds = accounts.credentials(for: account.id) else {
             phase = .idle
             return
         }
         phase = .connecting
-        let session = DukascopySession(environment: account.environment, credentials: creds)
-        do {
-            try await session.connect()
-            self.session = session
-            phase = .ready
-        } catch {
-            phase = .failed(String(describing: error))
+        pinError = nil
+
+        while true {
+            let session = DukascopySession(
+                environment: account.environment,
+                credentials: creds,
+                pinProvider: { [weak self] challenge in
+                    guard let self else { throw AuthError.pinCancelled }
+                    return try await self.requestPin(challenge)
+                }
+            )
+            do {
+                try await session.connect()
+                self.session = session
+                pinError = nil
+                phase = .ready
+                return
+            } catch AuthError.badPin {
+                // Wrong PIN — the captcha is now spent. Loop to fetch a fresh one.
+                pinError = "Incorrect PIN — please try again."
+                phase = .connecting
+                continue
+            } catch AuthError.pinCancelled {
+                phase = .idle
+                return
+            } catch {
+                phase = .failed(String(describing: error))
+                return
+            }
         }
+    }
+
+    /// Invoked (off the main actor) by the session's `pinProvider`. Publishes the
+    /// captcha, flips to `.pinRequired`, and suspends until the user acts.
+    /// Internal (not private) so the continuation bridge is unit-testable.
+    func requestPin(_ challenge: PinChallenge) async throws -> String {
+        captchaImageData = challenge.captcha
+        pin = ""
+        phase = .pinRequired
+        return try await withCheckedThrowingContinuation { continuation in
+            self.pinContinuation = continuation
+        }
+    }
+
+    /// User submitted the PIN from the sheet.
+    func submitPin() {
+        guard let continuation = pinContinuation, !pin.isEmpty else { return }
+        pinContinuation = nil
+        phase = .connecting
+        continuation.resume(returning: pin)
+    }
+
+    /// User dismissed the PIN sheet without submitting.
+    func cancelPin() {
+        guard let continuation = pinContinuation else { return }
+        pinContinuation = nil
+        continuation.resume(throwing: AuthError.pinCancelled)
+        // `connectSelected`'s catch lands the phase on `.idle`.
     }
 
     /// Tear down the current session (e.g. before switching accounts).

@@ -83,6 +83,11 @@ struct ContentView: View {
         }
     }
 
+    private var isNativePinRequired: Bool {
+        if case .pinRequired = standaloneAuth.phase { return true }
+        return false
+    }
+
     @ViewBuilder
     private var nativeGatedContent: some View {
         Group {
@@ -94,6 +99,14 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showLoginSheet) {
             StandaloneLoginSheet(accounts: AccountStore.shared, auth: standaloneAuth)
+        }
+        // Captcha PIN challenge (LIVE on a non-whitelisted IP) — layered over the
+        // login sheet so cancelling returns cleanly to the account picker.
+        .sheet(isPresented: Binding(
+            get: { isNativePinRequired },
+            set: { presented in if !presented { standaloneAuth.cancelPin() } }
+        )) {
+            NativePinSheet(auth: standaloneAuth)
         }
     }
 

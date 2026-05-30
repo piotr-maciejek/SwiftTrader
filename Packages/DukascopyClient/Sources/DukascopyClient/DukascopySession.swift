@@ -52,6 +52,9 @@ public actor DukascopySession {
     private let environment: DukascopyEnvironment
     private let credentials: AuthCredentials
     private let authClient: AuthClient
+    /// Invoked when the account needs a captcha PIN (LIVE on a non-whitelisted IP).
+    /// Nil for demo / whitelisted accounts — `connect()` then never prompts.
+    private let pinProvider: PinProvider?
 
     private var transport: Transport?
     private var authSessionId: String?
@@ -88,11 +91,13 @@ public actor DukascopySession {
     public init(
         environment: DukascopyEnvironment,
         credentials: AuthCredentials,
-        authClient: AuthClient = AuthClient()
+        authClient: AuthClient = AuthClient(),
+        pinProvider: PinProvider? = nil
     ) {
         self.environment = environment
         self.credentials = credentials
         self.authClient = authClient
+        self.pinProvider = pinProvider
     }
 
     /// Resolve JNLP → authenticate (trying each SRP6 server) → connect transport →
@@ -105,12 +110,44 @@ public actor DukascopySession {
             let jnlp = try await JNLPClient.fetch(from: environment.jnlpURL)
             guard !jnlp.srp6LoginURLs.isEmpty else { throw SessionError.noSRP6Servers }
 
+            // PIN/captcha pre-flight — done ONCE (not per server) so the user is
+            // prompted at most once per connect. Only runs when a pinProvider is set
+            // (LIVE accounts); demo/whitelisted skip it entirely. A thrown
+            // `pinCancelled`/`badPin` propagates out of connect() to the caller.
+            var captchaId: String?
+            var pin: String?
+            if let pinProvider, let probe = jnlp.srp6LoginURLs.first {
+                let info = try await authClient.checkIfPinRequired(
+                    baseURL: probe, login: credentials.login
+                )
+                log.info("connect: login_info checkPin=\(info.checkPin, privacy: .public)")
+                if info.checkPin {
+                    let challenge = try await authClient.fetchCaptcha(baseURL: probe)
+                    let entered = try await pinProvider(challenge)
+                    captchaId = challenge.captchaId
+                    pin = entered
+                }
+            }
+
             var lastError: Error?
             var success: AuthSuccess?
             for serverURL in jnlp.srp6LoginURLs {
                 do {
-                    success = try await authClient.authenticate(baseURL: serverURL, credentials: credentials)
+                    success = try await authClient.authenticate(
+                        baseURL: serverURL, credentials: credentials,
+                        captchaId: captchaId, pin: pin
+                    )
                     break
+                } catch let e as AuthError {
+                    // A wrong PIN is deterministic — every server will reject it, so don't
+                    // burn the rest of the list retrying; surface it for a fresh-captcha retry.
+                    if case .badPin = e {
+                        lastError = e
+                        break
+                    }
+                    log.error("connect: auth failed against \(serverURL.absoluteString, privacy: .public): \(e.description, privacy: .public)")
+                    lastError = e
+                    continue
                 } catch {
                     log.error("connect: auth failed against \(serverURL.absoluteString, privacy: .public): \(error.localizedDescription, privacy: .public)")
                     lastError = error
@@ -118,6 +155,9 @@ public actor DukascopySession {
                 }
             }
             guard let auth = success else {
+                // Preserve a typed AuthError (e.g. `.badPin`, `.pinCancelled`) so the
+                // caller can react — re-prompt with a fresh captcha vs. hard-fail.
+                if let authError = lastError as? AuthError { throw authError }
                 throw SessionError.authFailed(lastError.map { String(describing: $0) } ?? "unknown")
             }
             guard let first = auth.authApiURLs.first, let address = ServerAddress.parse(first) else {

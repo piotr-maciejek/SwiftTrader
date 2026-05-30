@@ -8,7 +8,7 @@ struct DukascopyCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dukascopy-cli",
         abstract: "Dukascopy native protocol prototyping CLI.",
-        subcommands: [JNLPCommand.self, AuthCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self, BulkSpikeCommand.self]
+        subcommands: [JNLPCommand.self, AuthCommand.self, LoginInfoCommand.self, CaptchaCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self, BulkSpikeCommand.self]
     )
 }
 
@@ -68,6 +68,12 @@ struct AuthCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Skip requesting the occasus settings blob")
     var noSettings: Bool = false
 
+    @Option(name: .long, help: "Captcha PIN. Forces the dual-SRP6 PIN flow. A wrong PIN (e.g. 0000) is a safe, non-consuming end-to-end probe of the wire path.")
+    var pin: String?
+
+    @Option(name: .long, help: "Captcha id from a prior `captcha` fetch (use the SAME --url). If omitted while --pin is set, a fresh captcha is fetched here.")
+    var captchaId: String?
+
     func run() async throws {
         let srp6URLs: [URL]
         if let raw = url, let u = URL(string: raw) {
@@ -85,6 +91,38 @@ struct AuthCommand: AsyncParsableCommand {
 
         let creds = AuthCredentials(login: user, password: pass)
         let client = AuthClient(requestSettings: !noSettings)
+
+        // PIN flow: the captcha id is bound to the server that issued it, so the whole
+        // dual-session must run against ONE base URL. Fetch a fresh captcha here unless
+        // the caller supplied an id from a prior `captcha` fetch on the same --url.
+        if let pin {
+            let base = srp6URLs[0]
+            let resolvedCaptchaId: String
+            if let captchaId {
+                resolvedCaptchaId = captchaId
+            } else {
+                print("Fetching captcha from \(base.absoluteString) …")
+                let challenge = try await client.fetchCaptcha(baseURL: base)
+                let out = "/tmp/dukascopy-captcha.png"
+                try? challenge.captcha.write(to: URL(fileURLWithPath: out))
+                print("  captchaId: \(challenge.captchaId)")
+                print("  saved image: \(out) (\(challenge.captcha.count) bytes)")
+                resolvedCaptchaId = challenge.captchaId
+            }
+            do {
+                let result = try await client.authenticate(
+                    baseURL: base, credentials: creds, captchaId: resolvedCaptchaId, pin: pin
+                )
+                print("\nPIN auth SUCCEEDED.")
+                printSuccess(result)
+            } catch AuthError.badPin {
+                print("\nPIN auth reached the server cleanly but the PIN was REJECTED "
+                    + "(M2_C mismatch). This is the expected result for a wrong PIN — it "
+                    + "PROVES the dual-SRP6 wire path (verbum_id / pin_ params / _C / M2_C) "
+                    + "is correct.")
+            }
+            return
+        }
 
         var lastError: Error?
         for serverURL in srp6URLs {
@@ -113,6 +151,79 @@ struct AuthCommand: AsyncParsableCommand {
             print("settings:    \(blob.count) bytes (parsing deferred)")
         }
     }
+}
+
+/// Non-consuming pre-check: does this account currently need a captcha PIN from
+/// this IP? Safe to run repeatedly — it does not authenticate.
+struct LoginInfoCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "login-info",
+        abstract: "Check whether an account needs a captcha PIN (munus=login_info)."
+    )
+
+    @Option(name: .long, help: "Target environment: demo or live")
+    var env: String = "demo"
+
+    @Option(name: .long, help: "Dukascopy login (account number / username)")
+    var user: String
+
+    @Option(name: .long, help: "Override the SRP6 base URL (skip JNLP lookup)")
+    var url: String?
+
+    func run() async throws {
+        let base = try await resolveFirstSRP6URL(env: env, urlOverride: url)
+        let info = try await AuthClient().checkIfPinRequired(baseURL: base, login: user)
+        print("checkPin:    \(info.checkPin)")
+        print("wlPartnerId: \(info.wlPartnerId.map(String.init) ?? "—")")
+        if !info.checkPin {
+            print("\nNo PIN required right now (IP whitelisted or already trusted today).")
+        } else {
+            print("\nPIN required — fetch a captcha and run `auth --pin …`.")
+        }
+    }
+}
+
+/// Fetch one captcha image + its id. Non-consuming. Pairs with `auth --pin --captcha-id`
+/// for the correct-PIN two-step (view the saved image, then submit the digits you read).
+struct CaptchaCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "captcha",
+        abstract: "Fetch a captcha PNG and print its X-CaptchaID."
+    )
+
+    @Option(name: .long, help: "Target environment: demo or live")
+    var env: String = "demo"
+
+    @Option(name: .long, help: "Override the SRP6 base URL (skip JNLP lookup)")
+    var url: String?
+
+    @Option(name: .long, help: "Where to save the PNG")
+    var out: String = "/tmp/dukascopy-captcha.png"
+
+    func run() async throws {
+        let base = try await resolveFirstSRP6URL(env: env, urlOverride: url)
+        let challenge = try await AuthClient().fetchCaptcha(baseURL: base)
+        try challenge.captcha.write(to: URL(fileURLWithPath: out))
+        print("captchaId: \(challenge.captchaId)")
+        print("saved:     \(out) (\(challenge.captcha.count) bytes)")
+        print("base URL:  \(base.absoluteString)")
+        print("\nNext: open the image, then run")
+        print("  dukascopy-cli auth --env \(env) --user <login> --pass <pwd> \\")
+        print("    --url \(base.absoluteString) --captcha-id \(challenge.captchaId) --pin <digits>")
+    }
+}
+
+/// Resolve the first SRP6 login URL for an environment, or use an explicit override.
+private func resolveFirstSRP6URL(env: String, urlOverride: String?) async throws -> URL {
+    if let raw = urlOverride, let u = URL(string: raw) { return u }
+    guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+        throw ValidationError("env must be 'demo' or 'live'")
+    }
+    let config = try await JNLPClient.fetch(from: target.jnlpURL)
+    guard let first = config.srp6LoginURLs.first else {
+        throw ValidationError("JNLP returned no SRP6 servers")
+    }
+    return first
 }
 
 struct ConnectTestCommand: AsyncParsableCommand {
