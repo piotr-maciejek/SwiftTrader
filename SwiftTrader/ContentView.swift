@@ -47,10 +47,10 @@ struct ContentView: View {
         .task {
             if provider == .server {
                 await auth.start()
-            } else {
-                // Auto-connect the selected account; if none, the gate opens the login sheet.
-                await standaloneAuth.connectSelected()
             }
+            // Native mode does NOT auto-connect: the gate opens the login sheet so
+            // the user explicitly confirms which account to use. Saved credentials
+            // are still used by Connect — no password re-entry.
         }
         // Server returns 503 for /history until the strategy is ready, so any
         // history fetches that fire during the auth handshake are wasted retries
@@ -121,7 +121,7 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 800, minHeight: 500)
-        .onAppear { if !standaloneAuth.hasSelectedAccount { showLoginSheet = true } }
+        .onAppear { showLoginSheet = true }
     }
 
     private func loadingPlaceholder(_ text: String) -> some View {
