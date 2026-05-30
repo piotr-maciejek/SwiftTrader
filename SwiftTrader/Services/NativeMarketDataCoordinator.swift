@@ -850,6 +850,85 @@ private actor HistoryPrefetcher {
             }
         }
         nativeLog.info("prefetch: warm-up complete")
+
+        // After the depth pass we have the full target window on disk for every pair —
+        // now scan for mid-series holes (left behind by transient bulk timeouts or by
+        // older runs without the non-positive-price filter) and refill them. Aggregated
+        // periods (4H/Daily/3m/5m/15m/30m) rebuild from these, so fixing 1H + 1m fixes
+        // every visible timeframe.
+        if Task.isCancelled { return }
+        await gapScan()
+    }
+
+    /// Scan every (instrument, basic period) for missing-bar runs and refill them.
+    /// Same pacing as the depth pass: one request at a time, gated on foreground idle
+    /// so user-driven loads always win. Logs at every boundary so the run is traceable
+    /// in `log stream --predicate 'subsystem == "com.swifttrader" AND category == "native"'`.
+    private func gapScan() async {
+        nativeLog.info("gap-scan: beginning sweep of \(self.instruments.count) instruments × [ONE_HOUR, ONE_MIN]")
+        let t0 = Date()
+        var seriesScanned = 0
+        var seriesWithGaps = 0
+        var totalGapsFound = 0
+        var totalGapsFilled = 0
+        var totalBarsPulled = 0
+
+        for period in Self.gapScanPeriods {
+            for instrument in instruments {
+                if Task.isCancelled {
+                    nativeLog.info("gap-scan: cancelled mid-sweep — \(totalGapsFilled)/\(totalGapsFound) gaps filled so far")
+                    return
+                }
+                seriesScanned += 1
+                let gaps = await cache.findGaps(instrument: instrument, period: period)
+                if gaps.isEmpty { continue }
+                seriesWithGaps += 1
+                totalGapsFound += gaps.count
+                let missingTotal = gaps.reduce(0) { $0 + $1.missingBars }
+                nativeLog.info(
+                    "gap-scan \(instrument, privacy: .public) \(period, privacy: .public): found \(gaps.count) gap(s) totalling \(missingTotal) bar(s)"
+                )
+
+                // Cap per-series work — a runaway cache (e.g. years of 1m with a hole every
+                // hour) shouldn't pin the prefetcher forever. Per-period cap is roomy enough
+                // that real-world gap counts (single digits per pair) never trip it.
+                let toFix = gaps.prefix(Self.maxGapsPerSeries)
+                for (idx, gap) in toFix.enumerated() {
+                    if Task.isCancelled {
+                        nativeLog.info("gap-scan: cancelled mid-sweep — \(totalGapsFilled)/\(totalGapsFound) gaps filled so far")
+                        return
+                    }
+                    await awaitIdle()
+                    if Task.isCancelled { return }
+                    nativeLog.debug(
+                        "gap-fill \(instrument, privacy: .public) \(period, privacy: .public) [\(idx + 1)/\(toFix.count)]: window [\(gap.fromMs), \(gap.toMs)] = \(gap.missingBars) bar(s)"
+                    )
+                    let cadenceMs = Self.cadenceMs(period)
+                    // Anchor the fetch at the right edge of the gap; count = missing + slop
+                    // so the underlying server window covers the full gap.
+                    let beforeMs = gap.toMs + cadenceMs
+                    let count = gap.missingBars + 2
+                    let bars = await fetchPage(instrument, period, beforeMs, count)
+                    if bars.isEmpty {
+                        nativeLog.warning(
+                            "gap-fill \(instrument, privacy: .public) \(period, privacy: .public) [\(gap.fromMs), \(gap.toMs)]: fetch returned 0 bars (CDN may still be missing this chunk)"
+                        )
+                    } else {
+                        totalGapsFilled += 1
+                        totalBarsPulled += bars.count
+                        nativeLog.info(
+                            "gap-fill \(instrument, privacy: .public) \(period, privacy: .public) [\(gap.fromMs), \(gap.toMs)]: pulled \(bars.count) bars"
+                        )
+                    }
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
+            }
+        }
+
+        let elapsed = Int(Date().timeIntervalSince(t0))
+        nativeLog.info(
+            "gap-scan complete: scanned \(seriesScanned) series, \(seriesWithGaps) had gaps, filled \(totalGapsFilled)/\(totalGapsFound) gaps (pulled \(totalBarsPulled) bars) in \(elapsed)s"
+        )
     }
 
     /// Page `series.period` for one instrument backward until it reaches the target depth
@@ -869,6 +948,22 @@ private actor HistoryPrefetcher {
             if page.isEmpty { return }   // hit the start of available history
             // Pace so a freshly-arrived foreground load always gets the next idle window.
             try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
+    /// Basic stored periods the gap-scan walks. Aggregated periods rebuild from these.
+    private static let gapScanPeriods: [String] = ["ONE_HOUR", "ONE_MIN"]
+    /// Bound per-series gap-fill so a pathological cache (e.g. every other bar missing)
+    /// can't pin the prefetcher. Real-world gap counts on the affected pairs are single
+    /// digits, so this is a generous safety cap, not a tuning knob.
+    private static let maxGapsPerSeries = 32
+
+    private static func cadenceMs(_ period: String) -> Int64 {
+        switch period {
+        case "ONE_MIN": return 60_000
+        case "ONE_HOUR": return 3_600_000
+        case "DAILY": return 86_400_000
+        default: return 60_000
         }
     }
 }

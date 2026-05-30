@@ -168,6 +168,60 @@ actor CandleCache {
         scheduleDiskWrite(key: key, bars: existing)
     }
 
+    /// Mid-series run of expected-but-missing bars in a cached `(instrument, period)`.
+    /// Bounded by an adjacent pair of cached bars — unknown depth at either end is not
+    /// a gap. Used by the background prefetcher to detect and refetch holes that bulk
+    /// chunk timeouts (or the pre-fix corrupted-bar drops) left behind.
+    struct CacheGap: Sendable, Equatable {
+        public let fromMs: Int64      // first missing bar's expected timestamp
+        public let toMs: Int64        // last missing bar's expected timestamp
+        public let missingBars: Int   // number of bars expected between [fromMs, toMs]
+    }
+
+    /// Scan cached bars for `(instrument, period)` and return runs of expected
+    /// timestamps that are missing — skipping Sat/Sun (`NYTradingCalendar.isMarketClosed`)
+    /// and the two global FX holidays (`isFXHoliday` — Dec 25, Jan 1). Only meaningful
+    /// for the basic stored periods (ONE_MIN, ONE_HOUR, DAILY); aggregated series rebuild
+    /// from these so their gaps fix as a side effect. Returns gaps in ascending time order.
+    func findGaps(instrument: String, period: String) async -> [CacheGap] {
+        guard let cadenceMs = Self.periodCadenceMs(period) else { return [] }
+        let key = CacheKey(instrument: instrument, period: period, source: .server)
+        await ensureLoaded(key)
+        let bars = store[key]?.bars ?? []
+        guard bars.count >= 2 else { return [] }
+
+        var gaps: [CacheGap] = []
+        for i in 1..<bars.count {
+            let prev = bars[i - 1].time
+            let curr = bars[i].time
+            // Adjacent / overlapping / out-of-order — nothing to fill.
+            if curr <= prev + cadenceMs { continue }
+            let gapStart = prev + cadenceMs
+            let gapEnd = curr - cadenceMs
+            // Discard ranges that are entirely weekend/holiday closure. Fast: early-exits
+            // on the first trading slot encountered, so multi-day genuine gaps cost ~hours
+            // of iteration to first Monday morning, not weeks.
+            if NYTradingCalendar.isClosedThroughout(fromMs: gapStart, toMs: gapEnd) {
+                continue
+            }
+            let missing = Int((gapEnd - gapStart) / cadenceMs) + 1
+            gaps.append(CacheGap(fromMs: gapStart, toMs: gapEnd, missingBars: missing))
+        }
+        return gaps
+    }
+
+    /// Cadence (ms) per period name for the BASIC stored periods only. Aggregated
+    /// targets (4H/Daily/3m/5m/15m/30m) intentionally return nil — `findGaps` is
+    /// only meaningful against their sources, since fixing 1m/1H fixes the rest.
+    private static func periodCadenceMs(_ period: String) -> Int64? {
+        switch period {
+        case "ONE_MIN": return 60_000
+        case "ONE_HOUR": return 3_600_000
+        case "DAILY": return 86_400_000
+        default: return nil
+        }
+    }
+
     /// Wipe all entries (e.g. on full reconnect with different server config).
     /// Awaits the disk wipe so the caller's next merge/scheduleDiskWrite can't
     /// race ahead and have its freshly-written data deleted by a delayed wipe.

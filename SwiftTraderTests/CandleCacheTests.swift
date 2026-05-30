@@ -182,4 +182,75 @@ struct CandleCacheTests {
         #expect(result[0].close == 1.0)  // time 100 unchanged
         #expect(result[1].close == 9.0)  // time 200 replaced with new value
     }
+
+    // MARK: - findGaps
+
+    /// 2026-05-27 (Wednesday) 10:00 UTC = 06:00 ET — middle of an active NY session
+    /// (FX trades 24/5 Sun 17 ET → Fri 17 ET, so any Wed hour qualifies). Used as the
+    /// anchor for in-session gap tests so weekend / holiday skipping doesn't swallow them.
+    private let wedMidSessionMs: Int64 = 1_779_876_000_000   // Wed 2026-05-27 10:00:00 UTC
+
+    private let oneHourKey = CandleCache.CacheKey(instrument: "EURUSD", period: "ONE_HOUR")
+
+    @Test("findGaps: empty cache returns no gaps")
+    func findGapsEmpty() async {
+        let cache = CandleCache()
+        let gaps = await cache.findGaps(instrument: "EURUSD", period: "ONE_HOUR")
+        #expect(gaps.isEmpty)
+    }
+
+    @Test("findGaps: contiguous bars report no gaps")
+    func findGapsContiguous() async {
+        let cache = CandleCache()
+        let cadence: Int64 = 3_600_000
+        let bars = (0..<5).map { makeBar(time: wedMidSessionMs + Int64($0) * cadence) }
+        _ = await cache.merge(bars, for: oneHourKey)
+        let gaps = await cache.findGaps(instrument: "EURUSD", period: "ONE_HOUR")
+        #expect(gaps.isEmpty)
+    }
+
+    @Test("findGaps: mid-session 3-bar hole is reported")
+    func findGapsMidSessionHole() async {
+        let cache = CandleCache()
+        let cadence: Int64 = 3_600_000
+        // bars at t, t+1h, GAP(t+2, t+3, t+4), t+5h, t+6h — a 3-bar mid-session gap
+        let bars = [
+            makeBar(time: wedMidSessionMs),
+            makeBar(time: wedMidSessionMs + cadence),
+            makeBar(time: wedMidSessionMs + 5 * cadence),
+            makeBar(time: wedMidSessionMs + 6 * cadence),
+        ]
+        _ = await cache.merge(bars, for: oneHourKey)
+        let gaps = await cache.findGaps(instrument: "EURUSD", period: "ONE_HOUR")
+        #expect(gaps.count == 1)
+        #expect(gaps[0].fromMs == wedMidSessionMs + 2 * cadence)
+        #expect(gaps[0].toMs == wedMidSessionMs + 4 * cadence)
+        #expect(gaps[0].missingBars == 3)
+    }
+
+    @Test("findGaps: pure weekend gap is NOT reported")
+    func findGapsWeekendSkipped() async {
+        let cache = CandleCache()
+        // 2026-05-29 (Friday) 21:00 UTC = 17:00 ET = market close. Last open-session 1H
+        // bar opens at 20:00 UTC = 16:00 ET. Next is Sunday 22:00 UTC = 18:00 ET.
+        let friLastBarMs: Int64 = 1_780_084_800_000   // Fri 2026-05-29 20:00 UTC
+        let sunFirstBarMs: Int64 = 1_780_257_600_000  // Sun 2026-05-31 20:00 UTC (≥ Sun 17 ET)
+        _ = await cache.merge(
+            [makeBar(time: friLastBarMs), makeBar(time: sunFirstBarMs)],
+            for: oneHourKey
+        )
+        let gaps = await cache.findGaps(instrument: "EURUSD", period: "ONE_HOUR")
+        #expect(gaps.isEmpty, "Fri close → Sun open is a weekend closure, not a gap")
+    }
+
+    @Test("findGaps: aggregated period returns no gaps (handled via source)")
+    func findGapsAggregatedSkipped() async {
+        let cache = CandleCache()
+        let aggKey = CandleCache.CacheKey(
+            instrument: "EURUSD", period: "FIFTEEN_MINS", source: .aggregated
+        )
+        _ = await cache.merge([makeBar(time: wedMidSessionMs)], for: aggKey)
+        let gaps = await cache.findGaps(instrument: "EURUSD", period: "FIFTEEN_MINS")
+        #expect(gaps.isEmpty, "aggregated periods rebuild from their source — no direct gap-fill")
+    }
 }
