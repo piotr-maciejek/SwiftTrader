@@ -81,6 +81,11 @@ public struct BinaryWriter {
         writeVarLen(bytes.count)
         data.append(bytes)
     }
+
+    /// BigDecimal in the DDS tagged format (see `BigDecimalCodec.encode`).
+    public mutating func writeBigDecimal(_ value: BigDecimalValue) {
+        BigDecimalCodec.encode(value, into: &self)
+    }
 }
 
 /// Cursor-style big-endian reader.

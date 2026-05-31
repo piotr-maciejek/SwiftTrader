@@ -208,6 +208,9 @@ public enum InboundMessage: Sendable {
     case heartbeatRequest(HeartbeatRequest)
     case packedAccountInfo(PackedAccountInfo)
     case candleHistoryGroup(CandleHistoryGroup)
+    case orderGroup(OrderGroup)          // live position update
+    case order(OrderMsg)                 // live single-order update
+    case orderResponse(ExtApiOrderResponse)  // order submit/close/modify ack
     case unknown(classId: Int32, body: Data)
 }
 
@@ -232,6 +235,13 @@ public enum MessageDecoder {
             return .packedAccountInfo(try PackedAccountInfo.decode(from: &fields))
         case javaStringHashCode(WireClass.candleHistoryGroup):
             return .candleHistoryGroup(try CandleHistoryGroup.decode(from: &fields))
+        case javaStringHashCode(WireClass.orderGroupMessage):
+            return .orderGroup(try OrderGroup.decode(from: &fields))
+        case javaStringHashCode(WireClass.orderMessage),
+             javaStringHashCode(WireClass.orderMessageExt):
+            return .order(try OrderMsg.decode(from: &fields))
+        case javaStringHashCode(WireClass.extApiOrderResponse):
+            return .orderResponse(try ExtApiOrderResponse.decode(from: &fields))
         default:
             let remaining = try fields.readBytes(fields.remaining)
             return .unknown(classId: classId, body: remaining)

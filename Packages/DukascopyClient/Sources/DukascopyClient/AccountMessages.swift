@@ -76,12 +76,25 @@ public struct AccountInfo: Sendable {
 
 public struct PackedAccountInfo: Sendable {
     public let account: AccountInfo
+    /// Open position groups present at connect.
+    public var groups: [OrderGroup] = []
+    /// Individual orders present at connect (incl. pending limit/stop orders).
+    public var orders: [OrderMsg] = []
+
+    public init(account: AccountInfo, groups: [OrderGroup] = [], orders: [OrderMsg] = []) {
+        self.account = account
+        self.groups = groups
+        self.orders = orders
+    }
 
     /// Decodes the field stream of a PackedAccountInfoMessage. The `account`
     /// field is a nested protocol message — value bytes are
-    /// `varLen(nestedLen) + classId + nested fields`.
+    /// `varLen(nestedLen) + classId + nested fields`. `groups`/`orders` are
+    /// `List<Message>` (see `decodeMessageList`).
     public static func decode(from reader: inout BinaryReader) throws -> PackedAccountInfo {
         var account = AccountInfo()
+        var groups: [OrderGroup] = []
+        var orders: [OrderMsg] = []
         while let field = try readField(from: &reader) {
             var v = field.value
             switch field.fieldId {
@@ -91,10 +104,14 @@ public struct PackedAccountInfo: Sendable {
                 _ = try v.readVarLen()
                 _ = try v.readInt32BE()  // nested classId (AccountInfoMessageInit)
                 account = try AccountInfo.decode(from: &v)
+            case -17942:
+                groups = try decodeMessageList(from: &v) { try OrderGroup.decode(from: &$0) }
+            case -23746:
+                orders = try decodeMessageList(from: &v) { try OrderMsg.decode(from: &$0) }
             default:
-                break  // groups/orders deferred
+                break
             }
         }
-        return PackedAccountInfo(account: account)
+        return PackedAccountInfo(account: account, groups: groups, orders: orders)
     }
 }

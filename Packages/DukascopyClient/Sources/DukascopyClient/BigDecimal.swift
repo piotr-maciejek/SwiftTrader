@@ -14,6 +14,14 @@ public struct BigDecimalValue: Sendable, Equatable, CustomStringConvertible {
 
     public static let zero = BigDecimalValue(unscaled: 0, scale: 0)
 
+    /// Build from a `Double` at a fixed decimal `scale` — `unscaled = round(value · 10^scale)`.
+    /// Used to encode order amounts/prices (e.g. price 1.23456 at scale 5 → unscaled 123456).
+    public init(_ value: Double, scale: Int) {
+        let factor = pow(10.0, Double(scale))
+        let scaled = (value * factor).rounded()
+        self.init(unscaled: BigInt(scaled), scale: scale)
+    }
+
     public var doubleValue: Double {
         let raw = Double(unscaled.description) ?? 0
         if scale == 0 { return raw }
@@ -81,6 +89,62 @@ public enum BigDecimalCodec {
             return BigDecimalValue(unscaled: signedBigInt(from: data), scale: scale)
         default:
             return .zero
+        }
+    }
+
+    /// Encodes a `BigDecimalValue` in the DDS tagged format (inverse of `decode`).
+    /// Emits kind 4 (non-negative scale ≤ 255), kind 5 (negative scale ≥ -255), or
+    /// kind 7 (int32 scale + length) — all forms the server's decoder accepts. FX
+    /// amounts/prices always fall in the kind-4 range.
+    public static func encode(_ value: BigDecimalValue, into w: inout BinaryWriter) {
+        if value.unscaled == 0 {
+            w.writeByte(0)   // kind 0 = zero
+            return
+        }
+        let bytes = twosComplementBE(value.unscaled)
+        let len = bytes.count
+        let scale = value.scale
+        if scale >= 0 && scale <= 0xFF && len <= 0xFF {
+            w.writeByte(4)
+            w.writeByte(UInt8(scale))
+            w.writeByte(UInt8(len))
+            w.writeBytes(bytes)
+        } else if scale < 0 && -scale <= 0xFF && len <= 0xFF {
+            w.writeByte(5)
+            w.writeByte(UInt8(-scale))
+            w.writeByte(UInt8(len))
+            w.writeBytes(bytes)
+        } else {
+            w.writeByte(7)
+            w.writeInt32BE(Int32(scale))
+            w.writeInt32BE(Int32(len))
+            w.writeBytes(bytes)
+        }
+    }
+
+    /// Minimal-length two's-complement big-endian bytes for a non-zero `BigInt`
+    /// (inverse of `signedBigInt`). Positive values get a leading 0x00 when their
+    /// top bit would otherwise read as negative.
+    static func twosComplementBE(_ value: BigInt) -> Data {
+        if value > 0 {
+            var bytes = [UInt8](value.magnitude.serialize())
+            if bytes.isEmpty { bytes = [0] }
+            if (bytes[0] & 0x80) != 0 { bytes.insert(0, at: 0) }
+            return Data(bytes)
+        }
+        // value < 0 (zero is handled by the caller).
+        let mag = value.magnitude
+        var n = max(1, (mag.bitWidth + 7) / 8)
+        while true {
+            let modulus = BigUInt(1) << (8 * n)
+            let tc = modulus - mag                 // 2^(8n) − |value|
+            let signBit = BigUInt(1) << (8 * n - 1)
+            if tc >= signBit {                     // top bit set → reads as negative
+                var bytes = [UInt8](tc.serialize())
+                while bytes.count < n { bytes.insert(0, at: 0) }
+                return Data(bytes)
+            }
+            n += 1
         }
     }
 

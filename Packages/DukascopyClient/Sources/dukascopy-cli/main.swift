@@ -368,7 +368,7 @@ struct StreamCommand: AsyncParsableCommand {
             case .error(let e):
                 FileHandle.standardError.write(Data("server error: \(e)\n".utf8))
                 return
-            case .ok, .halo, .packedAccountInfo, .candleHistoryGroup:
+            case .ok, .halo, .packedAccountInfo, .candleHistoryGroup, .orderGroup, .order, .orderResponse:
                 break
             case .unknown(let classId, let body):
                 if ProcessInfo.processInfo.environment["DUKASCOPY_CLI_VERBOSE"] != nil {
