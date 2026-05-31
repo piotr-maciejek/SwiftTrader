@@ -97,8 +97,18 @@ final class ChartViewModel {
         ("WEEKLY", "W"),
     ]
 
-    /// Set by ChartView via GeometryReader so scroll calculations use real width
-    var chartWidth: CGFloat = 1200
+    /// Set by ChartView via GeometryReader so scroll calculations use real width.
+    /// The real cell width often arrives *after* the first `scrollToEnd()` (which
+    /// runs on history/cache load with the 1200 default) — most visibly in the
+    /// dense multi-timeframe/correlation grids. Re-snap to the live edge when the
+    /// width actually changes, but only while autoscroll is active so a manual
+    /// scroll-back or a later window resize isn't yanked to the end.
+    var chartWidth: CGFloat = 1200 {
+        didSet {
+            guard chartWidth != oldValue, autoScroll, !bars.isEmpty else { return }
+            scrollToEnd()
+        }
+    }
 
     private var coordinator: any MarketDataProviding
     private var startTask: Task<Void, Never>?
@@ -640,9 +650,18 @@ final class ChartViewModel {
         updateATRFromBar(bar)
     }
 
+    /// Empty space (in candle slots, so it scales with zoom) left to the right of
+    /// the newest candle when scrolled to the live edge, so it isn't flush against
+    /// the price axis.
+    static let rightEdgePaddingSlots: CGFloat = 4
+
     func scrollToEnd() {
         let totalWidth = CGFloat(bars.count) * transform.candleSlotWidth
-        transform.xOffset = max(0, totalWidth - chartWidth)
+        let rightPadding = transform.candleSlotWidth * Self.rightEdgePaddingSlots
+        // Only add the margin when content overflows the viewport; a short chart
+        // that doesn't fill the width stays left-anchored (it already has space on
+        // the right) instead of being pushed left by the padding.
+        transform.xOffset = totalWidth > chartWidth ? (totalWidth - chartWidth + rightPadding) : 0
 
         // If bars don't fill the screen, fetch earlier bars automatically
         if totalWidth < chartWidth && !isLoadingEarlier && !bars.isEmpty {

@@ -376,4 +376,69 @@ struct ChartViewModelTests {
         startTask.cancel()
         vm.stop()
     }
+
+    // MARK: - scrollToEnd / autoscroll on width change
+
+    /// Bars at 10px slot width (default xScale 1.0).
+    private func bars(_ n: Int) -> [CandleBar] {
+        (0..<n).map { makeBar(time: Int64($0 + 1) * 1000) }
+    }
+
+    @Test("scrollToEnd keeps the last bar on-screen with a right-edge margin")
+    func scrollToEndLeavesRightMargin() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.bars = bars(100)                 // totalWidth = 1000 (slot 10)
+        vm.chartWidth = 300                 // overflows the viewport
+        vm.scrollToEnd()
+
+        let slot = vm.transform.candleSlotWidth
+        let padding = slot * ChartViewModel.rightEdgePaddingSlots
+        let totalWidth = CGFloat(vm.bars.count) * slot
+        #expect(vm.transform.xOffset == totalWidth - vm.chartWidth + padding)
+
+        // Last bar's screen x sits inside the viewport but not flush against the edge.
+        let lastX = CGFloat(vm.bars.count - 1) * slot - vm.transform.xOffset + slot / 2
+        #expect(lastX < vm.chartWidth)
+        #expect(lastX < vm.chartWidth - padding + slot)   // margin actually present
+    }
+
+    @Test("Changing chartWidth re-runs scrollToEnd (the real-width race fix)")
+    func widthChangeRescrolls() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.bars = bars(100)
+
+        vm.chartWidth = 300                 // didSet → scrollToEnd for a 300px viewport
+        let narrow = vm.transform.xOffset
+
+        vm.chartWidth = 600                 // real cell width arrives → re-snap
+        let wide = vm.transform.xOffset
+
+        let slot = vm.transform.candleSlotWidth
+        let padding = slot * ChartViewModel.rightEdgePaddingSlots
+        let totalWidth = CGFloat(vm.bars.count) * slot
+        #expect(narrow == totalWidth - 300 + padding)
+        #expect(wide == totalWidth - 600 + padding)
+        #expect(wide != narrow)
+    }
+
+    @Test("Width change does not re-scroll once the user has scrolled away")
+    func widthChangeRespectsManualScroll() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.bars = bars(100)
+        vm.autoScroll = false               // user scrolled back
+        vm.transform.xOffset = 123
+
+        vm.chartWidth = 600                  // would re-snap if autoScroll were on
+        #expect(vm.transform.xOffset == 123) // left where the user put it
+    }
+
+    @Test("Short chart that doesn't fill the width stays left-anchored")
+    func shortChartLeftAnchored() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.bars = bars(5)                    // totalWidth = 50, well under the width
+        vm.chartWidth = 300
+        vm.scrollToEnd()
+        #expect(vm.transform.xOffset == 0)
+        vm.stop()                            // cancel the loadEarlierBars task it kicked off
+    }
 }
