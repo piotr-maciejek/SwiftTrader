@@ -302,6 +302,15 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                 return extend(last)
             }
             return extend(snap?.oneMin)
+        case "WEEKLY":
+            // Seed the forming week from the 1H bars already in this FX week (the warm
+            // shared 1H cache, same source the weekly history fetch aggregates), then
+            // extend by the tick and the in-progress 1H partial.
+            let hourlyKey = CandleCache.CacheKey(instrument: instrument, period: "ONE_HOUR", source: .server)
+            let weekHours = await cache.getBars(for: hourlyKey)
+                .filter { BarAggregator.weekStartMs($0.date) == bucketMs }
+            let aggregated = BarAggregator.aggregateWeekly(weekHours, openPartial: snap?.oneHour)
+            return extend(aggregated.first)
         default:
             return extend(nil)
         }
@@ -361,6 +370,8 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         case "DAILY":
             let d = Date(timeIntervalSince1970: Double(tickMs) / 1000.0)
             return Int64((NYTradingCalendar.bucketStart(at: d, period: .daily).timeIntervalSince1970 * 1000).rounded())
+        case "WEEKLY":
+            return BarAggregator.weekStartMs(Date(timeIntervalSince1970: Double(tickMs) / 1000.0))
         default:             return (tickMs / 60_000) * 60_000
         }
     }
@@ -402,6 +413,19 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             return AggSpec(
                 sourcePeriod: target.sourcePeriod, sourceSpan: target.sourceSpan, periodCode: target.periodCode,
                 bucket: { src, partial in BarAggregator.aggregate(hourly: src, openPartial: partial, target: target) }
+            )
+        }
+        // WEEKLY is native-only (server mode fetches it from jforex-server). Dukascopy
+        // serves NO weekly history to the client, and its deep DAILY .bi5 files 503, so
+        // we build weekly from ONE_HOUR — the same source as the daily chart (deep, via
+        // validated hourly .bi5 + the warm 1H cache). `aggregateWeekly` groups the
+        // weekend-stripped hourly bars into FX weeks; a weekly candle is exactly that
+        // week's daily candles' span, so weekly stays consistent with the daily chart.
+        // ~120 trading hours/week sizes the source fetch.
+        if period == "WEEKLY" {
+            return AggSpec(
+                sourcePeriod: "ONE_HOUR", sourceSpan: 120, periodCode: "WEEKLY",
+                bucket: { src, partial in BarAggregator.aggregateWeekly(src, openPartial: partial) }
             )
         }
         let granularityMs: Int64

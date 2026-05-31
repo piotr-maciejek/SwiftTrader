@@ -642,7 +642,7 @@ final class ChartViewModel {
             // THREE_MINS has no native server period — it is always aggregated,
             // regardless of the rebucketing toggle (see CacheKey.forDisplay).
             let isDerivedAggregated = currentPeriod == "THREE_MINS"
-                || (rebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY"))
+                || (rebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY" || currentPeriod == "WEEKLY"))
             if !isDerivedAggregated {
                 Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod) }
             }
@@ -712,7 +712,7 @@ final class ChartViewModel {
     /// Bar count scaled to the timeframe — avoids multi-year CDN downloads for larger periods.
     private static func barCount(for period: String) -> Int {
         switch period {
-        case "WEEKLY":     return 150  // ~3 years
+        case "WEEKLY":     return 104  // ~2 years (fits the warm 1H cache → no deep .bi5 on open)
         case "DAILY":      return 250  // ~1 year of trading days
         case "FOUR_HOURS": return 500  // ~3 months
         case "ONE_HOUR":   return 500  // ~3 weeks

@@ -361,4 +361,58 @@ struct BarAggregatorTests {
         #expect(AggregatedPeriod("DAILY") == .daily)
         #expect(AggregatedPeriod("ONE_HOUR") == nil)
     }
+
+    // MARK: Weekly aggregation (from 1H, FX-week boundaries)
+
+    @Test("One FX trading week of 1H bars collapses into a single weekly candle")
+    func weeklySingleWeek() {
+        // FX week opening Sunday 2024-04-14 17:00 ET → Friday 2024-04-19.
+        let bars = [
+            hourly(2024, 4, 14, 17, open: 1.00, high: 1.02, low: 0.99, close: 1.01),  // Sun open
+            hourly(2024, 4, 15, 10, open: 1.01, high: 1.08, low: 1.00, close: 1.05),  // Mon (week high 1.08)
+            hourly(2024, 4, 17, 12, open: 1.05, high: 1.06, low: 0.95, close: 0.97),  // Wed (week low 0.95)
+            hourly(2024, 4, 19, 16, open: 0.97, high: 1.00, low: 0.96, close: 0.98),  // Fri close
+        ]
+        let out = BarAggregator.aggregateWeekly(bars, openPartial: nil)
+        #expect(out.count == 1)
+        let w = out[0]
+        // Labeled by the Sunday-first NY week start (Sunday 00:00 ET).
+        #expect(w.time == timeMs(nyDate(2024, 4, 14, 0, 0)))
+        #expect(w.open == 1.00)   // Sunday's open — the FX week open
+        #expect(w.close == 0.98)  // Friday's close
+        #expect(w.high == 1.08)
+        #expect(w.low == 0.95)
+        #expect(w.volume == 400)
+        #expect(w.partial == false)
+    }
+
+    @Test("Bars across two FX weeks split into two weekly candles")
+    func weeklyTwoWeeks() {
+        let bars = [
+            hourly(2024, 4, 15, 10, open: 1.00, high: 1.05, low: 0.99, close: 1.02),  // week of Apr 14
+            hourly(2024, 4, 19, 16, open: 1.02, high: 1.03, low: 1.00, close: 1.01),  // week of Apr 14
+            hourly(2024, 4, 21, 17, open: 1.01, high: 1.10, low: 1.01, close: 1.08),  // week of Apr 21 (Sun open)
+            hourly(2024, 4, 25, 14, open: 1.08, high: 1.12, low: 1.07, close: 1.11),  // week of Apr 21
+        ]
+        let out = BarAggregator.aggregateWeekly(bars, openPartial: nil)
+        #expect(out.count == 2)
+        #expect(out[0].time == timeMs(nyDate(2024, 4, 14, 0, 0)))
+        #expect(out[0].open == 1.00)
+        #expect(out[0].close == 1.01)
+        #expect(out[1].time == timeMs(nyDate(2024, 4, 21, 0, 0)))
+        #expect(out[1].open == 1.01)   // Sunday open of the second week
+        #expect(out[1].close == 1.11)
+        #expect(out[1].high == 1.12)
+    }
+
+    @Test("A forming partial bar marks the current week's candle partial")
+    func weeklyPartial() {
+        let completed = hourly(2024, 4, 15, 10, open: 1.00, high: 1.05, low: 0.99, close: 1.02)
+        let formingNow = hourly(2024, 4, 17, 12, open: 1.02, high: 1.07, low: 1.02, close: 1.06, partial: true)
+        let out = BarAggregator.aggregateWeekly([completed], openPartial: formingNow)
+        #expect(out.count == 1)
+        #expect(out[0].partial == true)
+        #expect(out[0].high == 1.07)   // forming bar's high folded in
+        #expect(out[0].close == 1.06)
+    }
 }

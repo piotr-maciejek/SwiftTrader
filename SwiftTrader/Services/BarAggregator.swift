@@ -103,6 +103,70 @@ enum BarAggregator {
         }
     }
 
+    /// Calendar used to group DAILY bars into weeks: Sunday-first, NY timezone, so
+    /// the FX trading week (Sun 17:00 ET open → Fri close) lands in one bucket and
+    /// matches the NY-session daily chart. Sunday's candle is intentionally kept.
+    private static let weekGroupingCalendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = NYTradingCalendar.nyTZ
+        c.firstWeekday = 1            // Sunday
+        c.minimumDaysInFirstWeek = 1
+        return c
+    }()
+
+    /// Epoch ms of the start (Sunday 00:00 ET) of the Sunday-first NY week containing
+    /// `date`. Used both to label weekly bars and to bucket live ticks so the forming
+    /// weekly bar shares the historical bar's timestamp.
+    static func weekStartMs(_ date: Date) -> Int64 {
+        let cal = weekGroupingCalendar
+        let comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        let start = cal.date(from: comps) ?? cal.startOfDay(for: date)
+        return Int64((start.timeIntervalSince1970 * 1000).rounded())
+    }
+
+    /// Groups source bars (weekend-stripped 1H — the same series the daily chart uses)
+    /// into weekly candles on FX-week boundaries (Sunday-first, NY-aligned). Weekly is
+    /// canonical — there's only one sensible grouping. Built from 1H rather than DAILY
+    /// because Dukascopy serves no weekly history and its deep daily .bi5 files 503;
+    /// 1H is deep and reliable, and a weekly candle then spans exactly that week's daily
+    /// candles. `openPartial` is the most recent forming source bar, merged into the
+    /// current week.
+    static func aggregateWeekly(_ daily: [CandleBar], openPartial: CandleBar?) -> [CandleBar] {
+        var inputs = daily
+        if let partial = openPartial {
+            let hasCompleted = inputs.contains { $0.time == partial.time && !$0.partial }
+            if !hasCompleted {
+                inputs.removeAll { $0.time == partial.time }
+                inputs.append(partial)
+            }
+        }
+        let sorted = inputs.sorted { $0.time < $1.time }
+        guard !sorted.isEmpty else { return [] }
+
+        var buckets: [(startMs: Int64, bars: [CandleBar])] = []
+        for bar in sorted {
+            let bStart = weekStartMs(bar.date)
+            if let lastIdx = buckets.indices.last, buckets[lastIdx].startMs == bStart {
+                buckets[lastIdx].bars.append(bar)
+            } else {
+                buckets.append((bStart, [bar]))
+            }
+        }
+
+        return buckets.map { bucket in
+            let bars = bucket.bars
+            return CandleBar(
+                time: bucket.startMs,
+                open: bars.first!.open,
+                high: bars.map(\.high).max()!,
+                low: bars.map(\.low).min()!,
+                close: bars.last!.close,
+                volume: bars.map(\.volume).reduce(0, +),
+                partial: bars.contains { $0.partial }
+            )
+        }
+    }
+
     /// Bucket-start epoch ms for `bar` under `target`. Session-aligned periods
     /// (4H/Daily) defer to `NYTradingCalendar`; fixed-grid periods (3m) use a
     /// pure epoch grid that needs no timezone/DST/session logic.

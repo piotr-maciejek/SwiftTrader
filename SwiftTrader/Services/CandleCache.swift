@@ -19,15 +19,16 @@ actor CandleCache {
         }
 
         /// Resolve the source for the currently-displayed chart given the rebucketing toggle.
-        /// Raw periods map to `.server`; FOUR_HOURS/DAILY switch with the toggle.
+        /// Raw periods map to `.server`; FOUR_HOURS/DAILY/WEEKLY switch with the toggle.
         /// THREE_MINS has no native server period, so it is ALWAYS `.aggregated`.
+        /// WEEKLY is client-derived in native mode (Dukascopy serves no weekly history),
+        /// built by grouping DAILY candles — so it tracks the toggle like 4H/Daily.
         static func forDisplay(
             instrument: String, period: String, clientSideRebucketing: Bool
         ) -> CacheKey {
-            let source: BarSource =
-                period == "THREE_MINS"
-                    || ((period == "FOUR_HOURS" || period == "DAILY") && clientSideRebucketing)
-                    ? .aggregated : .server
+            let togglesWithRebucketing = period == "FOUR_HOURS" || period == "DAILY" || period == "WEEKLY"
+            let isAggregated = period == "THREE_MINS" || (togglesWithRebucketing && clientSideRebucketing)
+            let source: BarSource = isAggregated ? .aggregated : .server
             return CacheKey(instrument: instrument, period: period, source: source)
         }
     }
