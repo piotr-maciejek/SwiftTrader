@@ -905,6 +905,26 @@ struct ChartView: View {
                                     isSelected: Bool, chartWidth: CGFloat,
                                     chartHeight: CGFloat, priceRange: (min: Double, max: Double)) {
         guard !bars.isEmpty else { return }
+
+        // Freehand: stroke the captured polyline. Covers the in-flight preview too.
+        if drawing.kind == .freehand, let pts = drawing.points, pts.count > 1 {
+            let screenPts = pts.map { point in
+                CGPoint(x: xForTimeMs(point.timeMs),
+                        y: yForPrice(point.price, chartHeight: chartHeight, priceRange: priceRange))
+            }
+            let minX = screenPts.map(\.x).min() ?? 0
+            let maxX = screenPts.map(\.x).max() ?? 0
+            if minX > chartWidth || maxX < 0 { return }
+
+            let color = isSelected ? drawingSelectedColor : drawingDefaultColor
+            let lineWidth: CGFloat = isSelected ? 2.5 : 1.5
+            var path = Path()
+            path.move(to: screenPts[0])
+            for pt in screenPts.dropFirst() { path.addLine(to: pt) }
+            context.stroke(path, with: .color(color), lineWidth: lineWidth)
+            return
+        }
+
         let p1 = CGPoint(x: xForTimeMs(drawing.startTimeMs),
                          y: yForPrice(drawing.startPrice, chartHeight: chartHeight, priceRange: priceRange))
         let p2 = CGPoint(x: xForTimeMs(drawing.endTimeMs),

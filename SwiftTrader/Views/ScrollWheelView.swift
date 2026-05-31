@@ -153,6 +153,8 @@ struct ChartInteractionView: NSViewRepresentable {
         var onSelectDrawing: ((UUID?) -> Void)?
         /// (startTimeMs, startPrice, tool) seeded on drawing mouseDown.
         var inFlightStart: (timeMs: Int64, price: Double, tool: DrawingKind)?
+        /// Accumulated polyline vertices while drawing a freehand stroke.
+        var inFlightPoints: [DrawingPoint] = []
 
         init(transform: Binding<ChartTransform>, barCount: Int, chartWidth: CGFloat,
              onUserDrag: (() -> Void)?, crosshair: Binding<CrosshairState?>,
@@ -186,6 +188,13 @@ struct ChartInteractionView: NSViewRepresentable {
         func hitTestDrawing(mouseX: CGFloat, mouseY: CGFloat, threshold: CGFloat = 6) -> UUID? {
             let point = CGPoint(x: mouseX, y: mouseY)
             for drawing in drawings {
+                if drawing.kind == .freehand, let pts = drawing.points {
+                    let screenPts = pts.map { CGPoint(x: xForTimeMs($0.timeMs), y: yForPrice($0.price)) }
+                    if DrawingMath.distanceFromPolyline(point: point, points: screenPts) <= threshold {
+                        return drawing.id
+                    }
+                    continue
+                }
                 let a = CGPoint(x: xForTimeMs(drawing.startTimeMs), y: yForPrice(drawing.startPrice))
                 let b = CGPoint(x: xForTimeMs(drawing.endTimeMs), y: yForPrice(drawing.endPrice))
                 let d = DrawingMath.distanceFromSegment(point: point, a: a, b: b)
@@ -349,11 +358,21 @@ struct ChartInteractionView: NSViewRepresentable {
                 let startPrice = coord.priceForY(min(max(flippedY, 0), coord.chartHeight))
                 let startTimeMs = coord.timeMsForX(location.x)
                 coord.inFlightStart = (timeMs: startTimeMs, price: startPrice, tool: tool)
-                coord.inFlightDrawing.wrappedValue = Drawing(
-                    kind: tool,
-                    startTimeMs: startTimeMs, startPrice: startPrice,
-                    endTimeMs: startTimeMs, endPrice: startPrice
-                )
+                if tool == .freehand {
+                    coord.inFlightPoints = [DrawingPoint(timeMs: startTimeMs, price: startPrice)]
+                    coord.inFlightDrawing.wrappedValue = Drawing(
+                        kind: .freehand,
+                        startTimeMs: startTimeMs, startPrice: startPrice,
+                        endTimeMs: startTimeMs, endPrice: startPrice,
+                        points: coord.inFlightPoints
+                    )
+                } else {
+                    coord.inFlightDrawing.wrappedValue = Drawing(
+                        kind: tool,
+                        startTimeMs: startTimeMs, startPrice: startPrice,
+                        endTimeMs: startTimeMs, endPrice: startPrice
+                    )
+                }
                 coord.crosshair.wrappedValue = nil
                 return
             }
@@ -415,6 +434,32 @@ struct ChartInteractionView: NSViewRepresentable {
                 let flippedY = bounds.height - location.y
                 let endPrice = coord.priceForY(min(max(flippedY, 0), coord.chartHeight))
                 let endTimeMs = coord.timeMsForX(location.x)
+
+                if start.tool == .freehand {
+                    // Commit only a real stroke: ≥2 vertices spanning some screen distance.
+                    let pts = coord.inFlightPoints
+                    if pts.count >= 2 {
+                        let xs = pts.map { coord.xForTimeMs($0.timeMs) }
+                        let ys = pts.map { coord.yForPrice($0.price) }
+                        let span = max((xs.max() ?? 0) - (xs.min() ?? 0),
+                                       (ys.max() ?? 0) - (ys.min() ?? 0))
+                        if span >= 3 {
+                            let drawing = Drawing(
+                                kind: .freehand,
+                                startTimeMs: pts.first!.timeMs, startPrice: pts.first!.price,
+                                endTimeMs: pts.last!.timeMs, endPrice: pts.last!.price,
+                                points: pts
+                            )
+                            coord.onCommitDrawing?(drawing)
+                        }
+                    }
+                    coord.inFlightPoints = []
+                    coord.inFlightStart = nil
+                    coord.inFlightDrawing.wrappedValue = nil
+                    coord.onSetDrawingTool?(nil)
+                    return
+                }
+
                 // Discard zero-length attempts (likely an accidental click).
                 let dxPixels = abs(coord.xForTimeMs(endTimeMs) - coord.xForTimeMs(start.timeMs))
                 if dxPixels >= 3 {
@@ -473,6 +518,26 @@ struct ChartInteractionView: NSViewRepresentable {
                 let clampedY = min(max(flippedY, 0), coord.chartHeight)
                 let endPrice = coord.priceForY(clampedY)
                 let endTimeMs = coord.timeMsForX(location.x)
+
+                if start.tool == .freehand {
+                    // Sample: only append once the cursor has moved ≥2px in screen
+                    // space from the last vertex, so dense drag events don't bloat
+                    // the polyline.
+                    if let last = coord.inFlightPoints.last {
+                        let lastX = coord.xForTimeMs(last.timeMs)
+                        let lastY = coord.yForPrice(last.price)
+                        if abs(location.x - lastX) < 2 && abs(clampedY - lastY) < 2 { return }
+                    }
+                    coord.inFlightPoints.append(DrawingPoint(timeMs: endTimeMs, price: endPrice))
+                    coord.inFlightDrawing.wrappedValue = Drawing(
+                        kind: .freehand,
+                        startTimeMs: start.timeMs, startPrice: start.price,
+                        endTimeMs: endTimeMs, endPrice: endPrice,
+                        points: coord.inFlightPoints
+                    )
+                    return
+                }
+
                 coord.inFlightDrawing.wrappedValue = Drawing(
                     kind: start.tool,
                     startTimeMs: start.timeMs, startPrice: start.price,
@@ -571,10 +636,14 @@ struct ChartInteractionView: NSViewRepresentable {
                 case 1:  // S → arrow tool
                     coord.onSetDrawingTool?(.arrow)
                     return
+                case 3:  // F → freehand tool
+                    coord.onSetDrawingTool?(.freehand)
+                    return
                 case 53: // Escape
                     if coord.drawingTool != nil {
                         coord.onSetDrawingTool?(nil)
                         coord.inFlightStart = nil
+                        coord.inFlightPoints = []
                         coord.inFlightDrawing.wrappedValue = nil
                         return
                     }

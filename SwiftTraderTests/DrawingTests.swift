@@ -33,6 +33,38 @@ struct DrawingTests {
         let decoded = try JSONDecoder().decode(Drawing.self, from: data)
         #expect(decoded == original)
     }
+
+    @Test("Drawing freehand round-trips through JSON with its polyline")
+    func freehandRoundTrip() throws {
+        let pts = [
+            DrawingPoint(timeMs: 1_700_000_000_000, price: 1.10),
+            DrawingPoint(timeMs: 1_700_000_060_000, price: 1.105),
+            DrawingPoint(timeMs: 1_700_000_120_000, price: 1.102),
+        ]
+        let original = Drawing(
+            kind: .freehand,
+            startTimeMs: pts.first!.timeMs, startPrice: pts.first!.price,
+            endTimeMs: pts.last!.timeMs, endPrice: pts.last!.price,
+            points: pts
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Drawing.self, from: data)
+        #expect(decoded == original)
+        #expect(decoded.points?.count == 3)
+    }
+
+    @Test("Legacy line JSON without `points` decodes with points == nil")
+    func legacyDecodeWithoutPoints() throws {
+        // JSON shaped like a pre-freehand persisted drawing (no `points` key).
+        let json = """
+        {"id":"00000000-0000-0000-0000-000000000001","kind":"line",
+         "startTimeMs":1700000000000,"startPrice":1.0950,
+         "endTimeMs":1700003600000,"endPrice":1.0980}
+        """
+        let decoded = try JSONDecoder().decode(Drawing.self, from: Data(json.utf8))
+        #expect(decoded.kind == .line)
+        #expect(decoded.points == nil)
+    }
 }
 
 @Suite("DrawingMath")
@@ -76,6 +108,33 @@ struct DrawingMathTests {
         let far  = CGPoint(x: 50, y: 6.01)
         #expect(DrawingMath.distanceFromSegment(point: near, a: a, b: b) < 6)
         #expect(DrawingMath.distanceFromSegment(point: far,  a: a, b: b) > 6)
+    }
+
+    // MARK: - Distance from polyline
+
+    @Test("Polyline distance picks the nearest segment")
+    func polylineNearestSegment() {
+        // An L-shape: (0,0)→(10,0)→(10,10).
+        let pts = [CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 0), CGPoint(x: 10, y: 10)]
+        // Off the first (horizontal) segment.
+        let p1 = CGPoint(x: 5, y: 3)
+        #expect(abs(DrawingMath.distanceFromPolyline(point: p1, points: pts) - 3) < 1e-6)
+        // Off the second (vertical) segment.
+        let p2 = CGPoint(x: 13, y: 5)
+        #expect(abs(DrawingMath.distanceFromPolyline(point: p2, points: pts) - 3) < 1e-6)
+    }
+
+    @Test("Point on a polyline vertex is ~zero distance")
+    func polylineOnVertex() {
+        let pts = [CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 0), CGPoint(x: 10, y: 10)]
+        #expect(DrawingMath.distanceFromPolyline(point: CGPoint(x: 10, y: 0), points: pts) < 1e-6)
+    }
+
+    @Test("Degenerate polylines: empty → infinity, single point → point distance")
+    func polylineDegenerate() {
+        #expect(DrawingMath.distanceFromPolyline(point: .zero, points: []) == .infinity)
+        let single = [CGPoint(x: 3, y: 4)]
+        #expect(abs(DrawingMath.distanceFromPolyline(point: .zero, points: single) - 5) < 1e-6)
     }
 
     // MARK: - Arrowhead

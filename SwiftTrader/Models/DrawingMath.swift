@@ -98,6 +98,23 @@ enum DrawingMath {
         return (ex * ex + ey * ey).squareRoot()
     }
 
+    /// Shortest distance from `p` to a polyline (the connected segments through
+    /// `points`), in pixel space. Returns `.infinity` for an empty polyline and
+    /// the point distance for a single vertex. Used to hit-test freehand drawings.
+    static func distanceFromPolyline(point p: CGPoint, points: [CGPoint]) -> CGFloat {
+        guard let first = points.first else { return .infinity }
+        guard points.count > 1 else {
+            let ex = p.x - first.x
+            let ey = p.y - first.y
+            return (ex * ex + ey * ey).squareRoot()
+        }
+        var best = CGFloat.infinity
+        for i in 0..<(points.count - 1) {
+            best = min(best, distanceFromSegment(point: p, a: points[i], b: points[i + 1]))
+        }
+        return best
+    }
+
     /// Arrowhead tip points for an arrow from `p1` to `p2`. Two short strokes
     /// from `p2` back toward `p1`, splayed ±30° around the line direction.
     static func arrowHeadTips(from p1: CGPoint,

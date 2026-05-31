@@ -21,6 +21,7 @@ struct ShortcutsPopover: View {
         ("Drawing (chart focused)", [
             Row(label: "Line tool", keys: "A"),
             Row(label: "Arrow tool", keys: "S"),
+            Row(label: "Freehand tool", keys: "F"),
             Row(label: "Delete selected drawing", keys: "D / ⌫"),
             Row(label: "Clear all drawings (this chart)", keys: "⇧D / ⇧⌫"),
             Row(label: "Clear all drawings (every cell)", keys: "⌥D"),
