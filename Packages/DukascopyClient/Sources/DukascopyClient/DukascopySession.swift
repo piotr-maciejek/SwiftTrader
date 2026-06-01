@@ -986,15 +986,15 @@ public actor DukascopySession {
         case .orderResponse(let r):
             handleOrderResponse(r)
         case .calendarEvent(let e):
-            log.info("calendar event: \(e.country ?? "-", privacy: .public) [\(e.eventCategory ?? "-", privacy: .public)] \(e.description ?? "-", privacy: .public)")
+            log.debug("calendar event: \(e.country ?? "-", privacy: .public) [\(e.eventCategory ?? "-", privacy: .public)] \(e.description ?? "-", privacy: .public)")
             for (_, c) in newsEventStreams { c.yield(.calendar(e, story: NewsStoryMsg())) }
         case .newsStory(let s):
             if let cal = s.content {
                 // Calendar entries arrive embedded in a NewsStoryMessage's content.
-                log.info("calendar event: \(cal.country ?? "-", privacy: .public) [\(cal.eventCategory ?? "-", privacy: .public)] \(cal.description ?? "-", privacy: .public)")
+                log.debug("calendar event: \(cal.country ?? "-", privacy: .public) [\(cal.eventCategory ?? "-", privacy: .public)] \(cal.description ?? "-", privacy: .public)")
                 for (_, c) in newsEventStreams { c.yield(.calendar(cal, story: s)) }
             } else {
-                log.info("news story: [hot=\(s.hot)] \(s.header ?? "-", privacy: .public)")
+                log.debug("news story: [hot=\(s.hot)] \(s.header ?? "-", privacy: .public)")
                 for (_, c) in newsEventStreams { c.yield(.story(s)) }
             }
         case .currencyMarket(let cm):
