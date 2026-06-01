@@ -335,43 +335,53 @@ struct VisualOrderManagementTests {
 @Suite("Visual order panel placement")
 @MainActor
 struct VisualOrderPanelPlacementTests {
-    @Test("Panel sits to the right of the box when there's room, never covering it")
+    @Test("Default: panel sits to the right of the box, centred on entry")
     func placesRightWhenRoom() {
         let r = ChartView.visualOrderPanelRect(
-            boxLeft: 100, boxRight: 300, entryY: 400, isBuy: true,
-            chartWidth: 1000, chartHeight: 800)
+            boxLeft: 100, boxRight: 300, entryY: 400, boxTopY: 350, boxBottomY: 450,
+            isBuy: true, chartWidth: 1000, chartHeight: 800)
         #expect(r.minX >= 300)               // entirely right of the box
-        #expect(abs(r.minX - 310) < 0.001)   // boxRight + gap(10)
-        #expect(r.maxX <= 1000 - 4)          // within bounds
+        #expect(abs(r.minX - 308) < 0.001)   // boxRight + gap(8)
+        #expect(r.maxX <= 1000 - 4)
         #expect(abs(r.midY - 400) < 0.001)   // centred on entry
     }
 
-    @Test("Panel flips to the left of the box when the right would overflow")
-    func flipsLeftWhenRightOverflows() {
+    @Test("No room right → BUY drops the panel BELOW the box (risk side), off the candles")
+    func buyFallsBelowWhenNoRoomRight() {
         let r = ChartView.visualOrderPanelRect(
-            boxLeft: 750, boxRight: 950, entryY: 400, isBuy: false,
-            chartWidth: 1000, chartHeight: 800)
-        #expect(r.maxX <= 750)            // entirely left of the box
-        #expect(r.minX >= 4)              // within bounds
+            boxLeft: 750, boxRight: 970, entryY: 400, boxTopY: 350, boxBottomY: 450,
+            isBuy: true, chartWidth: 1000, chartHeight: 800)
+        #expect(r.minY >= 450)               // entirely below the box
+        #expect(abs(r.minY - 458) < 0.001)   // boxBottomY + gap(8)
+        #expect(r.maxX <= 1000 - 4)          // within bounds
     }
 
-    @Test("Panel stays on-screen even in a too-narrow cell")
-    func clampsInNarrowCell() {
+    @Test("No room right → SELL drops the panel ABOVE the box")
+    func sellFallsAboveWhenNoRoomRight() {
         let r = ChartView.visualOrderPanelRect(
-            boxLeft: 120, boxRight: 320, entryY: 200, isBuy: true,
-            chartWidth: 400, chartHeight: 500)
+            boxLeft: 750, boxRight: 970, entryY: 400, boxTopY: 350, boxBottomY: 450,
+            isBuy: false, chartWidth: 1000, chartHeight: 800)
+        #expect(r.maxY <= 350)               // entirely above the box
+        #expect(abs(r.maxY - 342) < 0.001)   // boxTopY - gap(8)
+    }
+
+    @Test("BUY flips above when there's no room below")
+    func buyFlipsAboveWhenNoRoomBelow() {
+        // No room right; box bottom near the chart floor so below doesn't fit → flip above.
+        let r = ChartView.visualOrderPanelRect(
+            boxLeft: 750, boxRight: 970, entryY: 400, boxTopY: 300, boxBottomY: 700,
+            isBuy: true, chartWidth: 1000, chartHeight: 800)
+        #expect(r.maxY <= 300)               // flipped above the box
+    }
+
+    @Test("Always stays on-screen, even in a too-narrow/short cell")
+    func clampsOnScreen() {
+        let r = ChartView.visualOrderPanelRect(
+            boxLeft: 120, boxRight: 320, entryY: 200, boxTopY: 150, boxBottomY: 260,
+            isBuy: true, chartWidth: 400, chartHeight: 500)
         #expect(r.minX >= 4)
         #expect(r.maxX <= 400 - 4)
         #expect(r.minY >= 4)
         #expect(r.maxY <= 500 - 4)
-    }
-
-    @Test("Vertical centre clamps to the chart, never off-screen")
-    func clampsVertically() {
-        // Entry near the top → panel would extend above 0, clamps to y=4.
-        let r = ChartView.visualOrderPanelRect(
-            boxLeft: 100, boxRight: 300, entryY: 10, isBuy: true,
-            chartWidth: 1000, chartHeight: 800)
-        #expect(r.minY == 4)
     }
 }

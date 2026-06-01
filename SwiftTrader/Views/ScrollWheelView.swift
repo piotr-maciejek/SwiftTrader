@@ -266,12 +266,14 @@ struct ChartInteractionView: NSViewRepresentable {
             guard let vo = visualOrder else { return nil }
             // Buttons live in a fixed-size control panel — mirror ChartView's geometry.
             let entryY = yForPrice(vo.entryPrice)
+            let slY = yForPrice(vo.stopLoss)
+            let tpY = yForPrice(vo.takeProfit)
             let slotWidth = transform.wrappedValue.candleSlotWidth
             let leftX = CGFloat(vo.startBarIndex) * slotWidth - transform.wrappedValue.xOffset
             let rightX = CGFloat(vo.endBarIndex) * slotWidth - transform.wrappedValue.xOffset + slotWidth
             let panelRect = ChartView.visualOrderPanelRect(
-                boxLeft: leftX, boxRight: rightX,
-                entryY: entryY, isBuy: vo.direction == "BUY",
+                boxLeft: leftX, boxRight: rightX, entryY: entryY,
+                boxTopY: min(slY, tpY), boxBottomY: max(slY, tpY), isBuy: vo.direction == "BUY",
                 chartWidth: chartWidth, chartHeight: chartHeight
             )
             let midX = panelRect.midX

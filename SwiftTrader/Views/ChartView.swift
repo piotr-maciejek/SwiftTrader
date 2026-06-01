@@ -1082,30 +1082,34 @@ struct ChartView: View {
     static let visualOrderPanelWidth: CGFloat = 180
     static let visualOrderPanelHeight: CGFloat = 140
 
-    /// Panel sits BESIDE the box (not on top of it) so the red/green SL/TP zones stay
-    /// visible. Prefer the right of the box; fall back to the left when the right would
-    /// overflow the chart; as a last resort (narrow cell) use whichever side has more room,
-    /// clamped on-screen. Vertically centred on the entry line. `isBuy` is no longer used
-    /// for placement (kept for signature stability across the drawing + hit-test call sites).
-    static func visualOrderPanelRect(boxLeft: CGFloat, boxRight: CGFloat,
-                                     entryY: CGFloat, isBuy: Bool,
+    /// Default: panel BESIDE the box on the right (the empty future area, ahead of the live
+    /// bar), vertically centred on the entry line — clears both the candles and the SL/TP
+    /// zones. When there's no room on the right (box near the chart edge), drop it onto the
+    /// RISK side instead of back over the candles: BELOW the box for a BUY (TP/green is above),
+    /// ABOVE for a SELL — flipping if the preferred side has no room, clamping as a last resort.
+    static func visualOrderPanelRect(boxLeft: CGFloat, boxRight: CGFloat, entryY: CGFloat,
+                                     boxTopY: CGFloat, boxBottomY: CGFloat, isBuy: Bool,
                                      chartWidth: CGFloat, chartHeight: CGFloat) -> CGRect {
         let width = visualOrderPanelWidth
         let height = visualOrderPanelHeight
-        let gap: CGFloat = 10
+        let gap: CGFloat = 8
+        func clampY(_ y: CGFloat) -> CGFloat { max(4, min(chartHeight - height - 4, y)) }
+        func fitsY(_ y: CGFloat) -> Bool { y >= 4 && y + height <= chartHeight - 4 }
+
+        // Preferred: to the right of the box.
         let rightX = boxRight + gap
-        let leftX = boxLeft - gap - width
-        let x: CGFloat
         if rightX + width <= chartWidth - 4 {
-            x = rightX                                   // fits to the right (preferred)
-        } else if leftX >= 4 {
-            x = leftX                                    // else to the left
-        } else if (chartWidth - boxRight) >= boxLeft {
-            x = min(chartWidth - width - 4, rightX)      // neither fits: more room on the right
-        } else {
-            x = max(4, leftX)                            // more room on the left
+            return CGRect(x: rightX, y: clampY(entryY - height / 2), width: width, height: height)
         }
-        let y = max(4, min(chartHeight - height - 4, entryY - height / 2))
+
+        // Fallback: on the risk side, anchored to the box's left edge (just past the newest
+        // candle), clamped on-screen.
+        let x = max(4, min(chartWidth - width - 4, boxLeft))
+        let belowY = boxBottomY + gap
+        let aboveY = boxTopY - gap - height
+        let y: CGFloat = isBuy
+            ? (fitsY(belowY) ? belowY : (fitsY(aboveY) ? aboveY : clampY(belowY)))
+            : (fitsY(aboveY) ? aboveY : (fitsY(belowY) ? belowY : clampY(aboveY)))
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
@@ -1218,8 +1222,8 @@ struct ChartView: View {
         // the SL/TP labels so the labels can be placed on the OPPOSITE side and never hide
         // behind the panel.
         let panelRect = Self.visualOrderPanelRect(
-            boxLeft: leftX, boxRight: rightX,
-            entryY: entryY, isBuy: isBuy,
+            boxLeft: leftX, boxRight: rightX, entryY: entryY,
+            boxTopY: topY, boxBottomY: bottomY, isBuy: isBuy,
             chartWidth: chartWidth, chartHeight: chartHeight
         )
 
