@@ -15,10 +15,211 @@ public extension WireClass {
     static let extApiOrderResponse    = "com.dukascopy.dds3.transport.msg.extapi.ExtApiOrderResponse"
 }
 
-// MARK: - ProtocolMessage envelope (shared by every order request)
+public extension WireClass {
+    static let orderDirectionEnum = "com.dukascopy.dds3.transport.msg.types.OrderDirection"
+    static let orderSideEnum      = "com.dukascopy.dds3.transport.msg.types.OrderSide"
+    static let positionSideEnum   = "com.dukascopy.dds3.transport.msg.types.PositionSide"
+    static let orderStateEnum     = "com.dukascopy.dds3.transport.msg.types.OrderState"
+    static let stopDirectionEnum  = "com.dukascopy.dds3.transport.msg.types.StopDirection"
+}
 
-/// The request-correlation + identity fields every order request carries.
-/// `requestId` is the key we await `ExtApiOrderResponse` on.
+/// Enum wire values used when ENCODING orders (inverse of the OrderEnums tables).
+enum OrderEnumValue {
+    static let directionOpen: Int32 = 2432586
+    static let directionClose: Int32 = 64218584
+    static let sideBuy: Int32 = 66150
+    static let sideSell: Int32 = 2541394
+    static let positionLong: Int32 = 2342524
+    static let positionShort: Int32 = 78875740
+    static let stateCreated: Int32 = 1746537160
+    static let stateCancelled: Int32 = -1031784143
+    static let stopGreaterBid: Int32 = -1215583496
+    static let stopGreaterAsk: Int32 = -1215584140
+    static let stopLessBid: Int32 = -1421388489
+    static let stopLessAsk: Int32 = -1421389133
+}
+
+/// Pending entry kind. The opening order's `stopDirection` is derived from side + kind:
+/// BUY LIMIT → LESS_ASK, SELL LIMIT → GREATER_BID, BUY STOP → GREATER_ASK, SELL STOP → LESS_BID.
+public enum PendingKind: Sendable { case limit, stop }
+
+func entryStopDirection(side: String, kind: PendingKind) -> Int32 {
+    switch (side, kind) {
+    case ("BUY", .limit):  return OrderEnumValue.stopLessAsk
+    case ("SELL", .limit): return OrderEnumValue.stopGreaterBid
+    case ("BUY", .stop):   return OrderEnumValue.stopGreaterAsk
+    default:               return OrderEnumValue.stopLessBid   // SELL stop
+    }
+}
+
+/// Builds an `OrderGroupMessage` frame that places a pending LIMIT/STOP entry order:
+/// the opening order carries the trigger price in `priceStop`, the current market in
+/// `priceClient`, and a `stopDirection` selecting limit-vs-stop semantics.
+public func encodePendingOrderGroup(
+    instrument: String, side: String, kind: PendingKind, amount: BigDecimalValue,
+    triggerPrice: BigDecimalValue, priceClient: BigDecimalValue, label: String,
+    userId: String?, sessionId: String?, requestId: String, timestamp: Int64
+) -> Data {
+    var ord = BinaryWriter()
+    ord.writeInt32BE(javaStringHashCode(WireClass.orderMessageExt))
+    writeField(&ord, fieldId: 12424) { $0.writeString(instrument) }
+    writeEnumField(&ord, fieldId: -19551, enumClass: WireClass.orderDirectionEnum, value: OrderEnumValue.directionOpen)
+    writeEnumField(&ord, fieldId: -7924, enumClass: WireClass.orderSideEnum,
+                   value: side == "BUY" ? OrderEnumValue.sideBuy : OrderEnumValue.sideSell)
+    writeField(&ord, fieldId: -30914) { $0.writeBigDecimal(triggerPrice) }   // priceStop = trigger
+    writeField(&ord, fieldId: 14767) { $0.writeBigDecimal(priceClient) }     // current market
+    writeEnumField(&ord, fieldId: 19053, enumClass: WireClass.stopDirectionEnum,
+                   value: entryStopDirection(side: side, kind: kind))
+    if kind == .limit { writeField(&ord, fieldId: -3668) { $0.writeBigDecimal(.zero) } }  // priceTrailingLimit
+    writeField(&ord, fieldId: -5158) { $0.writeBigDecimal(amount) }
+    writeField(&ord, fieldId: -8548) { $0.writeString(label) }
+    if let sessionId { writeField(&ord, fieldId: 28132) { $0.writeString(sessionId) } }
+
+    var w = BinaryWriter()
+    w.writeInt32BE(javaStringHashCode(WireClass.orderGroupMessage))
+    writeField(&w, fieldId: 12424) { $0.writeString(instrument) }
+    if let userId { writeField(&w, fieldId: -31160) { $0.writeString(userId) } }
+    writeField(&w, fieldId: 17261) { $0.writeString(requestId) }
+    writeField(&w, fieldId: -28332) { $0.writeInt64BE(timestamp) }
+    writeSingleMessageListField(&w, fieldId: -23746, elementClass: WireClass.orderMessageExt, body: ord.data)
+    return w.data
+}
+
+/// Writes an enum field: `int16 fieldId + int32 len + [enumClassId(int32) + value(int32)]`.
+func writeEnumField(_ w: inout BinaryWriter, fieldId: Int16, enumClass: String, value: Int32) {
+    writeField(&w, fieldId: fieldId) { sub in
+        sub.writeInt32BE(javaStringHashCode(enumClass))
+        sub.writeInt32BE(value)
+    }
+}
+
+/// Writes a `List<Message>` field value containing a single message `body`
+/// (which already begins with its classId), matching `decodeMessageList`.
+func writeSingleMessageListField(_ w: inout BinaryWriter, fieldId: Int16, elementClass: String, body: Data) {
+    writeField(&w, fieldId: fieldId) { sub in
+        sub.writeInt32BE(javaStringHashCode(WireType.arrayListClass))
+        sub.writeVarLen(1)
+        sub.writeInt32BE(javaStringHashCode(elementClass))   // element class id
+        sub.writeVarLen(body.count)
+        sub.writeBytes(body)
+    }
+}
+
+/// Builds an `OrderGroupMessage` frame that submits a MARKET order — the path the
+/// desktop client uses (`OrderEntryAction` → `controlRequest`): a group carrying one
+/// opening `OrderMessageExt` (direction OPEN, side, client price, amount, label).
+public func encodeMarketOrderGroup(
+    instrument: String, side: String, amount: BigDecimalValue, priceClient: BigDecimalValue,
+    label: String, userId: String?, accountLoginId: String?, sessionId: String?,
+    requestId: String, timestamp: Int64
+) -> Data {
+    // Opening order body = classId + fields.
+    var ord = BinaryWriter()
+    ord.writeInt32BE(javaStringHashCode(WireClass.orderMessageExt))
+    writeField(&ord, fieldId: 12424) { $0.writeString(instrument) }
+    writeEnumField(&ord, fieldId: -19551, enumClass: WireClass.orderDirectionEnum, value: OrderEnumValue.directionOpen)
+    writeEnumField(&ord, fieldId: -7924, enumClass: WireClass.orderSideEnum,
+                   value: side == "BUY" ? OrderEnumValue.sideBuy : OrderEnumValue.sideSell)
+    writeField(&ord, fieldId: 14767) { $0.writeBigDecimal(priceClient) }
+    writeField(&ord, fieldId: -5158) { $0.writeBigDecimal(amount) }
+    writeField(&ord, fieldId: -8548) { $0.writeString(label) }
+    if let sessionId { writeField(&ord, fieldId: 28132) { $0.writeString(sessionId) } }   // security info
+
+    var w = BinaryWriter()
+    w.writeInt32BE(javaStringHashCode(WireClass.orderGroupMessage))
+    writeField(&w, fieldId: 12424) { $0.writeString(instrument) }
+    if let userId { writeField(&w, fieldId: -31160) { $0.writeString(userId) } }
+    if let accountLoginId, !accountLoginId.isEmpty { writeField(&w, fieldId: 9208) { $0.writeString(accountLoginId) } }
+    writeField(&w, fieldId: 17261) { $0.writeString(requestId) }
+    writeField(&w, fieldId: -28332) { $0.writeInt64BE(timestamp) }
+    writeSingleMessageListField(&w, fieldId: -23746, elementClass: WireClass.orderMessageExt, body: ord.data)
+    return w.data
+}
+
+/// Builds an `OrderGroupMessage` frame that CLOSES a position: the same group id with
+/// `amount = 0` (per `OrderMessageUtils.prepareGroupForClose`).
+/// Builds an `OrderGroupMessage` frame that CLOSES a position — the position group
+/// carrying one nested CLOSE order (opposite side, state CREATED, current price),
+/// per `OrderGroupCloseAction` + `ProtocolUtils.createPositionClosingOrder`.
+/// `positionSide` is the open position's side ("BUY"/"SELL"); the closing order
+/// takes the opposite side.
+public func encodeCloseOrderGroup(
+    orderGroupId: String, instrument: String, positionSide: String, amount: BigDecimalValue,
+    pricePosOpen: BigDecimalValue?, priceClient: BigDecimalValue,
+    userId: String?, sessionId: String?, requestId: String, timestamp: Int64
+) -> Data {
+    let closeSideBuy = positionSide != "BUY"   // close a LONG by SELL, a SHORT by BUY
+
+    // Closing order body = classId + fields.
+    var ord = BinaryWriter()
+    ord.writeInt32BE(javaStringHashCode(WireClass.orderMessageExt))
+    writeField(&ord, fieldId: 12424) { $0.writeString(instrument) }
+    writeField(&ord, fieldId: 29772) { $0.writeString(orderGroupId) }
+    writeEnumField(&ord, fieldId: -19551, enumClass: WireClass.orderDirectionEnum, value: OrderEnumValue.directionClose)
+    writeEnumField(&ord, fieldId: -7924, enumClass: WireClass.orderSideEnum,
+                   value: closeSideBuy ? OrderEnumValue.sideBuy : OrderEnumValue.sideSell)
+    writeEnumField(&ord, fieldId: 32505, enumClass: WireClass.orderStateEnum, value: OrderEnumValue.stateCreated)
+    writeField(&ord, fieldId: 14767) { $0.writeBigDecimal(priceClient) }
+    writeField(&ord, fieldId: -5158) { $0.writeBigDecimal(amount) }
+    if let sessionId { writeField(&ord, fieldId: 28132) { $0.writeString(sessionId) } }
+
+    var w = BinaryWriter()
+    w.writeInt32BE(javaStringHashCode(WireClass.orderGroupMessage))
+    writeField(&w, fieldId: 29772) { $0.writeString(orderGroupId) }
+    writeField(&w, fieldId: 12424) { $0.writeString(instrument) }
+    writeEnumField(&w, fieldId: -25925, enumClass: WireClass.positionSideEnum,
+                   value: positionSide == "BUY" ? OrderEnumValue.positionLong : OrderEnumValue.positionShort)
+    writeField(&w, fieldId: -5158) { $0.writeBigDecimal(amount) }
+    if let pricePosOpen { writeField(&w, fieldId: -27533) { $0.writeBigDecimal(pricePosOpen) } }
+    if let userId { writeField(&w, fieldId: -31160) { $0.writeString(userId) } }
+    writeField(&w, fieldId: 17261) { $0.writeString(requestId) }
+    writeField(&w, fieldId: -28332) { $0.writeInt64BE(timestamp) }
+    writeSingleMessageListField(&w, fieldId: -23746, elementClass: WireClass.orderMessageExt, body: ord.data)
+    return w.data
+}
+
+/// Builds a top-level `OrderMessage` that CANCELS a pending order — a copy of the
+/// pending order with `state = CANCELLED` (per `CancelOrderAction`). Sent directly,
+/// not wrapped in a group.
+public func encodeCancelOrder(
+    order: OrderMsg, userId: String?, sessionId: String?, requestId: String, timestamp: Int64
+) -> Data {
+    var w = BinaryWriter()
+    w.writeInt32BE(javaStringHashCode(WireClass.orderMessageExt))
+    if let oid = order.orderId { writeField(&w, fieldId: -12183) { $0.writeString(oid) } }
+    if let gid = order.orderGroupId { writeField(&w, fieldId: 29772) { $0.writeString(gid) } }
+    if let inst = order.instrument { writeField(&w, fieldId: 12424) { $0.writeString(inst) } }
+    if let side = order.side {
+        writeEnumField(&w, fieldId: -7924, enumClass: WireClass.orderSideEnum,
+                       value: side == "BUY" ? OrderEnumValue.sideBuy : OrderEnumValue.sideSell)
+    }
+    if let amt = order.amount { writeField(&w, fieldId: -5158) { $0.writeBigDecimal(amt) } }
+    if let ps = order.priceStop { writeField(&w, fieldId: -30914) { $0.writeBigDecimal(ps) } }
+    writeEnumField(&w, fieldId: 32505, enumClass: WireClass.orderStateEnum, value: OrderEnumValue.stateCancelled)
+    if let sessionId { writeField(&w, fieldId: 28132) { $0.writeString(sessionId) } }
+    if let userId { writeField(&w, fieldId: -31160) { $0.writeString(userId) } }
+    writeField(&w, fieldId: 17261) { $0.writeString(requestId) }
+    writeField(&w, fieldId: -28332) { $0.writeInt64BE(timestamp) }
+    return w.data
+}
+
+/// Inbound order/position events surfaced by `DukascopySession.orderEvents()`.
+public enum OrderEvent: Sendable {
+    case response(ExtApiOrderResponse)   // submit/close/modify ack or state change
+    case group(OrderGroup)               // live position update
+    case order(OrderMsg)                 // live single-order update
+}
+
+// MARK: - extapi order requests (SUPERSEDED — not used by the live path)
+//
+// These `extapi.Submit*Request` messages are the external-API gateway's order
+// protocol. The Dukascopy DESKTOP server silently ignores them; verified on demo
+// (2026-06-01). The working order path is the `ord.OrderGroupMessage` one the
+// desktop client uses — see `encodeMarketOrderGroup` / `encodePendingOrderGroup` /
+// `encodeCloseOrderGroup` / `encodeCancelOrder` and the `DukascopySession.submit*`
+// methods. These encoders are kept only as documented reference + their unit tests.
+
+/// The request-correlation + identity fields every extapi order request carries.
 struct OrderEnvelope: Sendable {
     var requestId: String
     var accountLoginId: String?

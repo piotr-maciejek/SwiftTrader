@@ -21,6 +21,7 @@ public actor DukascopySession {
         case authFailed(String)
         case notConnected
         case timedOut(String)
+        case orderRejected(String, String?)
 
         public var description: String {
             switch self {
@@ -29,6 +30,8 @@ public actor DukascopySession {
             case .authFailed(let s): "authentication failed: \(s)"
             case .notConnected: "session is not connected"
             case .timedOut(let what): "\(what) timed out"
+            case .orderRejected(let state, let reason):
+                "order rejected (\(state))" + (reason.map { ": \($0)" } ?? "")
             }
         }
 
@@ -77,6 +80,11 @@ public actor DukascopySession {
     // when a CurrencyMarket message arrives. Consumers filter to the instruments they care
     // about. Removed on stream termination so this dictionary stays bounded.
     private var tickStreams: [UUID: AsyncStream<CurrencyMarket>.Continuation] = [:]
+    /// Open positions by `orderGroupId`, seeded from the connect-time PackedAccountInfo
+    /// and kept current by live OrderGroup updates (removed when a group goes CLOSE).
+    private var positions: [String: OrderGroup] = [:]
+    /// Multicast order/position event consumers (mirrors `tickStreams`).
+    private var orderEventStreams: [UUID: AsyncStream<OrderEvent>.Continuation] = [:]
     /// Debounce flag for the silent-DDS watchdog: when a fetchHistory idle-times-out
     /// every subsequent fetchHistory is hung on the same wedged channel, so we trigger
     /// a forced reconnect — but multiple in-flight requests hitting their timeouts
@@ -639,8 +647,146 @@ public actor DukascopySession {
         cont.resume(throwing: SessionError.timedOut("account snapshot"))
     }
 
-    /// Fail every in-flight history request and account waiter — called on teardown so
-    /// a socket drop / server error / `close()` never leaves a caller suspended forever.
+    // MARK: - Orders & positions
+
+    /// Snapshot of the currently-open position groups.
+    public func positionsSnapshot() -> [OrderGroup] { Array(positions.values) }
+
+    /// Multicast stream of inbound order/position events (acks + live updates).
+    public func orderEvents() -> AsyncStream<OrderEvent> {
+        let id = UUID()
+        return AsyncStream<OrderEvent> { continuation in
+            Task { [weak self] in await self?.registerOrderStream(id: id, continuation: continuation) }
+            continuation.onTermination = { [weak self] _ in
+                Task { [weak self] in await self?.unregisterOrderStream(id: id) }
+            }
+        }
+    }
+
+    private func registerOrderStream(id: UUID, continuation: AsyncStream<OrderEvent>.Continuation) {
+        orderEventStreams[id] = continuation
+    }
+    private func unregisterOrderStream(id: UUID) {
+        orderEventStreams.removeValue(forKey: id)
+    }
+
+    /// Submit a MARKET order by sending an `OrderGroupMessage` (the desktop client's
+    /// path). Fire-and-forget: the server streams the resulting order/position state
+    /// back via `orderEvents()`. Returns the `requestId` so the caller can correlate.
+    /// `priceClient` is the current market price the user is acting on.
+    @discardableResult
+    public func submitMarketOrder(
+        instrument: String, side: String, amount: BigDecimalValue,
+        priceClient: BigDecimalValue, label: String
+    ) async throws -> String {
+        guard state == .connected, let transport else { throw SessionError.notConnected }
+        let reqId = UUID().uuidString
+        let frame = encodeMarketOrderGroup(
+            instrument: instrument, side: side, amount: amount, priceClient: priceClient,
+            label: label, userId: latestAccount?.userId, accountLoginId: latestAccount?.accountLoginId,
+            sessionId: authSessionId,
+            requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        try await transport.sendFrame(frame)
+        return reqId
+    }
+
+    /// Submit a pending LIMIT/STOP entry order at `triggerPrice`. Fire-and-forget;
+    /// the resulting pending order arrives via `orderEvents()`.
+    @discardableResult
+    public func submitPendingOrder(
+        instrument: String, side: String, kind: PendingKind,
+        amount: BigDecimalValue, triggerPrice: BigDecimalValue, label: String
+    ) async throws -> String {
+        guard state == .connected, let transport else { throw SessionError.notConnected }
+        guard let priceClient = await currentPrice(instrument: instrument, buy: side == "BUY") else {
+            throw SessionError.timedOut("pending: no price for \(instrument)")
+        }
+        let reqId = UUID().uuidString
+        let frame = encodePendingOrderGroup(
+            instrument: instrument, side: side, kind: kind, amount: amount,
+            triggerPrice: triggerPrice, priceClient: priceClient, label: label,
+            userId: latestAccount?.userId, sessionId: authSessionId,
+            requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        try await transport.sendFrame(frame)
+        return reqId
+    }
+
+    /// Close an entire position group by its `orderGroupId`. Sends the position group
+    /// with a nested CLOSE order at the current market price. Fire-and-forget; the
+    /// resulting state change arrives via `orderEvents()`.
+    @discardableResult
+    public func closePosition(positionId: String) async throws -> String {
+        guard state == .connected, let transport else { throw SessionError.notConnected }
+        guard let group = positions[positionId],
+              let instrument = group.instrument,
+              let side = group.side,
+              let amount = group.amount else {
+            throw SessionError.timedOut("close: unknown position \(positionId)")
+        }
+        // Close a LONG by SELL (at bid); a SHORT by BUY (at ask).
+        let closeSideBuy = side != "BUY"
+        guard let price = await currentPrice(instrument: instrument, buy: closeSideBuy) else {
+            throw SessionError.timedOut("close: no price for \(instrument)")
+        }
+        let reqId = UUID().uuidString
+        let frame = encodeCloseOrderGroup(
+            orderGroupId: positionId, instrument: instrument, positionSide: side, amount: amount,
+            pricePosOpen: group.pricePosOpen, priceClient: price,
+            userId: latestAccount?.userId, sessionId: authSessionId,
+            requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        try await transport.sendFrame(frame)
+        return reqId
+    }
+
+    /// Cancel a pending order by `orderId` (found among the stored position groups).
+    @discardableResult
+    public func cancelOrder(orderId: String) async throws -> String {
+        guard state == .connected, let transport else { throw SessionError.notConnected }
+        var found: OrderMsg?
+        for g in positions.values {
+            if let o = g.orders.first(where: { $0.orderId == orderId }) { found = o; break }
+        }
+        guard let order = found else { throw SessionError.timedOut("cancel: unknown order \(orderId)") }
+        let reqId = UUID().uuidString
+        let frame = encodeCancelOrder(
+            order: order, userId: latestAccount?.userId, sessionId: authSessionId,
+            requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        try await transport.sendFrame(frame)
+        return reqId
+    }
+
+    /// First quote for `instrument` (ask if `buy`, else bid), bounded by `timeout`.
+    private func currentPrice(instrument: String, buy: Bool, timeout: TimeInterval = 6) async -> BigDecimalValue? {
+        try? await ensureSubscribedQuotes([instrument])
+        return await withTaskGroup(of: BigDecimalValue?.self) { group in
+            group.addTask { [weak self] in
+                guard let self else { return nil }
+                for await t in await self.tickStream() where t.instrument == instrument {
+                    return buy ? t.bestAsk : t.bestBid
+                }
+                return nil
+            }
+            group.addTask { try? await Task.sleep(for: .seconds(timeout)); return nil }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
+    }
+
+    /// Broadcasts a server order ack on `orderEvents()`. The desktop order path is
+    /// fire-and-forget — order/position state changes arrive as OrderGroup/OrderMsg
+    /// updates; an `ExtApiOrderResponse` (if the server ever sends one) is surfaced here too.
+    private func handleOrderResponse(_ r: ExtApiOrderResponse) {
+        log.info("order response: state=\(r.state ?? "-", privacy: .public) orderId=\(r.orderId ?? "-", privacy: .public) positionId=\(r.positionId ?? "-", privacy: .public) reqId=\(r.requestId ?? "-", privacy: .public)")
+        for (_, c) in orderEventStreams { c.yield(.response(r)) }
+    }
+
+    /// Fail every in-flight history request and account waiter — called on teardown
+    /// so a socket drop / server error / `close()` never leaves a caller suspended forever.
     private func failAllPending(_ error: Error) {
         let histories = pendingHistory
         pendingHistory.removeAll()
@@ -740,6 +886,21 @@ public actor DukascopySession {
             handleHistoryGroup(g)
         case .packedAccountInfo(let p):
             handleAccountInfo(p.account)
+            for g in p.groups where g.orderGroupId != nil {
+                positions[g.orderGroupId!] = g
+            }
+            if !p.groups.isEmpty {
+                log.info("packed account info: \(p.groups.count) position group(s), \(p.orders.count) order(s)")
+            }
+        case .orderGroup(let g):
+            if let id = g.orderGroupId {
+                if g.isOpen { positions[id] = g } else { positions.removeValue(forKey: id) }
+            }
+            for (_, c) in orderEventStreams { c.yield(.group(g)) }
+        case .order(let o):
+            for (_, c) in orderEventStreams { c.yield(.order(o)) }
+        case .orderResponse(let r):
+            handleOrderResponse(r)
         case .currencyMarket(let cm):
             log.debug("tick \(cm.instrument, privacy: .public) bid=\(cm.bestBid?.description ?? "-", privacy: .public)")
             for (_, c) in tickStreams { c.yield(cm) }

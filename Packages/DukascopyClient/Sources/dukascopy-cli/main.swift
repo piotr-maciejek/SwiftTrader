@@ -8,7 +8,7 @@ struct DukascopyCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dukascopy-cli",
         abstract: "Dukascopy native protocol prototyping CLI.",
-        subcommands: [JNLPCommand.self, AuthCommand.self, LoginInfoCommand.self, CaptchaCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self, BulkSpikeCommand.self]
+        subcommands: [JNLPCommand.self, AuthCommand.self, LoginInfoCommand.self, CaptchaCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self, BulkSpikeCommand.self, PositionsCommand.self, SubmitCommand.self, CloseCommand.self, CancelCommand.self, HashOfCommand.self]
     )
 }
 
@@ -458,6 +458,7 @@ struct AccountCommand: AsyncParsableCommand {
 
     private func printAccount(_ a: AccountInfo) {
         print("login:        \(a.accountLoginId ?? "-")")
+        print("userId:       \(a.userId ?? "-")")
         print("currency:     \(a.currency ?? "-")")
         print("balance:      \(a.balance?.description ?? "-")")
         print("equity:       \(a.equity?.description ?? "-")")
@@ -467,6 +468,219 @@ struct AccountCommand: AsyncParsableCommand {
         }
         print("leverage:     \(a.leverage.map(String.init) ?? "-")")
         print("state:        \(a.state ?? "-")")
+    }
+}
+
+private func printGroup(_ g: OrderGroup) {
+    print("  position \(g.orderGroupId ?? "-")  \(g.instrument ?? "-")  \(g.side ?? "-")  \(g.status ?? "-")  amount=\(g.amount?.description ?? "-")  open=\(g.pricePosOpen?.description ?? "-")  pl@=\(g.pricePl?.description ?? "-")")
+    for o in g.orders {
+        print("    order \(o.orderId ?? "-")  \(o.state ?? "-")  SL=\(o.priceStop?.description ?? "-")  TP=\(o.priceLimit?.description ?? "-")")
+    }
+}
+
+private func printOrderEvent(_ ev: OrderEvent) {
+    switch ev {
+    case .response(let r):
+        print("  «response» state=\(r.state ?? "-")  orderId=\(r.orderId ?? "-")  positionId=\(r.positionId ?? "-")  side=\(r.side ?? "-")  price=\(r.price?.description ?? "-")  reqId=\(r.requestId ?? "(none echoed)")  rejected=\(r.isRejected)")
+    case .group(let g):
+        print("  «group» \(g.orderGroupId ?? "-")  \(g.instrument ?? "-")  \(g.status ?? "-")  open=\(g.pricePosOpen?.description ?? "-")")
+    case .order(let o):
+        print("  «order» \(o.orderId ?? "-")  \(o.state ?? "-")  group=\(o.orderGroupId ?? "-")")
+    }
+}
+
+struct HashOfCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "hashof", abstract: "Print javaStringHashCode of a string.")
+    @Argument(help: "string to hash") var value: String
+    func run() { print(javaStringHashCode(value)) }
+}
+
+struct PositionsCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "positions",
+        abstract: "Connect and list open positions."
+    )
+    @Option(name: .long, help: "Target environment: demo or live") var env: String = "demo"
+    @Option(name: .long, help: "Login") var user: String
+    @Option(name: .long, help: "Password") var pass: String
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        let session = DukascopySession(
+            environment: target, credentials: AuthCredentials(login: user, password: pass)
+        )
+        try await session.connect()
+        _ = try? await session.accountSnapshot()
+        try? await Task.sleep(for: .seconds(1))   // let any groups arrive
+        let positions = await session.positionsSnapshot()
+        print(positions.isEmpty ? "(no open positions)" : "open positions:")
+        for g in positions { printGroup(g) }
+        await session.close()
+    }
+}
+
+struct SubmitCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "submit",
+        abstract: "Submit a MARKET order on the demo account and watch the server response."
+    )
+    @Option(name: .long, help: "Target environment: demo or live") var env: String = "demo"
+    @Option(name: .long, help: "Login") var user: String
+    @Option(name: .long, help: "Password") var pass: String
+    @Argument(help: "Instrument in BASE/QUOTE form, e.g. EUR/USD") var instrument: String
+    @Argument(help: "BUY or SELL") var side: String
+    @Option(name: .long, help: "Amount in UNITS (e.g. 1000 = micro lot)") var amount: Double = 1000
+    @Option(name: .long, help: "Order type: market, limit, or stop") var type: String = "market"
+    @Option(name: .long, help: "Trigger price (required for limit/stop)") var price: Double?
+    @Option(name: .long, help: "Order label") var label: String = "CLI"
+    @Option(name: .long, help: "Seconds to watch order events after submit") var observe: Double = 8
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        let sideUpper = side.uppercased()
+        guard sideUpper == "BUY" || sideUpper == "SELL" else {
+            throw ValidationError("side must be BUY or SELL")
+        }
+        let session = DukascopySession(
+            environment: target, credentials: AuthCredentials(login: user, password: pass)
+        )
+        try await session.connect()
+        _ = try? await session.accountSnapshot()
+
+        let kindStr = type.lowercased()
+        guard ["market", "limit", "stop"].contains(kindStr) else {
+            throw ValidationError("type must be market, limit, or stop")
+        }
+        if kindStr != "market" && price == nil {
+            throw ValidationError("--price (trigger) is required for limit/stop")
+        }
+
+        let events = await session.orderEvents()
+        let printer = Task { for await ev in events { printOrderEvent(ev) } }
+        let amt = BigDecimalValue(amount, scale: 5)
+
+        do {
+            let reqId: String
+            switch kindStr {
+            case "market":
+                // priceClient = current market (BUY → ask, SELL → bid).
+                try? await session.ensureSubscribedQuotes([instrument])
+                var priceClient: BigDecimalValue?
+                let priceDeadline = Date().addingTimeInterval(8)
+                for await t in await session.tickStream() {
+                    if t.instrument == instrument {
+                        priceClient = sideUpper == "BUY" ? t.bestAsk : t.bestBid
+                        if priceClient != nil { break }
+                    }
+                    if Date() > priceDeadline { break }
+                }
+                guard let priceClient else {
+                    print("no price tick for \(instrument) within 8s"); printer.cancel(); await session.close(); return
+                }
+                print("submitting MARKET \(sideUpper) \(instrument) amount=\(amount) priceClient=\(priceClient.description) label=\(label) …")
+                reqId = try await session.submitMarketOrder(
+                    instrument: instrument, side: sideUpper, amount: amt,
+                    priceClient: priceClient, label: label
+                )
+            default:
+                let kind: PendingKind = kindStr == "limit" ? .limit : .stop
+                print("submitting \(kindStr.uppercased()) \(sideUpper) \(instrument) amount=\(amount) trigger=\(price!) label=\(label) …")
+                reqId = try await session.submitPendingOrder(
+                    instrument: instrument, side: sideUpper, kind: kind, amount: amt,
+                    triggerPrice: BigDecimalValue(price!, scale: 5), label: label
+                )
+            }
+            print("SUBMIT SENT: reqId=\(reqId) — watching for \(Int(observe))s …")
+        } catch {
+            print("SUBMIT FAILED: \(error)")
+        }
+        try? await Task.sleep(for: .seconds(observe))
+        printer.cancel()
+        print("--- positions after ---")
+        for g in await session.positionsSnapshot() { printGroup(g) }
+        await session.close()
+    }
+}
+
+struct CloseCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "close",
+        abstract: "Close a position by its positionId (from `positions`)."
+    )
+    @Option(name: .long, help: "Target environment: demo or live") var env: String = "demo"
+    @Option(name: .long, help: "Login") var user: String
+    @Option(name: .long, help: "Password") var pass: String
+    @Argument(help: "positionId / orderGroupId to close") var positionId: String
+    @Option(name: .long, help: "Seconds to watch order events after close") var observe: Double = 8
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        let session = DukascopySession(
+            environment: target, credentials: AuthCredentials(login: user, password: pass)
+        )
+        try await session.connect()
+        _ = try? await session.accountSnapshot()
+
+        let events = await session.orderEvents()
+        let printer = Task { for await ev in events { printOrderEvent(ev) } }
+
+        print("closing position \(positionId) …")
+        do {
+            let reqId = try await session.closePosition(positionId: positionId)
+            print("CLOSE SENT: reqId=\(reqId) — watching for \(Int(observe))s …")
+        } catch {
+            print("CLOSE FAILED: \(error)")
+        }
+        try? await Task.sleep(for: .seconds(observe))
+        printer.cancel()
+        print("--- positions after ---")
+        for g in await session.positionsSnapshot() { printGroup(g) }
+        await session.close()
+    }
+}
+
+struct CancelCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "cancel",
+        abstract: "Cancel a pending order by its orderId (from `positions`)."
+    )
+    @Option(name: .long, help: "Target environment: demo or live") var env: String = "demo"
+    @Option(name: .long, help: "Login") var user: String
+    @Option(name: .long, help: "Password") var pass: String
+    @Argument(help: "orderId to cancel") var orderId: String
+    @Option(name: .long, help: "Seconds to watch order events after cancel") var observe: Double = 8
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        let session = DukascopySession(
+            environment: target, credentials: AuthCredentials(login: user, password: pass)
+        )
+        try await session.connect()
+        _ = try? await session.accountSnapshot()
+        try? await Task.sleep(for: .seconds(1))   // let position groups arrive
+
+        let events = await session.orderEvents()
+        let printer = Task { for await ev in events { printOrderEvent(ev) } }
+        print("cancelling order \(orderId) …")
+        do {
+            let reqId = try await session.cancelOrder(orderId: orderId)
+            print("CANCEL SENT: reqId=\(reqId) — watching for \(Int(observe))s …")
+        } catch {
+            print("CANCEL FAILED: \(error)")
+        }
+        try? await Task.sleep(for: .seconds(observe))
+        printer.cancel()
+        print("--- positions after ---")
+        for g in await session.positionsSnapshot() { printGroup(g) }
+        await session.close()
     }
 }
 

@@ -26,6 +26,7 @@ public struct AccountInfo: Sendable {
     public var accountHash: Int32?
     public var state: String?  // enum encoded as its `toString()` name
     public var accountLoginId: String?
+    public var userId: String?
     /// `equity − usableMargin`; the server doesn't transmit it directly.
     public var usedMargin: BigDecimalValue? {
         guard let equity, let usableMargin else { return nil }
@@ -51,6 +52,7 @@ public struct AccountInfo: Sendable {
             case -17381: msg.accountHash = try v.readInt32BE()
             case 24446:  msg.state = try decodeAccountState(from: &v)
             case 9208:   msg.accountLoginId = try v.readString()
+            case -31160: msg.userId = try v.readString()
             default:     break  // skip unknown field's prepacked bytes
             }
         }

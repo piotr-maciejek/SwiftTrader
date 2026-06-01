@@ -171,6 +171,78 @@ struct OrderMessagesTests {
         #expect(r2.isRejected)
     }
 
+    // MARK: - ord.* order encoders (the live path) round-trip through the decoders
+
+    @Test("Market order group encodes to a decodable OrderGroup with an OPEN/BUY order")
+    func marketGroupRoundTrip() throws {
+        let frame = encodeMarketOrderGroup(
+            instrument: "EUR/USD", side: "BUY", amount: BigDecimalValue(1000, scale: 0),
+            priceClient: BigDecimalValue(1.16, scale: 5), label: "L1",
+            userId: "3602594", accountLoginId: nil, sessionId: "SID", requestId: "R1", timestamp: 1
+        )
+        guard case .orderGroup(let g) = try MessageDecoder.decode(frame) else {
+            Issue.record("expected .orderGroup"); return
+        }
+        #expect(g.instrument == "EUR/USD")
+        #expect(g.orders.count == 1)
+        let o = g.orders[0]
+        #expect(o.side == "BUY")
+        #expect(o.direction == "OPEN")
+        #expect(abs((o.priceClient?.doubleValue ?? 0) - 1.16) < 1e-9)
+        #expect(abs((o.amount?.doubleValue ?? 0) - 1000) < 1e-6)
+    }
+
+    @Test("Pending order puts the trigger in priceStop and opens with OPEN direction")
+    func pendingGroupRoundTrip() throws {
+        let frame = encodePendingOrderGroup(
+            instrument: "EUR/USD", side: "BUY", kind: .limit, amount: BigDecimalValue(1000, scale: 0),
+            triggerPrice: BigDecimalValue(1.10, scale: 5), priceClient: BigDecimalValue(1.16, scale: 5),
+            label: "L2", userId: "u", sessionId: "s", requestId: "R2", timestamp: 2
+        )
+        guard case .orderGroup(let g) = try MessageDecoder.decode(frame) else {
+            Issue.record("expected .orderGroup"); return
+        }
+        let o = g.orders[0]
+        #expect(o.direction == "OPEN")
+        #expect(abs((o.priceStop?.doubleValue ?? 0) - 1.10) < 1e-9)   // trigger
+        #expect(abs((o.priceClient?.doubleValue ?? 0) - 1.16) < 1e-9) // market
+    }
+
+    @Test("Close group carries a CLOSE order on the opposite side")
+    func closeGroupRoundTrip() throws {
+        let frame = encodeCloseOrderGroup(
+            orderGroupId: "POS-1", instrument: "EUR/USD", positionSide: "BUY",
+            amount: BigDecimalValue(1000, scale: 0), pricePosOpen: BigDecimalValue(1.15, scale: 5),
+            priceClient: BigDecimalValue(1.16, scale: 5), userId: "u", sessionId: "s",
+            requestId: "R3", timestamp: 3
+        )
+        guard case .orderGroup(let g) = try MessageDecoder.decode(frame) else {
+            Issue.record("expected .orderGroup"); return
+        }
+        #expect(g.orderGroupId == "POS-1")
+        let o = g.orders[0]
+        #expect(o.direction == "CLOSE")
+        #expect(o.side == "SELL")          // closing a BUY/LONG
+        #expect(o.state == "CREATED")
+    }
+
+    @Test("Cancel encodes a top-level OrderMessage with state CANCELLED")
+    func cancelRoundTrip() throws {
+        var order = OrderMsg()
+        order.orderId = "ORD-9"
+        order.orderGroupId = "POS-9"
+        order.instrument = "EUR/USD"
+        order.side = "BUY"
+        order.amount = BigDecimalValue(1000, scale: 0)
+        order.priceStop = BigDecimalValue(1.10, scale: 5)
+        let frame = encodeCancelOrder(order: order, userId: "u", sessionId: "s", requestId: "R4", timestamp: 4)
+        guard case .order(let o) = try MessageDecoder.decode(frame) else {
+            Issue.record("expected .order"); return
+        }
+        #expect(o.orderId == "ORD-9")
+        #expect(o.state == "CANCELLED")
+    }
+
     @Test("Enum value tables map known wire ints")
     func enumTables() {
         #expect(OrderEnums.positionSide(2342524) == "BUY")
