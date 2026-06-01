@@ -58,6 +58,7 @@ func entryStopDirection(side: String, kind: PendingKind) -> Int32 {
 public func encodePendingOrderGroup(
     instrument: String, side: String, kind: PendingKind, amount: BigDecimalValue,
     triggerPrice: BigDecimalValue, priceClient: BigDecimalValue, label: String,
+    stopLoss: BigDecimalValue? = nil, takeProfit: BigDecimalValue? = nil,
     userId: String?, sessionId: String?, requestId: String, timestamp: Int64
 ) -> Data {
     var ord = BinaryWriter()
@@ -75,13 +76,23 @@ public func encodePendingOrderGroup(
     writeField(&ord, fieldId: -8548) { $0.writeString(label) }
     if let sessionId { writeField(&ord, fieldId: 28132) { $0.writeString(sessionId) } }
 
+    var bodies = [ord.data]
+    if let stopLoss {
+        bodies.append(encodeProtectiveOrderBody(instrument: instrument, openingSide: side, amount: amount,
+            stopPrice: stopLoss, isTakeProfit: false, label: label, sessionId: sessionId))
+    }
+    if let takeProfit {
+        bodies.append(encodeProtectiveOrderBody(instrument: instrument, openingSide: side, amount: amount,
+            stopPrice: takeProfit, isTakeProfit: true, label: label, sessionId: sessionId))
+    }
+
     var w = BinaryWriter()
     w.writeInt32BE(javaStringHashCode(WireClass.orderGroupMessage))
     writeField(&w, fieldId: 12424) { $0.writeString(instrument) }
     if let userId { writeField(&w, fieldId: -31160) { $0.writeString(userId) } }
     writeField(&w, fieldId: 17261) { $0.writeString(requestId) }
     writeField(&w, fieldId: -28332) { $0.writeInt64BE(timestamp) }
-    writeSingleMessageListField(&w, fieldId: -23746, elementClass: WireClass.orderMessageExt, body: ord.data)
+    writeMessageListField(&w, fieldId: -23746, elementClass: WireClass.orderMessageExt, bodies: bodies)
     return w.data
 }
 
@@ -93,16 +104,49 @@ func writeEnumField(_ w: inout BinaryWriter, fieldId: Int16, enumClass: String, 
     }
 }
 
-/// Writes a `List<Message>` field value containing a single message `body`
-/// (which already begins with its classId), matching `decodeMessageList`.
-func writeSingleMessageListField(_ w: inout BinaryWriter, fieldId: Int16, elementClass: String, body: Data) {
+/// Writes a `List<Message>` field value from N message `bodies` (each already
+/// beginning with its classId), matching `decodeMessageList`.
+func writeMessageListField(_ w: inout BinaryWriter, fieldId: Int16, elementClass: String, bodies: [Data]) {
     writeField(&w, fieldId: fieldId) { sub in
         sub.writeInt32BE(javaStringHashCode(WireType.arrayListClass))
-        sub.writeVarLen(1)
-        sub.writeInt32BE(javaStringHashCode(elementClass))   // element class id
-        sub.writeVarLen(body.count)
-        sub.writeBytes(body)
+        sub.writeVarLen(bodies.count)
+        for body in bodies {
+            sub.writeInt32BE(javaStringHashCode(elementClass))   // element class id
+            sub.writeVarLen(body.count)
+            sub.writeBytes(body)
+        }
     }
+}
+
+/// Body of a protective SL/TP CLOSE order attached to a submit group
+/// (per `OrderUtils.addDefaultStopLossAndTakeProfitToMarketGroup`). `openingSide`
+/// is the entry order's side; the protective order takes the opposite side and a
+/// `stopDirection` chosen so the stop triggers on the correct side of the market.
+func encodeProtectiveOrderBody(
+    instrument: String, openingSide: String, amount: BigDecimalValue,
+    stopPrice: BigDecimalValue, isTakeProfit: Bool, label: String, sessionId: String?
+) -> Data {
+    let closeSideBuy = openingSide != "BUY"
+    // SL: BUY→LESS_BID, SELL→GREATER_ASK.  TP: BUY→GREATER_BID, SELL→LESS_ASK.
+    let stopDir: Int32
+    if openingSide == "BUY" {
+        stopDir = isTakeProfit ? OrderEnumValue.stopGreaterBid : OrderEnumValue.stopLessBid
+    } else {
+        stopDir = isTakeProfit ? OrderEnumValue.stopLessAsk : OrderEnumValue.stopGreaterAsk
+    }
+    var w = BinaryWriter()
+    w.writeInt32BE(javaStringHashCode(WireClass.orderMessageExt))
+    writeField(&w, fieldId: 12424) { $0.writeString(instrument) }
+    writeEnumField(&w, fieldId: -19551, enumClass: WireClass.orderDirectionEnum, value: OrderEnumValue.directionClose)
+    writeEnumField(&w, fieldId: -7924, enumClass: WireClass.orderSideEnum,
+                   value: closeSideBuy ? OrderEnumValue.sideBuy : OrderEnumValue.sideSell)
+    writeField(&w, fieldId: -5158) { $0.writeBigDecimal(amount) }       // same size as the entry
+    writeField(&w, fieldId: -30914) { $0.writeBigDecimal(stopPrice) }   // priceStop = SL/TP level
+    writeEnumField(&w, fieldId: 19053, enumClass: WireClass.stopDirectionEnum, value: stopDir)
+    if isTakeProfit { writeField(&w, fieldId: -3668) { $0.writeBigDecimal(.zero) } }  // priceTrailingLimit
+    writeField(&w, fieldId: -8548) { $0.writeString(label) }
+    if let sessionId { writeField(&w, fieldId: 28132) { $0.writeString(sessionId) } }
+    return w.data
 }
 
 /// Builds an `OrderGroupMessage` frame that submits a MARKET order — the path the
@@ -110,7 +154,8 @@ func writeSingleMessageListField(_ w: inout BinaryWriter, fieldId: Int16, elemen
 /// opening `OrderMessageExt` (direction OPEN, side, client price, amount, label).
 public func encodeMarketOrderGroup(
     instrument: String, side: String, amount: BigDecimalValue, priceClient: BigDecimalValue,
-    label: String, userId: String?, accountLoginId: String?, sessionId: String?,
+    label: String, stopLoss: BigDecimalValue? = nil, takeProfit: BigDecimalValue? = nil,
+    userId: String?, accountLoginId: String?, sessionId: String?,
     requestId: String, timestamp: Int64
 ) -> Data {
     // Opening order body = classId + fields.
@@ -125,6 +170,16 @@ public func encodeMarketOrderGroup(
     writeField(&ord, fieldId: -8548) { $0.writeString(label) }
     if let sessionId { writeField(&ord, fieldId: 28132) { $0.writeString(sessionId) } }   // security info
 
+    var bodies = [ord.data]
+    if let stopLoss {
+        bodies.append(encodeProtectiveOrderBody(instrument: instrument, openingSide: side, amount: amount,
+            stopPrice: stopLoss, isTakeProfit: false, label: label, sessionId: sessionId))
+    }
+    if let takeProfit {
+        bodies.append(encodeProtectiveOrderBody(instrument: instrument, openingSide: side, amount: amount,
+            stopPrice: takeProfit, isTakeProfit: true, label: label, sessionId: sessionId))
+    }
+
     var w = BinaryWriter()
     w.writeInt32BE(javaStringHashCode(WireClass.orderGroupMessage))
     writeField(&w, fieldId: 12424) { $0.writeString(instrument) }
@@ -132,7 +187,7 @@ public func encodeMarketOrderGroup(
     if let accountLoginId, !accountLoginId.isEmpty { writeField(&w, fieldId: 9208) { $0.writeString(accountLoginId) } }
     writeField(&w, fieldId: 17261) { $0.writeString(requestId) }
     writeField(&w, fieldId: -28332) { $0.writeInt64BE(timestamp) }
-    writeSingleMessageListField(&w, fieldId: -23746, elementClass: WireClass.orderMessageExt, body: ord.data)
+    writeMessageListField(&w, fieldId: -23746, elementClass: WireClass.orderMessageExt, bodies: bodies)
     return w.data
 }
 
@@ -174,7 +229,7 @@ public func encodeCloseOrderGroup(
     if let userId { writeField(&w, fieldId: -31160) { $0.writeString(userId) } }
     writeField(&w, fieldId: 17261) { $0.writeString(requestId) }
     writeField(&w, fieldId: -28332) { $0.writeInt64BE(timestamp) }
-    writeSingleMessageListField(&w, fieldId: -23746, elementClass: WireClass.orderMessageExt, body: ord.data)
+    writeMessageListField(&w, fieldId: -23746, elementClass: WireClass.orderMessageExt, bodies: [ord.data])
     return w.data
 }
 
@@ -430,6 +485,16 @@ enum OrderEnums {
         default:      return "UNKNOWN(\(v))"
         }
     }
+    /// `StopDirection` — the side/direction a stop or limit triggers on.
+    static func stopDirection(_ v: Int32) -> String {
+        switch v {
+        case -1215583496: return "GREATER_BID"
+        case -1215584140: return "GREATER_ASK"
+        case -1421388489: return "LESS_BID"
+        case -1421389133: return "LESS_ASK"
+        default:          return "UNKNOWN(\(v))"
+        }
+    }
     /// `OrderState` lifecycle.
     static func orderState(_ v: Int32) -> String {
         switch v {
@@ -527,6 +592,7 @@ public struct OrderMsg: Sendable {
     public var priceStop: BigDecimalValue?    // stop-loss
     public var priceClient: BigDecimalValue?  // client-requested (pending entry)
     public var pricePosOpen: BigDecimalValue?
+    public var stopDirection: String?         // GREATER_BID/LESS_ASK/… (distinguishes SL/TP, limit/stop)
 
     public static func decode(from reader: inout BinaryReader) throws -> OrderMsg {
         var m = OrderMsg()
@@ -544,6 +610,7 @@ public struct OrderMsg: Sendable {
             case -30914: m.priceStop = try BigDecimalCodec.decode(from: &v)
             case 14767:  m.priceClient = try BigDecimalCodec.decode(from: &v)
             case -27533: m.pricePosOpen = try BigDecimalCodec.decode(from: &v)
+            case 19053:  m.stopDirection = OrderEnums.stopDirection(try decodeEnumInt(from: &v))
             default:     break
             }
         }

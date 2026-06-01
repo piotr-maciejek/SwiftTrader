@@ -43,8 +43,6 @@ final class WorkspaceViewModel {
     private var newsCoordinator: NewsCoordinator
     private var newsTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
-    /// Native-mode account-snapshot fetch; cancelled + relaunched on every (re)attach.
-    private var accountTask: Task<Void, Never>?
     var tabs: [Tab] = []
     var selectedTabID: UUID?
     var showBottomPanel = false {
@@ -73,8 +71,14 @@ final class WorkspaceViewModel {
         marketData = Self.makeMarketDataCoordinator(
             provider: settings.dataProvider, port: settings.port, cache: candleCache
         )
-        // Orders always route through jforex-server, even in standalone market-data mode.
-        trading = TradingViewModel(coordinator: TradingCoordinator(port: settings.port))
+        // Trading: server mode routes through jforex-server; standalone trades natively
+        // via the DukascopySession (attached once it connects — see attachNativeSession).
+        switch settings.dataProvider {
+        case .server:
+            trading = TradingViewModel(coordinator: TradingCoordinator(port: settings.port))
+        case .native:
+            trading = TradingViewModel(coordinator: NativeTradingCoordinator(session: nil))
+        }
         tradeHistory = TradeHistoryViewModel(
             service: TradeHistoryService(
                 baseURL: URL(string: "http://localhost:\(settings.port)")!))
@@ -314,13 +318,9 @@ final class WorkspaceViewModel {
             case .multiTimeframe(let vm): vm.reconnect(coordinator: marketData)
             }
         }
-        // Pull the native account snapshot into the shared trading VM so the status bar
-        // shows real balance/equity/margin without the server. Orders stay server-routed.
-        accountTask?.cancel()
-        accountTask = Task { @MainActor [weak self] in
-            guard let info = try? await session.accountSnapshot() else { return }
-            self?.trading.account = Account(native: info, connected: true)
-        }
+        // Route trading natively through this session: positions / account / spreads now
+        // stream from the session, and orders place directly (no jforex-server).
+        trading.reconnect(coordinator: NativeTradingCoordinator(session: session))
     }
 
     func reconnectAll(port: Int) {

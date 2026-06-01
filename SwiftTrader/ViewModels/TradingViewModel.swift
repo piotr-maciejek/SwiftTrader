@@ -44,6 +44,16 @@ final class TradingViewModel {
         start()
     }
 
+    /// Swap to a different coordinator (e.g. the native session-backed one) and
+    /// restart the snapshot/pending streams. Used when the standalone session connects.
+    func reconnect(coordinator: any TradingCoordinating) {
+        stop()
+        self.coordinator = coordinator
+        positions = []
+        pendingOrders = []
+        start()
+    }
+
     // MARK: - Order submission
 
     @discardableResult

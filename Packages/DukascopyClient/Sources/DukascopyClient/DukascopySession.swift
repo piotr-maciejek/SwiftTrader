@@ -677,13 +677,19 @@ public actor DukascopySession {
     @discardableResult
     public func submitMarketOrder(
         instrument: String, side: String, amount: BigDecimalValue,
-        priceClient: BigDecimalValue, label: String
+        priceClient: BigDecimalValue? = nil,
+        stopLoss: BigDecimalValue? = nil, takeProfit: BigDecimalValue? = nil, label: String
     ) async throws -> String {
         guard state == .connected, let transport else { throw SessionError.notConnected }
+        let price: BigDecimalValue
+        if let priceClient { price = priceClient }
+        else if let p = await currentPrice(instrument: instrument, buy: side == "BUY") { price = p }
+        else { throw SessionError.timedOut("market: no price for \(instrument)") }
         let reqId = UUID().uuidString
         let frame = encodeMarketOrderGroup(
-            instrument: instrument, side: side, amount: amount, priceClient: priceClient,
-            label: label, userId: latestAccount?.userId, accountLoginId: latestAccount?.accountLoginId,
+            instrument: instrument, side: side, amount: amount, priceClient: price,
+            label: label, stopLoss: stopLoss, takeProfit: takeProfit,
+            userId: latestAccount?.userId, accountLoginId: latestAccount?.accountLoginId,
             sessionId: authSessionId,
             requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
         )
@@ -696,7 +702,8 @@ public actor DukascopySession {
     @discardableResult
     public func submitPendingOrder(
         instrument: String, side: String, kind: PendingKind,
-        amount: BigDecimalValue, triggerPrice: BigDecimalValue, label: String
+        amount: BigDecimalValue, triggerPrice: BigDecimalValue,
+        stopLoss: BigDecimalValue? = nil, takeProfit: BigDecimalValue? = nil, label: String
     ) async throws -> String {
         guard state == .connected, let transport else { throw SessionError.notConnected }
         guard let priceClient = await currentPrice(instrument: instrument, buy: side == "BUY") else {
@@ -706,6 +713,7 @@ public actor DukascopySession {
         let frame = encodePendingOrderGroup(
             instrument: instrument, side: side, kind: kind, amount: amount,
             triggerPrice: triggerPrice, priceClient: priceClient, label: label,
+            stopLoss: stopLoss, takeProfit: takeProfit,
             userId: latestAccount?.userId, sessionId: authSessionId,
             requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
         )

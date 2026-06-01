@@ -534,6 +534,8 @@ struct SubmitCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Amount in UNITS (e.g. 1000 = micro lot)") var amount: Double = 1000
     @Option(name: .long, help: "Order type: market, limit, or stop") var type: String = "market"
     @Option(name: .long, help: "Trigger price (required for limit/stop)") var price: Double?
+    @Option(name: .long, help: "Stop-loss price (optional)") var sl: Double?
+    @Option(name: .long, help: "Take-profit price (optional)") var tp: Double?
     @Option(name: .long, help: "Order label") var label: String = "CLI"
     @Option(name: .long, help: "Seconds to watch order events after submit") var observe: Double = 8
 
@@ -562,36 +564,28 @@ struct SubmitCommand: AsyncParsableCommand {
         let events = await session.orderEvents()
         let printer = Task { for await ev in events { printOrderEvent(ev) } }
         let amt = BigDecimalValue(amount, scale: 5)
+        let slv = sl.map { BigDecimalValue($0, scale: 5) }
+        let tpv = tp.map { BigDecimalValue($0, scale: 5) }
+        let slStr: String = sl != nil ? String(sl!) : "-"
+        let tpStr: String = tp != nil ? String(tp!) : "-"
 
         do {
             let reqId: String
             switch kindStr {
             case "market":
-                // priceClient = current market (BUY → ask, SELL → bid).
-                try? await session.ensureSubscribedQuotes([instrument])
-                var priceClient: BigDecimalValue?
-                let priceDeadline = Date().addingTimeInterval(8)
-                for await t in await session.tickStream() {
-                    if t.instrument == instrument {
-                        priceClient = sideUpper == "BUY" ? t.bestAsk : t.bestBid
-                        if priceClient != nil { break }
-                    }
-                    if Date() > priceDeadline { break }
-                }
-                guard let priceClient else {
-                    print("no price tick for \(instrument) within 8s"); printer.cancel(); await session.close(); return
-                }
-                print("submitting MARKET \(sideUpper) \(instrument) amount=\(amount) priceClient=\(priceClient.description) label=\(label) …")
+                print("submitting MARKET \(sideUpper) \(instrument) amount=\(amount) sl=\(slStr) tp=\(tpStr) label=\(label) …")
                 reqId = try await session.submitMarketOrder(
                     instrument: instrument, side: sideUpper, amount: amt,
-                    priceClient: priceClient, label: label
+                    stopLoss: slv, takeProfit: tpv, label: label
                 )
             default:
                 let kind: PendingKind = kindStr == "limit" ? .limit : .stop
-                print("submitting \(kindStr.uppercased()) \(sideUpper) \(instrument) amount=\(amount) trigger=\(price!) label=\(label) …")
+                let trigStr = String(price!)
+                print("submitting \(kindStr.uppercased()) \(sideUpper) \(instrument) amount=\(amount) trigger=\(trigStr) sl=\(slStr) tp=\(tpStr) label=\(label) …")
                 reqId = try await session.submitPendingOrder(
                     instrument: instrument, side: sideUpper, kind: kind, amount: amt,
-                    triggerPrice: BigDecimalValue(price!, scale: 5), label: label
+                    triggerPrice: BigDecimalValue(price!, scale: 5),
+                    stopLoss: slv, takeProfit: tpv, label: label
                 )
             }
             print("SUBMIT SENT: reqId=\(reqId) — watching for \(Int(observe))s …")
