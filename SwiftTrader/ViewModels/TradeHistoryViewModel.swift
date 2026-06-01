@@ -30,6 +30,13 @@ final class TradeHistoryViewModel {
         trades = []
     }
 
+    /// Swap in a new fetcher (e.g. the native session-backed service once a standalone
+    /// session connects) and clear stale trades so the next reload comes from the new source.
+    func setService(_ newService: any TradeHistoryFetching) {
+        service = newService
+        trades = []
+    }
+
     /// Nil when preset is `.custom` and the user has chosen a reversed range.
     /// Non-nil for every other preset.
     var currentRange: ClosedRange<Date>? {

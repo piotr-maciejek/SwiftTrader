@@ -8,7 +8,7 @@ struct DukascopyCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dukascopy-cli",
         abstract: "Dukascopy native protocol prototyping CLI.",
-        subcommands: [JNLPCommand.self, AuthCommand.self, LoginInfoCommand.self, CaptchaCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self, BulkSpikeCommand.self, PositionsCommand.self, SubmitCommand.self, CloseCommand.self, CancelCommand.self, ModifyCommand.self, NewsCommand.self, HashOfCommand.self]
+        subcommands: [JNLPCommand.self, AuthCommand.self, LoginInfoCommand.self, CaptchaCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self, BulkSpikeCommand.self, PositionsCommand.self, SubmitCommand.self, CloseCommand.self, CancelCommand.self, ModifyCommand.self, NewsCommand.self, ClosedTradesCommand.self, HashOfCommand.self]
     )
 }
 
@@ -369,7 +369,7 @@ struct StreamCommand: AsyncParsableCommand {
                 FileHandle.standardError.write(Data("server error: \(e)\n".utf8))
                 return
             case .ok, .halo, .packedAccountInfo, .candleHistoryGroup, .orderGroup, .order, .orderResponse,
-                 .calendarEvent, .newsStory:
+                 .calendarEvent, .newsStory, .positionBinaryResponse:
                 break
             case .unknown(let classId, let body):
                 if ProcessInfo.processInfo.environment["DUKASCOPY_CLI_VERBOSE"] != nil {
@@ -816,6 +816,176 @@ struct NewsCommand: AsyncParsableCommand {
         printer.cancel()
         print("--- done watching ---")
         await session.close()
+    }
+}
+
+/// GATING probe for native closed-trade history (review issue #1, Stage A). Builds the
+/// transport directly (like `account`) so we can dump EVERY inbound frame's classId + head
+/// after sending a `PositionDataRequestMessage`. Confirms the desktop server actually
+/// answers this on the DDS socket (the `extapi.Submit*` requests are silently ignored — the
+/// same risk), reveals the byte[] inner framing for `positionsEncoded`, and saves the gzip
+/// blob to a file so it can become the Stage-E decode fixture. No app/library decode of the
+/// blob yet — that's Stage B.
+struct ClosedTradesCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "closed-trades",
+        abstract: "PROBE: send PositionDataRequestMessage and dump the server's reply frames."
+    )
+    @Option(name: .long, help: "Target environment: demo or live") var env: String = "demo"
+    @Option(name: .long, help: "Login") var user: String
+    @Option(name: .long, help: "Password") var pass: String
+    @Option(name: .long, help: "Window start: days before now") var fromDays: Int = 90
+    @Option(name: .long, help: "Seconds to watch for response frames") var observe: Double = 15
+    @Option(name: .long, help: "Where to save the raw positionsEncoded gzip blob") var out: String = "/tmp/dukascopy-closed-positions.gz"
+    @Flag(name: .long, help: "Drive the high-level DukascopySession.fetchClosedPositions path instead of the raw-frame probe") var viaSession: Bool = false
+
+    private func hexHead(_ data: Data, _ n: Int = 32) -> String {
+        data.prefix(n).map { String(format: "%02x", $0) }.joined(separator: " ")
+    }
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        if viaSession { try await runViaSession(target); return }
+        let jnlp = try await JNLPClient.fetch(from: target.jnlpURL)
+        guard let serverURL = jnlp.srp6LoginURLs.first else {
+            throw ValidationError("JNLP returned no SRP6 servers")
+        }
+        let auth = try await AuthClient().authenticate(
+            baseURL: serverURL, credentials: AuthCredentials(login: user, password: pass)
+        )
+        guard let first = auth.authApiURLs.first, let address = ServerAddress.parse(first) else {
+            throw ValidationError("no usable authApiURL")
+        }
+        let transport = Transport(address: address)
+        try await transport.connect()
+        _ = try await transport.handshake(
+            login: user, ticket: auth.ticket, authSessionId: auth.authSessionId
+        )
+
+        var initReq = InitRequest()
+        initReq.requestId = UUID().uuidString
+        initReq.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        try await transport.sendFrame(initReq.encode())
+
+        // Wait for the account snapshot so we can populate userId/accountLoginId on the
+        // request (the order/news requests carry these — best chance of a real answer).
+        var account: AccountInfo?
+        let snapDeadline = Date().addingTimeInterval(15)
+        while account == nil, Date() < snapDeadline {
+            let frame = try await transport.receiveFrame()
+            switch try MessageDecoder.decode(frame) {
+            case .packedAccountInfo(let p): account = p.account
+            case .heartbeatRequest(let h):
+                try await transport.sendFrame(HeartbeatOkResponse(
+                    requestTime: h.requestTime ?? 0,
+                    receiveTime: Int64(Date().timeIntervalSince1970 * 1000)
+                ).encode())
+            case .error(let e): throw ValidationError("server error before snapshot: \(e)")
+            default: continue
+            }
+        }
+        print("account: login=\(account?.accountLoginId ?? "-") userId=\(account?.userId ?? "-")")
+
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let fromMs = nowMs - Int64(fromDays) * 86_400_000
+        let reqId = UUID().uuidString
+        let frame = encodePositionDataRequest(
+            startMillis: fromMs, endMillis: nowMs, getClosed: true,
+            userName: user, sessionId: auth.authSessionId,
+            userId: account?.userId, accountLoginId: account?.accountLoginId,
+            requestId: reqId, timestamp: nowMs
+        )
+        print("REQUEST classId=\(javaStringHashCode(WireClass.positionDataRequest)) reqId=\(reqId) bytes=\(frame.count)")
+        print("  \(hexHead(frame, 48))")
+        try await transport.sendFrame(frame)
+        print("sent PositionDataRequestMessage — watching for \(Int(observe))s …\n")
+
+        let posRespId = javaStringHashCode(WireClass.positionBinaryResponse)
+        var chunks: [Int32: Data] = [:]
+        var finished = false
+        var sawAnyResponse = false
+        let deadline = Date().addingTimeInterval(observe)
+        while Date() < deadline, !finished {
+            let frame = try await transport.receiveFrame()
+            var peek = BinaryReader(frame)
+            let classId = try peek.readInt32BE()
+            print("frame classId=\(classId) bytes=\(frame.count) head=[\(hexHead(frame))]")
+            if classId == posRespId {
+                sawAnyResponse = true
+                var r = BinaryReader(frame)
+                _ = try r.readInt32BE()
+                let resp = try PositionBinaryResponse.decode(from: &r)
+                let blobLen = resp.positionsEncoded?.count ?? 0
+                print("  → PositionBinaryResponse order=\(resp.messageOrder.map(String.init) ?? "-") "
+                    + "finished=\(resp.finished.map(String.init) ?? "-") reqId=\(resp.requestId ?? "-") "
+                    + "blob=\(blobLen) bytes")
+                if let blob = resp.positionsEncoded, !blob.isEmpty {
+                    print("    blob head: \(hexHead(blob))")
+                    chunks[resp.messageOrder ?? Int32(chunks.count)] = blob
+                }
+                if resp.finished == true { finished = true }
+                continue
+            }
+            switch try MessageDecoder.decode(frame) {
+            case .heartbeatRequest(let h):
+                try await transport.sendFrame(HeartbeatOkResponse(
+                    requestTime: h.requestTime ?? 0,
+                    receiveTime: Int64(Date().timeIntervalSince1970 * 1000)
+                ).encode())
+            case .error(let e):
+                print("  → server ERROR: \(e)")
+            default:
+                break
+            }
+        }
+
+        print("\n--- probe result ---")
+        if !sawAnyResponse {
+            print("NO PositionBinaryResponse frames received in \(Int(observe))s.")
+            print("→ The server likely IGNORES PositionDataRequestMessage on the DDS socket")
+            print("  (same as extapi.Submit*). GATE FAILS — keep server-mode REST for history.")
+        } else {
+            let combined = chunks.keys.sorted().reduce(into: Data()) { $0.append(chunks[$1]!) }
+            print("GATE PASSES — server answered. \(chunks.count) chunk(s), \(combined.count) blob bytes total, finished=\(finished).")
+            if !combined.isEmpty {
+                let gzipMagic = combined.prefix(2) == Data([0x1f, 0x8b])
+                print("blob starts with GZIP magic (1f 8b): \(gzipMagic)")
+                try? combined.write(to: URL(fileURLWithPath: out))
+                print("saved blob → \(out) (use as the Stage-E decodeList fixture)")
+            } else {
+                print("blob empty — account may have no closed trades in this window; widen --from-days.")
+            }
+        }
+        await transport.close()
+    }
+
+    /// End-to-end check of the real Stage-B integration: connect a `DukascopySession`,
+    /// wait for the account snapshot, then call `fetchClosedPositions` and print the
+    /// decoded trades.
+    private func runViaSession(_ target: DukascopyEnvironment) async throws {
+        let session = DukascopySession(
+            environment: target, credentials: AuthCredentials(login: user, password: pass)
+        )
+        try await session.connect()
+        _ = try? await session.accountSnapshot()
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let fromMs = nowMs - Int64(fromDays) * 86_400_000
+        let positions = try await session.fetchClosedPositions(fromMillis: fromMs, toMillis: nowMs)
+        await session.close()
+
+        print(positions.isEmpty ? "(no closed positions in window)" : "closed positions (\(positions.count)):")
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        f.timeZone = .current
+        for p in positions {
+            let opened = p.openDateMillis.map { f.string(from: Date(timeIntervalSince1970: Double($0) / 1000)) } ?? "-"
+            let closed = p.closeDateMillis.map { f.string(from: Date(timeIntervalSince1970: Double($0) / 1000)) } ?? "-"
+            print("  \(p.positionId)  \(p.isLong ? "LONG " : "SHORT")  \(p.instrument)  amt=\(p.amount.map { String($0) } ?? "-")  "
+                + "open=\(p.openPrice.map { String($0) } ?? "-")  close=\(p.closePrice.map { String($0) } ?? "-")  "
+                + "P/L=\(p.profitLoss.map { String($0) } ?? "-")  \(opened) → \(closed)")
+        }
     }
 }
 

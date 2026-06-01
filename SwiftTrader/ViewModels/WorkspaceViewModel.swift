@@ -83,9 +83,18 @@ final class WorkspaceViewModel {
         case .native:
             trading = TradingViewModel(coordinator: NativeTradingCoordinator(session: nil))
         }
-        tradeHistory = TradeHistoryViewModel(
-            service: TradeHistoryService(
-                baseURL: URL(string: "http://localhost:\(settings.port)")!))
+        // Trade history follows the same split as `trading`: server mode hits jforex-server's
+        // REST; standalone reads closed positions over the DukascopySession (attached on
+        // connect via attachNativeSession). The native service starts session-less and
+        // returns [] until then.
+        switch settings.dataProvider {
+        case .server:
+            tradeHistory = TradeHistoryViewModel(
+                service: TradeHistoryService(
+                    baseURL: URL(string: "http://localhost:\(settings.port)")!))
+        case .native:
+            tradeHistory = TradeHistoryViewModel(service: NativeTradeHistoryService(session: nil))
+        }
         newsCoordinator = NewsCoordinator(port: settings.port)
         // NOTE: Do NOT start tasks here. SwiftUI re-evaluates @State initializers
         // on every body evaluation, creating (and discarding) many WorkspaceViewModels.
@@ -327,6 +336,8 @@ final class WorkspaceViewModel {
         // Route trading natively through this session: positions / account / spreads now
         // stream from the session, and orders place directly (no jforex-server).
         trading.reconnect(coordinator: NativeTradingCoordinator(session: session))
+        // Closed-trade history (History tab) now reads from this session too.
+        tradeHistory.setService(NativeTradeHistoryService(session: session))
         // News/calendar also comes from this session in native mode (Dukascopy's own feed),
         // so the right panel works without jforex-server. Re-subscribes on account switch.
         newsCoordinator = NativeNewsCoordinator(session: session)

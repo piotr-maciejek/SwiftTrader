@@ -50,6 +50,19 @@ public actor DukascopySession {
         var lastActivity: Date
     }
 
+    /// In-flight closed-trade history request. Mirrors `PendingHistory`: `positionsEncoded`
+    /// chunks accumulate by `messageOrder` until `finished`, then the concatenated GZIP blob
+    /// is decoded and the continuation resumed. The blob is ONE gzip stream split across
+    /// chunks (unlike candle history's per-chunk strings), so chunks are concatenated raw and
+    /// gunzipped once. `lastActivity` drives the same per-chunk idle timeout.
+    private struct PendingClosed {
+        var chunks: [Int32: Data] = [:]
+        var maxOrder: Int32 = -1
+        var finished = false
+        var continuation: CheckedContinuation<[ClosedPosition], Error>?
+        var lastActivity: Date
+    }
+
     public private(set) var state: State = .disconnected
 
     private let environment: DukascopyEnvironment
@@ -74,6 +87,7 @@ public actor DukascopySession {
     private let bulkClient = BulkHistoryClient()
 
     private var pendingHistory: [String: PendingHistory] = [:]
+    private var pendingClosed: [String: PendingClosed] = [:]
     private var latestAccount: AccountInfo?
     private var accountWaiters: [UUID: CheckedContinuation<AccountInfo, Error>] = [:]
     // Multicast: each consumer of `tickStream()` gets its own continuation, all yielded to
@@ -616,6 +630,121 @@ public actor DukascopySession {
         cont?.resume(throwing: error)
     }
 
+    // MARK: - Closed-trade history
+
+    /// Fetch the account's CLOSED positions (trade history) in `[fromMillis, toMillis]`.
+    /// Sends a `dfs.PositionDataRequestMessage` and reassembles the chunked
+    /// `PositionBinaryResponse` reply (correlated by requestId, ordered by messageOrder),
+    /// decoding the concatenated `GZIP(Bits.writeObject(List<PositionData>))` blob. Mirrors
+    /// the candle-history machinery; the idle timeout resets on each chunk so a large
+    /// transfer isn't killed mid-flight.
+    public func fetchClosedPositions(
+        fromMillis: Int64, toMillis: Int64, idleTimeout: TimeInterval = 30
+    ) async throws -> [ClosedPosition] {
+        guard state == .connected, let transport else { throw SessionError.notConnected }
+        let reqId = UUID().uuidString
+        let frame = encodePositionDataRequest(
+            startMillis: fromMillis, endMillis: toMillis, getClosed: true,
+            userName: credentials.login, sessionId: authSessionId,
+            userId: latestAccount?.userId, accountLoginId: latestAccount?.accountLoginId,
+            requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        log.debug("fetchClosedPositions window=[\(fromMillis),\(toMillis)] req=\(reqId, privacy: .public)")
+
+        pendingClosed[reqId] = PendingClosed(lastActivity: Date())
+        do {
+            try await transport.sendFrame(frame)
+        } catch {
+            pendingClosed[reqId] = nil
+            throw error
+        }
+
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<[ClosedPosition], Error>) in
+            guard pendingClosed[reqId] != nil else {
+                cont.resume(throwing: SessionError.notConnected)
+                return
+            }
+            pendingClosed[reqId]?.continuation = cont
+            resolveClosedIfReady(reqId)
+            scheduleClosedTimeout(reqId, idle: idleTimeout)
+        }
+    }
+
+    private func handleClosedResponse(_ resp: PositionBinaryResponse) {
+        guard let reqId = resp.requestId, pendingClosed[reqId] != nil else { return }
+        pendingClosed[reqId]?.lastActivity = Date()
+        if let order = resp.messageOrder {
+            if let blob = resp.positionsEncoded { pendingClosed[reqId]?.chunks[order] = blob }
+            log.debug("fetchClosedPositions chunk req=\(reqId, privacy: .public) order=\(order) finished=\(resp.finished == true)")
+            if resp.finished == true {
+                pendingClosed[reqId]?.maxOrder = order
+                pendingClosed[reqId]?.finished = true
+            }
+        } else if resp.finished == true {
+            // Terminal response without an order field — treat as a single, final chunk.
+            if let blob = resp.positionsEncoded { pendingClosed[reqId]?.chunks[0] = blob }
+            pendingClosed[reqId]?.maxOrder = max(pendingClosed[reqId]?.maxOrder ?? -1, 0)
+            pendingClosed[reqId]?.finished = true
+        }
+        resolveClosedIfReady(reqId)
+    }
+
+    private func resolveClosedIfReady(_ reqId: String) {
+        guard let pending = pendingClosed[reqId], pending.finished,
+              let cont = pending.continuation else { return }
+        pendingClosed[reqId] = nil
+        do {
+            var blob = Data()
+            if pending.maxOrder >= 0 {
+                for order in 0...pending.maxOrder {
+                    if let c = pending.chunks[order] { blob.append(c) }
+                }
+            }
+            let positions = blob.isEmpty ? [] : try PositionDataBitsDecoder.decodeList(blob)
+            log.debug("fetchClosedPositions req=\(reqId, privacy: .public) done: \(positions.count) position(s)")
+            cont.resume(returning: positions)
+        } catch {
+            log.error("fetchClosedPositions req=\(reqId, privacy: .public) decode failed: \(error.localizedDescription, privacy: .public)")
+            cont.resume(throwing: error)
+        }
+    }
+
+    private func scheduleClosedTimeout(_ reqId: String, idle: TimeInterval) {
+        Task { [weak self] in
+            guard let self else { return }
+            while await self.closedStillPending(reqId) {
+                let remaining = await self.closedIdleRemaining(reqId, idle: idle)
+                if remaining <= 0 {
+                    await self.timeoutClosed(reqId)
+                    return
+                }
+                try? await Task.sleep(for: .seconds(remaining))
+            }
+        }
+    }
+
+    private func closedStillPending(_ reqId: String) -> Bool { pendingClosed[reqId] != nil }
+
+    private func closedIdleRemaining(_ reqId: String, idle: TimeInterval) -> TimeInterval {
+        guard let pending = pendingClosed[reqId] else { return 0 }
+        return idle - Date().timeIntervalSince(pending.lastActivity)
+    }
+
+    private func timeoutClosed(_ reqId: String) {
+        guard let cont = pendingClosed[reqId]?.continuation else { return }
+        pendingClosed[reqId] = nil
+        cont.resume(throwing: SessionError.timedOut("closed positions request (no data received)"))
+    }
+
+    /// Resolve a pending closed-positions request with an error (server error routed by
+    /// requestId), so it fails immediately rather than hanging until its idle timeout.
+    private func failClosed(_ reqId: String, with error: Error) {
+        guard pendingClosed[reqId] != nil else { return }
+        let cont = pendingClosed[reqId]?.continuation
+        pendingClosed[reqId] = nil
+        cont?.resume(throwing: error)
+    }
+
     /// Extracts the cached `[start, end]` window (epoch seconds) the server reports in a
     /// "data not in cache" error reason: `… data in cache from [yyyy-MM-dd HH:mm:ss.SSS]
     /// to [yyyy-MM-dd HH:mm:ss.SSS] …` (GMT). Returns nil if the reason isn't that error
@@ -1035,6 +1164,10 @@ public actor DukascopySession {
         pendingHistory.removeAll()
         for (_, p) in histories { p.continuation?.resume(throwing: error) }
 
+        let closed = pendingClosed
+        pendingClosed.removeAll()
+        for (_, p) in closed { p.continuation?.resume(throwing: error) }
+
         let waiters = accountWaiters
         accountWaiters.removeAll()
         for (_, cont) in waiters { cont.resume(throwing: error) }
@@ -1122,11 +1255,16 @@ public actor DukascopySession {
             if let reqId = e.requestId, pendingHistory[reqId] != nil {
                 failHistory(reqId, with: e)
             }
+            if let reqId = e.requestId, pendingClosed[reqId] != nil {
+                failClosed(reqId, with: e)
+            }
             if e.fatal == true {
                 await markFailed("server error: \(e.reason ?? "unknown")")
             }
         case .candleHistoryGroup(let g):
             handleHistoryGroup(g)
+        case .positionBinaryResponse(let resp):
+            handleClosedResponse(resp)
         case .packedAccountInfo(let p):
             handleAccountInfo(p.account)
             for g in p.groups where g.orderGroupId != nil {

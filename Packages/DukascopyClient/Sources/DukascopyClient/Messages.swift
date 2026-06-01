@@ -213,6 +213,7 @@ public enum InboundMessage: Sendable {
     case orderResponse(ExtApiOrderResponse)  // order submit/close/modify ack
     case calendarEvent(CalendarEventMsg)     // economic-calendar event
     case newsStory(NewsStoryMsg)             // news story
+    case positionBinaryResponse(PositionBinaryResponse)  // closed-trade history chunk
     case unknown(classId: Int32, body: Data)
 }
 
@@ -248,6 +249,8 @@ public enum MessageDecoder {
             return .calendarEvent(try CalendarEventMsg.decode(from: &fields))
         case javaStringHashCode(NewsWire.newsStoryMessage):
             return .newsStory(try NewsStoryMsg.decode(from: &fields))
+        case javaStringHashCode(WireClass.positionBinaryResponse):
+            return .positionBinaryResponse(try PositionBinaryResponse.decode(from: &fields))
         default:
             let remaining = try fields.readBytes(fields.remaining)
             return .unknown(classId: classId, body: remaining)

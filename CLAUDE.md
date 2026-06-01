@@ -23,10 +23,11 @@ subscriptions aren't torn down mid-flight.
 - **Server** — market data + orders + news all go through `jforex-server`.
 - **Standalone** (default since 2026-05) — `NativeMarketDataCoordinator` drives a
   `DukascopySession` directly, and `NativeTradingCoordinator` / `NativeNewsCoordinator`
-  route orders and news over the same session. Fully server-independent: market data,
-  orders (market/limit/stop, close, cancel, modify SL/TP) and the news/economic
-  calendar all work natively. Login sheet shows on every launch so the user confirms
-  which account to use; saved password hashes are reused via the Keychain.
+  route orders and news over the same session, and `NativeTradeHistoryService` reads
+  closed trades from it. Fully server-independent: market data, orders (market/limit/stop,
+  close, cancel, modify SL/TP), the news/economic calendar and closed-trade history all
+  work natively. Login sheet shows on every launch so the user confirms which account to
+  use; saved password hashes are reused via the Keychain.
 
 ## Architecture
 

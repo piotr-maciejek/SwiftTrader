@@ -76,6 +76,7 @@
 		A1000052 /* NativeMarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000052 /* NativeMarketDataCoordinator.swift */; };
 		AA000040 /* NativeTradingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000041 /* NativeTradingCoordinator.swift */; };
 		AA000046 /* NativeNewsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000047 /* NativeNewsCoordinator.swift */; };
+		AA000060 /* NativeTradeHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000061 /* NativeTradeHistoryService.swift */; };
 		AA000042 /* PnLConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000043 /* PnLConverter.swift */; };
 		A1000060 /* DukascopyClient in Frameworks */ = {isa = PBXBuildFile; productRef = AA000002 /* DukascopyClient */; };
 		AA000010 /* DukascopyAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000011 /* DukascopyAccount.swift */; };
@@ -190,6 +191,7 @@
 		A2000052 /* NativeMarketDataCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMarketDataCoordinator.swift; sourceTree = "<group>"; };
 		AA000041 /* NativeTradingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTradingCoordinator.swift; sourceTree = "<group>"; };
 		AA000047 /* NativeNewsCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeNewsCoordinator.swift; sourceTree = "<group>"; };
+		AA000061 /* NativeTradeHistoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTradeHistoryService.swift; sourceTree = "<group>"; };
 		AA000043 /* PnLConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PnLConverter.swift; sourceTree = "<group>"; };
 		A3000001 /* SwiftTrader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftTrader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA000001 /* Packages/DukascopyClient */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = Packages/DukascopyClient; sourceTree = "<group>"; };
@@ -311,6 +313,7 @@
 				A2000052 /* NativeMarketDataCoordinator.swift */,
 				AA000041 /* NativeTradingCoordinator.swift */,
 				AA000047 /* NativeNewsCoordinator.swift */,
+				AA000061 /* NativeTradeHistoryService.swift */,
 				AA000043 /* PnLConverter.swift */,
 				AA000013 /* KeychainStore.swift */,
 				A2000013 /* TradingAPIService.swift */,
@@ -554,6 +557,7 @@
 				A1000052 /* NativeMarketDataCoordinator.swift in Sources */,
 				AA000040 /* NativeTradingCoordinator.swift in Sources */,
 				AA000046 /* NativeNewsCoordinator.swift in Sources */,
+				AA000060 /* NativeTradeHistoryService.swift in Sources */,
 				AA000042 /* PnLConverter.swift in Sources */,
 				AA000010 /* DukascopyAccount.swift in Sources */,
 				AA000012 /* KeychainStore.swift in Sources */,

@@ -1,3 +1,4 @@
+import DukascopyClient
 import Foundation
 import Testing
 @testable import SwiftTrader
@@ -153,5 +154,97 @@ struct TradeHistoryViewModelTests {
         await vm.reload()
         #expect(vm.error != nil)
         #expect(fake.lastFrom == nil) // service not called
+    }
+
+    /// `setService` is how `attachNativeSession` rewires history onto a freshly-connected
+    /// standalone session — it must drop stale trades and pull from the new source.
+    @Test("setService swaps the source and clears stale trades")
+    func setServiceSwapsAndClears() async {
+        let first = FakeTradeHistoryService()
+        first.result = .success([
+            TradeRecord(positionId: "OLD", instrument: "EURUSD", direction: "BUY", amount: 0.01,
+                        openPrice: 1.0, closePrice: 1.0, profitLoss: 1, grossProfitLoss: 1,
+                        swaps: 0, commission: 0, openTime: 0, closeTime: 0, positionType: "REGULAR"),
+        ])
+        let vm = TradeHistoryViewModel(service: first)
+        await vm.reload()
+        #expect(vm.trades.count == 1)
+
+        let second = FakeTradeHistoryService()
+        second.result = .success([
+            TradeRecord(positionId: "NEW1", instrument: "GBPUSD", direction: "SELL", amount: 0.02,
+                        openPrice: 1.3, closePrice: 1.29, profitLoss: 9, grossProfitLoss: 9,
+                        swaps: 0, commission: 0, openTime: 0, closeTime: 0, positionType: "REGULAR"),
+            TradeRecord(positionId: "NEW2", instrument: "GBPUSD", direction: "BUY", amount: 0.02,
+                        openPrice: 1.3, closePrice: 1.31, profitLoss: 9, grossProfitLoss: 9,
+                        swaps: 0, commission: 0, openTime: 0, closeTime: 0, positionType: "REGULAR"),
+        ])
+        vm.setService(second)
+        #expect(vm.trades.isEmpty)   // stale trades dropped immediately on swap
+        await vm.reload()
+        #expect(vm.trades.map(\.id) == ["NEW1", "NEW2"])  // now sourced from the new service
+    }
+}
+
+@Suite("NativeTradeHistoryService")
+struct NativeTradeHistoryServiceTests {
+
+    private func position(
+        id: String = "P1", long: Bool = true, merged: Bool = false, instrument: String = "EUR/USD",
+        amount: Double? = 1000, open: Double? = 1.16448, current: Double? = nil, close: Double? = 1.1646,
+        pl: Double? = 0.12, swaps: Double? = 0, gross: Double? = 0.12, commission: Double? = -0.22,
+        currency: String? = "PLN", openMs: Int64? = 1_700_000_000_000, closeMs: Int64? = 1_700_000_600_000
+    ) -> ClosedPosition {
+        ClosedPosition(
+            positionId: id, isLong: long, isMerged: merged, instrument: instrument,
+            amount: amount, openPrice: open, currentPrice: current, closePrice: close,
+            profitLoss: pl, swaps: swaps, grossProfitLoss: gross, commission: commission,
+            commissionCurrency: currency, openDateMillis: openMs, closeDateMillis: closeMs)
+    }
+
+    @Test("maps a ClosedPosition to a TradeRecord 1:1 (LONG → BUY, fields, ms times)")
+    func mapsLong() {
+        let r = NativeTradeHistoryService.map(position())
+        #expect(r.positionId == "P1")
+        #expect(r.direction == "BUY")
+        #expect(r.isBuy)
+        #expect(r.instrument == "EUR/USD")
+        #expect(r.amount == 1000)
+        #expect(r.openPrice == 1.16448)
+        #expect(r.closePrice == 1.1646)
+        #expect(r.profitLoss == 0.12)
+        #expect(r.grossProfitLoss == 0.12)
+        #expect(r.commission == -0.22)
+        #expect(r.openTime == 1_700_000_000_000)
+        #expect(r.closeTime == 1_700_000_600_000)
+        #expect(r.positionType == "REGULAR")
+    }
+
+    @Test("SHORT → SELL and MERGED positionType carry through")
+    func mapsShortMerged() {
+        let r = NativeTradeHistoryService.map(position(long: false, merged: true))
+        #expect(r.direction == "SELL")
+        #expect(!r.isBuy)
+        #expect(r.positionType == "MERGED")
+    }
+
+    @Test("nil decimals/dates default to 0 (TradeRecord fields are non-optional)")
+    func mapsNilDefaults() {
+        let r = NativeTradeHistoryService.map(position(
+            amount: nil, open: nil, close: nil, pl: nil, swaps: nil, gross: nil,
+            commission: nil, currency: nil, openMs: nil, closeMs: nil))
+        #expect(r.amount == 0)
+        #expect(r.openPrice == 0)
+        #expect(r.closePrice == 0)
+        #expect(r.profitLoss == 0)
+        #expect(r.openTime == 0)
+        #expect(r.closeTime == 0)
+    }
+
+    @Test("no session → empty result (history VM is built before native connect)")
+    func noSessionReturnsEmpty() async throws {
+        let service = NativeTradeHistoryService(session: nil)
+        let trades = try await service.fetchClosedTrades(from: .distantPast, to: .now)
+        #expect(trades.isEmpty)
     }
 }
