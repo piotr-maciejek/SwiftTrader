@@ -4,7 +4,7 @@
 
 A native macOS forex trading client built with SwiftUI. Designed as a fast, lightweight alternative to Dukascopy's Java-based JForex platform -- no JVM overhead, instant startup, smooth 60fps chart rendering.
 
-Runs **standalone** by default: talks Dukascopy's wire protocol directly via the in-tree `DukascopyClient` Swift package -- no JVM, no server. Optional **server mode** routes market data through [jforex-server](https://github.com/piotr-maciejek/jforex-server) instead. Order execution still goes through `jforex-server` in both modes (standalone is read-only for now).
+Runs **standalone** by default: talks Dukascopy's wire protocol directly via the in-tree `DukascopyClient` Swift package -- no JVM, no server. Everything runs natively in this mode: market data, order execution (market/limit/stop, close, cancel, modify SL/TP), positions, account, the economic calendar, and closed-trade history. Optional **server mode** routes those through [jforex-server](https://github.com/piotr-maciejek/jforex-server) instead.
 
 ## Philosophy
 
@@ -20,7 +20,7 @@ SwiftTrader is calibrated for **price action trading**. Clean charts, no indicat
 
 ## Features
 
-- **Standalone mode** -- native SRP6 connection to Dukascopy, no JVM, no server; deep history via per-period `.bi5` downloads; single shared on-disk cache across all timeframes; multi-account login (demo + live) with passwords stored as SHA-1 hashes in the macOS Keychain
+- **Standalone mode** (default) -- native SRP6 connection to Dukascopy, no JVM, no server. Fully self-contained: market data, orders (market/limit/stop, close, cancel, modify SL/TP), positions, account, news/economic calendar, and closed-trade history all run over the wire. Deep history via per-period `.bi5` downloads; single shared on-disk cache across all timeframes; multi-account login (demo + live) with passwords stored as SHA-1 hashes in the macOS Keychain
 - **Canvas-based candlestick chart** with drag-to-scroll, mouse wheel zoom, and live streaming
 - **Multiple tabs** -- each with independent instrument and timeframe
 - **Visual order entry** -- click Buy/Sell to place a visual order box on the chart with draggable SL/TP lines, adjustable position size (+/- buttons), live R:R and pip calculations. Entry price tracks the market in real-time. Confirm or cancel directly on the chart (or Enter/Escape). Multiple visual orders supported across different instruments

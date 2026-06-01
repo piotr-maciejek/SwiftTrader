@@ -1,5 +1,6 @@
 import DukascopyClient
 import Foundation
+import os
 
 /// Saved standalone accounts + the active selection. Account metadata persists in
 /// UserDefaults; passwords live in the Keychain as SHA-1 hashes (never plaintext).
@@ -17,6 +18,7 @@ final class AccountStore {
     private(set) var lastSaveError: Error?
 
     private let secrets: SecretStore
+    private let log = Logger(subsystem: "com.swifttrader", category: "accounts")
     private static let accountsKey = "dukascopyAccounts"
     private static let selectionKey = "dukascopySelectedAccountID"
 
@@ -73,7 +75,14 @@ final class AccountStore {
     }
 
     func removeAccount(_ id: UUID) {
-        try? secrets.removeSecret(for: id.uuidString)
+        // Log (don't swallow) a Keychain delete failure, but still drop the account from the
+        // list — deletion must not be blocked, and an orphaned secret is harmless (its UUID is
+        // gone from UserDefaults, so it's never read again).
+        do {
+            try secrets.removeSecret(for: id.uuidString)
+        } catch {
+            log.error("Keychain delete failed for account \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
         accounts.removeAll { $0.id == id }
         if selectedAccountID == id { selectedAccountID = accounts.first?.id }
         persistAccounts()

@@ -35,6 +35,11 @@ struct KeychainStore: SecretStore {
         SecItemDelete(base as CFDictionary)  // overwrite any existing value
         var add = base
         add[kSecValueData as String] = Data(secret.utf8)
+        // Restrict to this device when unlocked: the SHA-1 SRP identity is only read at
+        // login (foreground), and `ThisDeviceOnly` keeps it off iCloud Keychain sync. Set on
+        // the add only — not on `base`, which doubles as the delete query above (adding it
+        // there would fail to match items written under the old default accessibility).
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         let status = SecItemAdd(add as CFDictionary, nil)
         guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
     }

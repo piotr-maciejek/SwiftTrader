@@ -128,7 +128,9 @@ struct AccountStoreCredentialTests {
             throw KeychainError.unexpectedStatus(-25299)
         }
         func secret(for key: String) -> String? { nil }
-        func removeSecret(for key: String) throws {}
+        func removeSecret(for key: String) throws {
+            throw KeychainError.unexpectedStatus(-25299)
+        }
     }
 
     private final class InMemorySecretStore: SecretStore, @unchecked Sendable {
@@ -152,5 +154,13 @@ struct AccountStoreCredentialTests {
         let account = store.addAccount(label: "Demo", login: "123", password: "pw", environment: .demo)
         defer { store.removeAccount(account.id) }
         #expect(store.lastSaveError == nil)
+    }
+
+    @Test("a failed Keychain delete is logged but still removes the account from the list")
+    func deleteFailureStillRemoves() {
+        let store = AccountStore(secrets: ThrowingSecretStore())
+        let account = store.addAccount(label: "Demo", login: "123", password: "pw", environment: .demo)
+        store.removeAccount(account.id)  // removeSecret throws; must not propagate or block removal
+        #expect(!store.accounts.contains { $0.id == account.id })
     }
 }
