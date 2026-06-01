@@ -205,17 +205,17 @@ final class ChartViewModel {
             return
         }
 
-        // Load history first so the REST call isn't starved by WebSocket
-        // callbacks competing for MainActor time. Also: WS must open AFTER
-        // loadHistoryWithRetry so a stale REST snapshot can't overwrite a fresher
-        // WS-pushed completed bar via timestamp-keyed merge.
+        // Open the live tick feed FIRST. connectWebSocket() only launches a background
+        // task (non-blocking), so the chart goes live on the warm-painted cached bars within
+        // ~1s instead of waiting out the history load — which can lag tens of seconds while
+        // the launch fetch storm saturates the history slots, leaving the chart looking dead
+        // and stuck on "Market Closed". Safe ordering: handleBar drops live bars while `bars`
+        // is empty (cold cache, so nothing to stale-overwrite), and loadHistoryWithRetry
+        // guards on currentInstrument/period so an in-flight switch can't paint stale data.
+        connectWebSocket()
         await loadHistoryWithRetry()
-        // loadHistoryWithRetry returns on Task.isCancelled too — without this guard
-        // a switchInstrument/switchPeriod that fires mid-retry would let this OLD
-        // task spawn a wsTask using the NEW currentPeriod, racing the new reloadTask.
         if Task.isCancelled { return }
         loadATR()
-        connectWebSocket()
     }
 
     func switchInstrument(_ instrument: String) {
@@ -570,12 +570,16 @@ final class ChartViewModel {
                     for try await bar in coordinator.streamCandles(
                         instrument: instrument, period: period, rebucketing: rebucketing
                     ) {
-                        if !isConnected { isConnected = true }
                         // Reset retry budget once we've successfully received bars —
                         // future drops should get the full retry window again.
                         attempt = 1
                         lastError = nil
                         handleBar(bar, expectedInstrument: instrument, expectedPeriod: period)
+                        // Only flag "Live" once there's a drawable chart. A live tick with no
+                        // history is meaningless — handleBar drops it until history paints — so
+                        // opening the feed early (parallel with the history load) never shows a
+                        // live-but-empty chart; the badge stays "Connecting…" until bars exist.
+                        if !isConnected && !bars.isEmpty { isConnected = true }
                     }
                     // Stream ended cleanly without an error — treat as a transient
                     // disconnect and try to reconnect within the same retry budget.

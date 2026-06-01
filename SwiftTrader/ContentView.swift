@@ -480,8 +480,13 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else if !vm.bars.isEmpty {
-                Circle().fill(.yellow).frame(width: 8, height: 8)
-                Text("Market Closed")
+                // No live tick yet. Distinguish a genuinely closed market (weekend/holiday)
+                // from "still connecting" — otherwise an open-market startup wrongly reads
+                // "Market Closed" while the live feed is just catching up.
+                let now = Date()
+                let marketClosed = NYTradingCalendar.isMarketClosed(at: now) || NYTradingCalendar.isFXHoliday(at: now)
+                Circle().fill(marketClosed ? .yellow : .orange).frame(width: 8, height: 8)
+                Text(marketClosed ? "Market Closed" : "Connecting…")
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {

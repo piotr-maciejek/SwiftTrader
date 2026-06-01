@@ -804,14 +804,24 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
 private actor HistoryCoalescer {
     private var inFlight: [String: Task<[SwiftTrader.CandleBar], Error>] = [:]
     private let limit: Int
+    // Background requests (the prefetcher) are capped below `limit` so they can never fill
+    // every slot, and a freed slot always goes to a waiting FOREGROUND request first — a
+    // user-driven (visible-chart) load never queues behind the prefetcher's slow deep
+    // fetches, which previously starved the focused chart for tens of seconds at launch.
+    private let backgroundLimit: Int
     private var active = 0
-    private var queue: [CheckedContinuation<Void, Never>] = []
-    // Foreground (user-driven) requests in flight. The background prefetcher gates on this
-    // hitting zero so it only runs in the gaps between visible loads.
+    private var activeBackground = 0
+    private var fgQueue: [CheckedContinuation<Void, Never>] = []
+    private var bgQueue: [CheckedContinuation<Void, Never>] = []
+    // Foreground (user-driven) requests in flight. The background prefetcher also gates on
+    // this hitting zero so it only *submits* in the gaps between visible loads.
     private var foregroundInFlight = 0
     private var idleWaiters: [CheckedContinuation<Void, Never>] = []
 
-    init(limit: Int) { self.limit = limit }
+    init(limit: Int) {
+        self.limit = limit
+        self.backgroundLimit = max(1, limit - 2)   // reserve ≥2 slots for foreground
+    }
 
     func run(
         key: String,
@@ -823,8 +833,8 @@ private actor HistoryCoalescer {
         }
         if foreground { foregroundInFlight += 1 }
         let task = Task<[SwiftTrader.CandleBar], Error> { [self] in
-            await acquire()
-            defer { Task { await self.release() } }
+            await acquire(foreground: foreground)
+            defer { Task { await self.release(foreground: foreground) } }
             return try await work()
         }
         inFlight[key] = task
@@ -849,17 +859,30 @@ private actor HistoryCoalescer {
         await withCheckedContinuation { idleWaiters.append($0) }
     }
 
-    private func acquire() async {
-        if active < limit { active += 1; return }
-        await withCheckedContinuation { queue.append($0) }
-        // Resumed by release(), which hands off its slot without decrementing `active`.
+    private func acquire(foreground: Bool) async {
+        if active < limit, foreground || activeBackground < backgroundLimit {
+            active += 1
+            if !foreground { activeBackground += 1 }
+            return
+        }
+        await withCheckedContinuation { c in
+            if foreground { fgQueue.append(c) } else { bgQueue.append(c) }
+        }
+        // Resumed by release(), which accounts the slot before resuming.
     }
 
-    private func release() {
-        if !queue.isEmpty {
-            queue.removeFirst().resume()
-        } else {
-            active -= 1
+    private func release(foreground: Bool) {
+        active -= 1
+        if !foreground { activeBackground -= 1 }
+        // Hand the freed slot to a waiting FOREGROUND request first; only feed the
+        // background queue when no foreground work is waiting and a background slot is free.
+        if !fgQueue.isEmpty {
+            active += 1
+            fgQueue.removeFirst().resume()
+        } else if !bgQueue.isEmpty, activeBackground < backgroundLimit {
+            active += 1
+            activeBackground += 1
+            bgQueue.removeFirst().resume()
         }
     }
 }
