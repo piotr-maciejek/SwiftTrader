@@ -280,10 +280,11 @@ actor NativeTradingCoordinator: TradingCoordinating {
         let acct: Account = account.map { Account(native: $0, connected: true) }
             ?? Account(balance: 0, equity: 0, usedMargin: 0, freeMargin: 0,
                        currency: "USD", leverage: 0, connected: session != nil, lastTickAgeMs: 0)
-        // Spreads keyed slashless, in pips, to match server-mode `spreads`.
-        var pipSpreads: [String: Double] = [:]
-        for (k, v) in spreads { pipSpreads[k] = v * PnLConverter.pipFactor(for: k) }
-        return TradingSnapshot(positions: positions, account: acct, spreads: pipSpreads)
+        // Spreads in PRICE units (ask − bid), matching server mode — JForexStrategy
+        // broadcasts ask−bid, not pips. The visual-order R:R and risk-sizing formulas add
+        // the spread to price-unit distances, so publishing pips here made the spread
+        // ~10,000× too large and collapsed R:R to 0 (and skewed position sizing).
+        return TradingSnapshot(positions: positions, account: acct, spreads: spreads)
     }
 
     private func buildPending() -> [PendingOrder] {
