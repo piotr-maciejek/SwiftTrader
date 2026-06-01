@@ -243,6 +243,44 @@ struct OrderMessagesTests {
         #expect(o.state == "CANCELLED")
     }
 
+    @Test("Modify (amend) a protective SL: top-level CLOSE order, existing id, state PENDING")
+    func modifyAmendStopLoss() throws {
+        let frame = encodeModifyProtectiveOrder(
+            existingProtectiveOrderId: "SL-7", orderGroupId: "POS-7", instrument: "EUR/USD",
+            positionSide: "BUY", amount: BigDecimalValue(1000, scale: 0),
+            newPrice: BigDecimalValue(1.155, scale: 5), isTakeProfit: false,
+            userId: "u", sessionId: "s", requestId: "R5", timestamp: 5
+        )
+        guard case .order(let o) = try MessageDecoder.decode(frame) else {
+            Issue.record("expected .order"); return
+        }
+        #expect(o.orderId == "SL-7")
+        #expect(o.orderGroupId == "POS-7")
+        #expect(o.direction == "CLOSE")
+        #expect(o.side == "SELL")                 // protective leg of a BUY/LONG
+        #expect(o.state == "PENDING")             // amend, not create
+        #expect(o.stopDirection == "LESS_BID")    // BUY stop-loss
+        #expect(abs((o.priceStop?.doubleValue ?? 0) - 1.155) < 1e-9)
+    }
+
+    @Test("Add (create) a protective TP: no existing id, state CREATED, TP stopDirection")
+    func modifyAddTakeProfit() throws {
+        let frame = encodeModifyProtectiveOrder(
+            existingProtectiveOrderId: nil, orderGroupId: "POS-8", instrument: "EUR/USD",
+            positionSide: "BUY", amount: BigDecimalValue(1000, scale: 0),
+            newPrice: BigDecimalValue(1.175, scale: 5), isTakeProfit: true,
+            userId: "u", sessionId: "s", requestId: "R6", timestamp: 6
+        )
+        guard case .order(let o) = try MessageDecoder.decode(frame) else {
+            Issue.record("expected .order"); return
+        }
+        #expect(o.orderId == nil)                 // create → server assigns the id
+        #expect(o.state == "CREATED")
+        #expect(o.direction == "CLOSE")
+        #expect(o.stopDirection == "GREATER_BID") // BUY take-profit
+        #expect(abs((o.priceStop?.doubleValue ?? 0) - 1.175) < 1e-9)
+    }
+
     @Test("Enum value tables map known wire ints")
     func enumTables() {
         #expect(OrderEnums.positionSide(2342524) == "BUY")

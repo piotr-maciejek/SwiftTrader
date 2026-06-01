@@ -33,6 +33,7 @@ enum OrderEnumValue {
     static let positionShort: Int32 = 78875740
     static let stateCreated: Int32 = 1746537160
     static let stateCancelled: Int32 = -1031784143
+    static let statePending: Int32 = 35394935
     static let stopGreaterBid: Int32 = -1215583496
     static let stopGreaterAsk: Int32 = -1215584140
     static let stopLessBid: Int32 = -1421388489
@@ -251,6 +252,53 @@ public func encodeCancelOrder(
     if let amt = order.amount { writeField(&w, fieldId: -5158) { $0.writeBigDecimal(amt) } }
     if let ps = order.priceStop { writeField(&w, fieldId: -30914) { $0.writeBigDecimal(ps) } }
     writeEnumField(&w, fieldId: 32505, enumClass: WireClass.orderStateEnum, value: OrderEnumValue.stateCancelled)
+    if let sessionId { writeField(&w, fieldId: 28132) { $0.writeString(sessionId) } }
+    if let userId { writeField(&w, fieldId: -31160) { $0.writeString(userId) } }
+    writeField(&w, fieldId: 17261) { $0.writeString(requestId) }
+    writeField(&w, fieldId: -28332) { $0.writeInt64BE(timestamp) }
+    return w.data
+}
+
+/// Builds a top-level `OrderMessageExt` that CHANGES or ADDS a protective SL/TP order
+/// on an existing position or pending entry — the desktop client's
+/// `PlatformOrderImpl.setStopLossPrice` / `setTakeProfitPrice` path. Sent directly (not
+/// wrapped in a group); the server amends/creates the protective CLOSE order inside the
+/// group identified by `orderGroupId`.
+///
+/// `existingProtectiveOrderId` set → AMEND that protective order (`state = PENDING`).
+/// `existingProtectiveOrderId` nil → CREATE a new one (`state = CREATED`).
+/// To REMOVE a protective order, use `encodeCancelOrder` on it instead.
+public func encodeModifyProtectiveOrder(
+    existingProtectiveOrderId: String?, orderGroupId: String,
+    instrument: String, positionSide: String, amount: BigDecimalValue,
+    newPrice: BigDecimalValue, isTakeProfit: Bool,
+    userId: String?, sessionId: String?, requestId: String, timestamp: Int64
+) -> Data {
+    // Protective order is the opposite side of the position, with a stopDirection chosen
+    // so it triggers on the correct side of the market (same rules as the submit path).
+    let closeSideBuy = positionSide != "BUY"
+    let stopDir: Int32
+    if positionSide == "BUY" {
+        stopDir = isTakeProfit ? OrderEnumValue.stopGreaterBid : OrderEnumValue.stopLessBid
+    } else {
+        stopDir = isTakeProfit ? OrderEnumValue.stopLessAsk : OrderEnumValue.stopGreaterAsk
+    }
+    var w = BinaryWriter()
+    w.writeInt32BE(javaStringHashCode(WireClass.orderMessageExt))
+    if let existingProtectiveOrderId {
+        writeField(&w, fieldId: -12183) { $0.writeString(existingProtectiveOrderId) }
+    }
+    writeField(&w, fieldId: 29772) { $0.writeString(orderGroupId) }
+    writeField(&w, fieldId: 12424) { $0.writeString(instrument) }
+    writeEnumField(&w, fieldId: -19551, enumClass: WireClass.orderDirectionEnum, value: OrderEnumValue.directionClose)
+    writeEnumField(&w, fieldId: -7924, enumClass: WireClass.orderSideEnum,
+                   value: closeSideBuy ? OrderEnumValue.sideBuy : OrderEnumValue.sideSell)
+    writeField(&w, fieldId: -5158) { $0.writeBigDecimal(amount) }
+    writeField(&w, fieldId: -30914) { $0.writeBigDecimal(newPrice) }   // priceStop = new SL/TP level
+    writeEnumField(&w, fieldId: 19053, enumClass: WireClass.stopDirectionEnum, value: stopDir)
+    if isTakeProfit { writeField(&w, fieldId: -3668) { $0.writeBigDecimal(.zero) } }  // priceTrailingLimit
+    writeEnumField(&w, fieldId: 32505, enumClass: WireClass.orderStateEnum,
+                   value: existingProtectiveOrderId != nil ? OrderEnumValue.statePending : OrderEnumValue.stateCreated)
     if let sessionId { writeField(&w, fieldId: 28132) { $0.writeString(sessionId) } }
     if let userId { writeField(&w, fieldId: -31160) { $0.writeString(userId) } }
     writeField(&w, fieldId: 17261) { $0.writeString(requestId) }

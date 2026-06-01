@@ -771,6 +771,35 @@ public actor DukascopySession {
         return reqId
     }
 
+    /// Add or change a protective SL/TP order on the position/pending group `orderGroupId`.
+    /// `existingProtectiveOrderId` set → amend that protective order; nil → create a new one.
+    /// To remove a protective order entirely, call `cancelOrder(orderId:)` on it.
+    @discardableResult
+    public func modifyProtectiveOrder(
+        orderGroupId: String, isTakeProfit: Bool, newPrice: BigDecimalValue,
+        existingProtectiveOrderId: String?
+    ) async throws -> String {
+        guard state == .connected, let transport else { throw SessionError.notConnected }
+        guard let group = positions[orderGroupId], let instrument = group.instrument else {
+            throw SessionError.timedOut("modify: unknown group \(orderGroupId)")
+        }
+        let opening = group.orders.first { $0.direction == "OPEN" }
+        guard let side = group.side ?? opening?.side,
+              let amount = group.amount ?? opening?.amount else {
+            throw SessionError.timedOut("modify: incomplete group \(orderGroupId)")
+        }
+        let reqId = UUID().uuidString
+        let frame = encodeModifyProtectiveOrder(
+            existingProtectiveOrderId: existingProtectiveOrderId, orderGroupId: orderGroupId,
+            instrument: instrument, positionSide: side, amount: amount,
+            newPrice: newPrice, isTakeProfit: isTakeProfit,
+            userId: latestAccount?.userId, sessionId: authSessionId,
+            requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        try await transport.sendFrame(frame)
+        return reqId
+    }
+
     /// Current price for `instrument` (ask if `buy`, else bid). Uses the last-known
     /// quote immediately when available (FX pairs can go 5–10s between ticks, so
     /// waiting for the *next* tick is unreliable); otherwise subscribes and waits up

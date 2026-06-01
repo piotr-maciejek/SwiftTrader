@@ -8,7 +8,7 @@ struct DukascopyCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dukascopy-cli",
         abstract: "Dukascopy native protocol prototyping CLI.",
-        subcommands: [JNLPCommand.self, AuthCommand.self, LoginInfoCommand.self, CaptchaCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self, BulkSpikeCommand.self, PositionsCommand.self, SubmitCommand.self, CloseCommand.self, CancelCommand.self, HashOfCommand.self]
+        subcommands: [JNLPCommand.self, AuthCommand.self, LoginInfoCommand.self, CaptchaCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self, BulkSpikeCommand.self, PositionsCommand.self, SubmitCommand.self, CloseCommand.self, CancelCommand.self, ModifyCommand.self, HashOfCommand.self]
     )
 }
 
@@ -674,6 +674,80 @@ struct CancelCommand: AsyncParsableCommand {
         printer.cancel()
         print("--- positions after ---")
         for g in await session.positionsSnapshot() { printGroup(g) }
+        await session.close()
+    }
+}
+
+struct ModifyCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "modify",
+        abstract: "Modify/add/remove SL and/or TP on a position or pending group (by orderGroupId)."
+    )
+    @Option(name: .long, help: "Target environment: demo or live") var env: String = "demo"
+    @Option(name: .long, help: "Login") var user: String
+    @Option(name: .long, help: "Password") var pass: String
+    @Argument(help: "orderGroupId of the position/pending group (from `positions`)") var orderGroupId: String
+    @Option(name: .long, help: "New stop-loss price (0 to remove the SL)") var sl: Double?
+    @Option(name: .long, help: "New take-profit price (0 to remove the TP)") var tp: Double?
+    @Option(name: .long, help: "Seconds to watch order events after modify") var observe: Double = 8
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        if sl == nil && tp == nil { throw ValidationError("provide --sl and/or --tp") }
+        let session = DukascopySession(
+            environment: target, credentials: AuthCredentials(login: user, password: pass)
+        )
+        try await session.connect()
+        _ = try? await session.accountSnapshot()
+        try? await Task.sleep(for: .seconds(1))   // let position groups arrive
+
+        guard let group = await session.positionsSnapshot().first(where: { $0.orderGroupId == orderGroupId }) else {
+            print("no group with orderGroupId \(orderGroupId)")
+            await session.close(); return
+        }
+        // Classify existing protective CLOSE orders by stopDirection (SL vs TP).
+        var slOrderId: String?, tpOrderId: String?
+        for o in group.orders where o.direction == "CLOSE" {
+            switch o.stopDirection {
+            case "LESS_BID", "GREATER_ASK": slOrderId = o.orderId
+            case "GREATER_BID", "LESS_ASK": tpOrderId = o.orderId
+            default: break
+            }
+        }
+        let inst = group.instrument ?? ""
+        let scale = inst.contains("JPY") ? 3 : 5
+        print("group \(orderGroupId) \(inst): existing SL=\(slOrderId ?? "-") TP=\(tpOrderId ?? "-")")
+
+        let events = await session.orderEvents()
+        let printer = Task { for await ev in events { printOrderEvent(ev) } }
+
+        func apply(_ price: Double?, isTP: Bool, existing: String?) async {
+            guard let price else { return }
+            let kind = isTP ? "TP" : "SL"
+            do {
+                if price <= 0 {
+                    guard let existing else { print("\(kind): nothing to remove"); return }
+                    print("removing \(kind) (order \(existing)) …")
+                    let r = try await session.cancelOrder(orderId: existing)
+                    print("\(kind) REMOVE SENT: reqId=\(r)")
+                } else {
+                    print("\(existing == nil ? "adding" : "modifying") \(kind) → \(price) …")
+                    let r = try await session.modifyProtectiveOrder(
+                        orderGroupId: orderGroupId, isTakeProfit: isTP,
+                        newPrice: BigDecimalValue(price, scale: scale), existingProtectiveOrderId: existing)
+                    print("\(kind) SENT: reqId=\(r)")
+                }
+            } catch { print("\(kind) FAILED: \(error)") }
+        }
+        await apply(sl, isTP: false, existing: slOrderId)
+        await apply(tp, isTP: true, existing: tpOrderId)
+
+        try? await Task.sleep(for: .seconds(observe))
+        printer.cancel()
+        print("--- group after ---")
+        for g in await session.positionsSnapshot() where g.orderGroupId == orderGroupId { printGroup(g) }
         await session.close()
     }
 }

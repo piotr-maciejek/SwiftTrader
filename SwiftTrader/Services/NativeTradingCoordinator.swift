@@ -86,8 +86,109 @@ actor NativeTradingCoordinator: TradingCoordinating {
         try await session.closePosition(positionId: label)
     }
 
+    /// Modify (or add/remove) SL and TP on an open position or pending entry.
+    /// `label` is the orderGroupId (open position) or the pending entry's orderId.
+    ///
+    /// Dukascopy rate-limits order ops (~1/s); firing SL and TP back-to-back drops the
+    /// second (verified on demo 2026-06-01, and the same issue server mode fixed in
+    /// `JForexStrategy.modifyOrder`). So we mirror that: send only the leg that actually
+    /// changed, and when both change, wait for the first to land before sending the second.
     func modifyOrder(label: String, stopLoss: Double, takeProfit: Double) async throws -> Position {
-        throw NativeTradingError.notSupported("modifying SL/TP on an open position")
+        guard let session else { throw NativeTradingError.notConnected }
+        let live = await session.positionsSnapshot()
+        guard let group = resolveGroup(label: label, in: live),
+              let gid = group.orderGroupId, let inst = group.instrument else {
+            throw NativeTradingError.notSupported("modifying SL/TP for unknown order \(label)")
+        }
+        let scale = inst.contains("JPY") ? 3 : 5
+        let st = protective(group)
+        let slChanged = priceDiffers(stopLoss, st.slPrice, scale: scale)
+        let tpChanged = priceDiffers(takeProfit, st.tpPrice, scale: scale)
+
+        if slChanged {
+            try await applyLeg(gid: gid, isTP: false, newPrice: stopLoss, existingId: st.slId, scale: scale)
+            if tpChanged { await waitForLeg(gid: gid, isTP: false, expected: stopLoss, scale: scale) }
+        }
+        if tpChanged {
+            try await applyLeg(gid: gid, isTP: true, newPrice: takeProfit, existingId: st.tpId, scale: scale)
+        }
+
+        // Best-effort echo; the authoritative state arrives via the snapshot stream.
+        let after = (await session.positionsSnapshot()).first { $0.orderGroupId == gid }
+        return after.flatMap { position(from: $0) ?? pendingEcho($0, sl: stopLoss, tp: takeProfit) }
+            ?? Position(label: gid, instrument: inst.replacingOccurrences(of: "/", with: ""),
+                        direction: group.side ?? "BUY",
+                        amount: (group.amount?.doubleValue ?? 0) / 1_000_000,
+                        openPrice: group.pricePosOpen?.doubleValue ?? 0,
+                        stopLoss: stopLoss, takeProfit: takeProfit,
+                        profitLoss: 0, profitLossPips: 0, state: "FILLED")
+    }
+
+    /// Apply one SL/TP leg: modify an existing protective order, add a new one, or
+    /// (price ≤ 0) cancel the existing one.
+    private func applyLeg(gid: String, isTP: Bool, newPrice: Double, existingId: String?, scale: Int) async throws {
+        guard let session else { throw NativeTradingError.notConnected }
+        if newPrice > 0 {
+            try await session.modifyProtectiveOrder(
+                orderGroupId: gid, isTakeProfit: isTP,
+                newPrice: BigDecimalValue(newPrice, scale: scale), existingProtectiveOrderId: existingId)
+        } else if let existingId {
+            try await session.cancelOrder(orderId: existingId)   // clear the protective order
+        }
+        // price ≤ 0 with no existing order → nothing to do.
+    }
+
+    /// Poll the live snapshot until `gid`'s leg reflects `expected` (or timeout), so a
+    /// following leg isn't sent inside Dukascopy's per-second order window.
+    private func waitForLeg(gid: String, isTP: Bool, expected: Double, scale: Int, timeout: TimeInterval = 4) async {
+        guard let session else { return }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(200))
+            guard let g = (await session.positionsSnapshot()).first(where: { $0.orderGroupId == gid }) else { continue }
+            let actual = isTP ? protective(g).tpPrice : protective(g).slPrice
+            if !priceDiffers(actual, expected, scale: scale) { return }
+        }
+    }
+
+    /// Resolve a group by orderGroupId (open position) or by a contained order's id (pending entry).
+    private func resolveGroup(label: String, in groups: [OrderGroup]) -> OrderGroup? {
+        groups.first { $0.orderGroupId == label }
+            ?? groups.first { g in g.orders.contains { $0.orderId == label } }
+    }
+
+    /// Current SL/TP prices and their protective-order ids (0 / nil when absent),
+    /// distinguished by `stopDirection` (SL: LESS_BID/GREATER_ASK; TP: GREATER_BID/LESS_ASK).
+    private func protective(_ g: OrderGroup) -> (slPrice: Double, slId: String?, tpPrice: Double, tpId: String?) {
+        var slPrice = 0.0, tpPrice = 0.0
+        var slId: String?, tpId: String?
+        for o in g.orders where o.direction == "CLOSE" {
+            guard let price = o.priceStop?.doubleValue else { continue }
+            switch o.stopDirection {
+            case "LESS_BID", "GREATER_ASK": slPrice = price; slId = o.orderId
+            case "GREATER_BID", "LESS_ASK": tpPrice = price; tpId = o.orderId
+            default: break
+            }
+        }
+        return (slPrice, slId, tpPrice, tpId)
+    }
+
+    /// Treat near-equal prices (within half a pippette at the instrument's scale) as unchanged.
+    private func priceDiffers(_ a: Double, _ b: Double, scale: Int) -> Bool {
+        abs(a - b) > pow(10.0, Double(-scale)) / 2
+    }
+
+    /// Echo for a pending entry whose SL/TP was just changed (its `position(from:)` is nil
+    /// because the entry isn't FILLED).
+    private func pendingEcho(_ g: OrderGroup, sl: Double, tp: Double) -> Position? {
+        guard let opening = openingOrder(g), opening.state == "PENDING",
+              let id = g.orderGroupId, let inst = g.instrument else { return nil }
+        return Position(
+            label: id, instrument: inst.replacingOccurrences(of: "/", with: ""),
+            direction: opening.side ?? "BUY",
+            amount: (opening.amount?.doubleValue ?? g.amount?.doubleValue ?? 0) / 1_000_000,
+            openPrice: opening.priceStop?.doubleValue ?? 0,
+            stopLoss: sl, takeProfit: tp, profitLoss: 0, profitLossPips: 0, state: "PENDING")
     }
 
     // MARK: - Snapshot streams
