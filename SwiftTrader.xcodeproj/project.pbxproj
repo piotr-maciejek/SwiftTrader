@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		A1000001 /* SwiftTraderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* SwiftTraderApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
+		AA000051 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA000050 /* Assets.xcassets */; };
 		A1000003 /* CandleBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* CandleBar.swift */; };
 		A1000004 /* ForexAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* ForexAPIService.swift */; };
 		A1000005 /* ForexWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005 /* ForexWebSocketService.swift */; };
@@ -128,6 +129,7 @@
 		A2000007 /* ChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartView.swift; sourceTree = "<group>"; };
 		A2000008 /* ChartTransform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartTransform.swift; sourceTree = "<group>"; };
 		A2000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA000050 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A200000A /* ScrollWheelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollWheelView.swift; sourceTree = "<group>"; };
 		A200000B /* MarketDataCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketDataCoordinator.swift; sourceTree = "<group>"; };
 		A200000C /* WorkspaceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceViewModel.swift; sourceTree = "<group>"; };
@@ -234,6 +236,17 @@
 		};
 /* End PBXFrameworksBuildPhase section */
 
+/* Begin PBXResourcesBuildPhase section */
+		A6000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA000051 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXGroup section */
 		A4000001 = {
 			isa = PBXGroup;
@@ -251,6 +264,7 @@
 				A2000001 /* SwiftTraderApp.swift */,
 				A2000002 /* ContentView.swift */,
 				A2000009 /* Info.plist */,
+				AA000050 /* Assets.xcassets */,
 				A4000003 /* Models */,
 				A4000004 /* Services */,
 				A4000005 /* ViewModels */,
@@ -408,6 +422,7 @@
 			buildPhases = (
 				A6000001 /* Sources */,
 				A6000002 /* Frameworks */,
+				A6000003 /* Resources */,
 			);
 			buildRules = (
 			);
