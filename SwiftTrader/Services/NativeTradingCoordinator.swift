@@ -32,6 +32,12 @@ actor NativeTradingCoordinator: TradingCoordinating {
     private var pendingConts: [UUID: AsyncThrowingStream<PendingOrdersSnapshot, Error>.Continuation] = [:]
     private var listenersStarted = false
     private var lastTickEmit = Date.distantPast
+    /// When the last tick arrived — feeds `Account.lastTickAgeMs` so the connection banner
+    /// can flag a degraded (silent) feed. Nil until the first tick.
+    private var lastTickAt: Date?
+    /// Live session connectivity, driven by the session's state stream — feeds
+    /// `Account.connected` so a dead transport raises the banner instead of a stale `true`.
+    private var sessionConnected = true
 
     init(session: DukascopySession?) {
         self.session = session
@@ -240,6 +246,17 @@ actor NativeTradingCoordinator: TradingCoordinating {
             guard let self, let session = await self.session else { return }
             for await tick in await session.tickStream() { await self.onTick(tick) }
         }
+        // Session state → drive the connection banner's `connected` flag and re-emit so a
+        // transport death surfaces immediately, even with no further ticks.
+        Task { [weak self] in
+            guard let self, let session = await self.session else { return }
+            for await state in await session.stateStream() { await self.onSessionState(state) }
+        }
+    }
+
+    private func onSessionState(_ state: DukascopySession.State) {
+        sessionConnected = (state == .connected)
+        emitSnapshot()
     }
 
     private func onOrderEvent() async {
@@ -251,6 +268,7 @@ actor NativeTradingCoordinator: TradingCoordinating {
     }
 
     private func onTick(_ tick: CurrencyMarket) {
+        lastTickAt = Date()
         let key = tick.instrument.replacingOccurrences(of: "/", with: "")
         if let bid = tick.bestBid?.doubleValue, let ask = tick.bestAsk?.doubleValue {
             rates[key] = (bid + ask) / 2
@@ -277,9 +295,18 @@ actor NativeTradingCoordinator: TradingCoordinating {
 
     private func buildSnapshot() -> TradingSnapshot {
         let positions = groups.compactMap { position(from: $0) }
-        let acct: Account = account.map { Account(native: $0, connected: true) }
+        let connected = sessionConnected && session != nil
+        // Tick-age only signals a degraded feed while the market is open — FX is closed
+        // weekends/holidays, so no ticks then is healthy, not stale. Zero until the first
+        // tick (or while closed) keeps the banner from firing on a fresh connect.
+        let now = Date()
+        let marketOpen = !NYTradingCalendar.isMarketClosed(at: now) && !NYTradingCalendar.isFXHoliday(at: now)
+        let tickAgeMs: Int64 = (marketOpen && lastTickAt != nil)
+            ? Int64(now.timeIntervalSince(lastTickAt!) * 1000)
+            : 0
+        let acct: Account = account.map { Account(native: $0, connected: connected, lastTickAgeMs: tickAgeMs) }
             ?? Account(balance: 0, equity: 0, usedMargin: 0, freeMargin: 0,
-                       currency: "USD", leverage: 0, connected: session != nil, lastTickAgeMs: 0)
+                       currency: "USD", leverage: 0, connected: connected, lastTickAgeMs: tickAgeMs)
         // Spreads in PRICE units (ask − bid), matching server mode — JForexStrategy
         // broadcasts ask−bid, not pips. The visual-order R:R and risk-sizing formulas add
         // the spread to price-unit distances, so publishing pips here made the spread

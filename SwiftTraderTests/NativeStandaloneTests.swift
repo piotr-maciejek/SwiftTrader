@@ -264,6 +264,24 @@ struct AccountNativeMappingTests {
         #expect(acct.leverage == 30)
         #expect(!acct.connected)
     }
+
+    @Test("isHealthStale: healthy when connected with a fresh tick age")
+    func healthyWhenConnectedAndFresh() {
+        let acct = Account(native: AccountInfo(), connected: true, lastTickAgeMs: 1_000)
+        #expect(!acct.isHealthStale)
+    }
+
+    @Test("isHealthStale: stale when the transport is disconnected")
+    func staleWhenDisconnected() {
+        let acct = Account(native: AccountInfo(), connected: false, lastTickAgeMs: 0)
+        #expect(acct.isHealthStale)
+    }
+
+    @Test("isHealthStale: stale when no tick has arrived for over 10s")
+    func staleWhenTickAged() {
+        let acct = Account(native: AccountInfo(), connected: true, lastTickAgeMs: 10_001)
+        #expect(acct.isHealthStale)
+    }
 }
 
 @Suite("BarAggregator fixed grid")

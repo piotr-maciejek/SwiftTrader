@@ -17,6 +17,10 @@ protocol MarketDataProviding: Sendable {
     func streamCandles(instrument: String, period: String, rebucketing: Bool) -> AsyncThrowingStream<CandleBar, Error>
     func clearServerCache(instrument: String) async throws -> Int
     func forceReconnect() async throws
+    /// Re-assert live-data subscriptions to recover a feed that's silent despite an open
+    /// connection (e.g. a dropped quote subscription). Default no-op for providers that
+    /// manage their own subscriptions server-side.
+    func resubscribeLiveData() async
 }
 
 extension MarketDataProviding {
@@ -25,6 +29,9 @@ extension MarketDataProviding {
     /// Server mode defaults — overridden by native (instant) and any provider with
     /// a different reconnect cycle.
     var hardRefreshGraceSeconds: TimeInterval { 12 }
+
+    /// No-op by default: server mode resubscribes through its own WebSocket layer.
+    func resubscribeLiveData() async {}
 
     // Convenience defaults so existing tests that pass `rebucketing: false` implicitly keep working.
     func fetchCandles(instrument: String, period: String, count: Int) async throws -> [CandleBar] {

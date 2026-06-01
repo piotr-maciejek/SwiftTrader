@@ -75,4 +75,25 @@ struct StandaloneAuthViewModelTests {
             }
         }
     }
+
+    @Test("a session failure while ready flips phase to .failed (re-opening the login gate)")
+    func sessionFailureFlipsToFailed() {
+        let vm = StandaloneAuthViewModel()
+        vm.phase = .ready
+        vm.handleSessionFailure("read: connection reset")
+        if case .failed(let msg) = vm.phase {
+            #expect(msg.contains("read: connection reset"))
+        } else {
+            Issue.record("expected .failed, got \(vm.phase)")
+        }
+        #expect(vm.session == nil)
+    }
+
+    @Test("a session failure is ignored unless we're in .ready (no spurious gate after disconnect)")
+    func sessionFailureIgnoredWhenNotReady() {
+        let vm = StandaloneAuthViewModel()
+        vm.phase = .idle
+        vm.handleSessionFailure("late event")
+        #expect(vm.phase == .idle)
+    }
 }

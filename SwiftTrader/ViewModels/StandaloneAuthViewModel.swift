@@ -34,6 +34,11 @@ final class StandaloneAuthViewModel {
     /// Resumed by `submitPin()` (with the typed PIN) or `cancelPin()` (throwing).
     private var pinContinuation: CheckedContinuation<String, Error>?
 
+    /// Watches the live session's state stream so a mid-session transport failure flips
+    /// `phase` back to `.failed` (re-opening the login gate) instead of leaving a dead
+    /// session wired to a "ready" workspace.
+    private var stateObserver: Task<Void, Never>?
+
     private let accounts: AccountStore
 
     init(accounts: AccountStore = .shared) {
@@ -69,6 +74,7 @@ final class StandaloneAuthViewModel {
                 self.session = session
                 pinError = nil
                 phase = .ready
+                observeSessionState(session)
                 return
             } catch AuthError.badPin {
                 // Wrong PIN — the captcha is now spent. Loop to fetch a fresh one.
@@ -115,8 +121,35 @@ final class StandaloneAuthViewModel {
 
     /// Tear down the current session (e.g. before switching accounts).
     func disconnect() async {
+        stateObserver?.cancel()
+        stateObserver = nil
         if let session { await session.close() }
         session = nil
         phase = .idle
+    }
+
+    /// Observe `session`'s state stream; a `.failed` transition (transport death, server
+    /// kick, idle timeout) flips `phase` to `.failed` and drops the dead session so the
+    /// connect gate / login sheet reappears and `connectSelected()` can run again.
+    /// Transient `.disconnected` (emitted mid-`reconnect()` during a watchdog rebuild) is
+    /// ignored — only a terminal `.failed` surfaces to the user.
+    private func observeSessionState(_ session: DukascopySession) {
+        stateObserver?.cancel()
+        stateObserver = Task { [weak self] in
+            for await state in await session.stateStream() {
+                if case .failed(let reason) = state {
+                    self?.handleSessionFailure(reason)
+                    return
+                }
+            }
+        }
+    }
+
+    /// Internal (not private) so the failure-recovery transition is unit-testable.
+    func handleSessionFailure(_ reason: String) {
+        // Ignore if we've already moved on (manual disconnect, or a re-connect in flight).
+        guard phase == .ready else { return }
+        phase = .failed("Connection lost: \(reason)")
+        session = nil
     }
 }

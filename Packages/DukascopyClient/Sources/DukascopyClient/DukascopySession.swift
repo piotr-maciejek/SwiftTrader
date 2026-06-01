@@ -89,6 +89,10 @@ public actor DukascopySession {
     /// Multicast order/position event consumers (mirrors `tickStreams`).
     private var orderEventStreams: [UUID: AsyncStream<OrderEvent>.Continuation] = [:]
     private var newsEventStreams: [UUID: AsyncStream<NewsEvent>.Continuation] = [:]
+    /// Multicast consumers of session `State` transitions — lets the app layer (auth
+    /// view-model, trading coordinator) react to a transport failure instead of holding
+    /// a dead session. Each consumer also gets the current state on subscribe.
+    private var stateStreams: [UUID: AsyncStream<State>.Continuation] = [:]
     /// Debounce flag for the silent-DDS watchdog: when a fetchHistory idle-times-out
     /// every subsequent fetchHistory is hung on the same wedged channel, so we trigger
     /// a forced reconnect — but multiple in-flight requests hitting their timeouts
@@ -99,6 +103,19 @@ public actor DukascopySession {
     /// `subscribeQuotes` (which sends the full set to the server) so `ensureSubscribed`
     /// can compute additions and skip the round-trip when nothing new is needed.
     private var subscribedQuotes: Set<String> = []
+    /// When each instrument was (re)subscribed — lets the quote watchdog tell "subscribed
+    /// but never ticked" from "just subscribed, give it a moment".
+    private var quoteSubscribedAt: [String: Date] = [:]
+    /// When each instrument last delivered a tick, and the most recent tick across ALL
+    /// instruments. The watchdog only acts when the feed is demonstrably live (something
+    /// ticked recently) but a specific subscribed pair has never ticked — the signature of
+    /// a dropped/clobbered subscription, distinct from a closed market (nothing ticks).
+    private var lastTickAt: [String: Date] = [:]
+    private var lastAnyTickAt = Date.distantPast
+    /// Debounce for `resubscribeQuotes` so the per-chart and session watchdogs (plus any
+    /// concurrent triggers) collapse to a single re-send.
+    private var lastResubscribeAt = Date.distantPast
+    private var quoteWatchdogTask: Task<Void, Never>?
 
     public init(
         environment: DukascopyEnvironment,
@@ -116,7 +133,7 @@ public actor DukascopySession {
     /// handshake → INIT. Starts the reader loop on success.
     public func connect(timeout: TimeInterval = 20) async throws {
         if state == .connected { return }
-        state = .connecting
+        setState(.connecting)
         log.info("connect: env=\(self.environment.rawValue, privacy: .public) resolving JNLP")
         do {
             let jnlp = try await JNLPClient.fetch(from: environment.jnlpURL)
@@ -194,21 +211,24 @@ public actor DukascopySession {
                 self.historyServerURL = (try? JavaPropertiesParser.parse(blob))?["history.server.url"]
                 log.info("connect: history server = \(self.historyServerURL ?? "none", privacy: .public)")
             }
-            self.state = .connected
+            setState(.connected)
             startReader(transport: transport)
             startHeartbeat(transport: transport)
+            startQuoteWatchdog()
             log.info("connect: CONNECTED")
         } catch {
             log.error("connect: FAILED: \(error.localizedDescription, privacy: .public)")
-            state = .failed(String(describing: error))
+            setState(.failed(String(describing: error)))
             await teardown()
+            finishMulticastStreams()
             throw error
         }
     }
 
     public func close() async {
         await teardown()
-        state = .disconnected
+        setState(.disconnected)
+        finishMulticastStreams()
     }
 
     /// Tear down the current transport and rebuild the session in-place — used by the
@@ -229,12 +249,64 @@ public actor DukascopySession {
         let toResubscribe = subscribedQuotes
         subscribedQuotes = []
         await teardown()
-        state = .disconnected
+        setState(.disconnected)
         try await connect()
         if !toResubscribe.isEmpty {
             log.info("reconnect: re-subscribing \(toResubscribe.count) quote(s) after rebuild")
             try await subscribeQuotes(instruments: toResubscribe)
         }
+    }
+
+    // MARK: - State observation
+
+    /// Multicast stream of session `State` transitions. Each consumer gets its own
+    /// stream and receives the CURRENT state immediately on subscribe, then every
+    /// subsequent transition. Lets the app layer react to a transport failure
+    /// (`.failed`) rather than clinging to a dead session. Mirrors `tickStream()`.
+    public func stateStream() -> AsyncStream<State> {
+        let id = UUID()
+        return AsyncStream<State> { continuation in
+            Task { [weak self] in await self?.registerStateStream(id: id, continuation: continuation) }
+            continuation.onTermination = { [weak self] _ in
+                Task { [weak self] in await self?.unregisterStateStream(id: id) }
+            }
+        }
+    }
+
+    private func registerStateStream(id: UUID, continuation: AsyncStream<State>.Continuation) {
+        stateStreams[id] = continuation
+        continuation.yield(state)
+    }
+    private func unregisterStateStream(id: UUID) {
+        stateStreams.removeValue(forKey: id)
+    }
+
+    /// Single choke point for state changes so every transition is broadcast to
+    /// `stateStream()` consumers.
+    private func setState(_ newState: State) {
+        state = newState
+        for (_, c) in stateStreams { c.yield(newState) }
+    }
+
+    /// Finish + clear every multicast stream (tick / order / news / state) so their
+    /// `for await` consumers terminate instead of hanging forever on a dead session — and
+    /// so a consumer that captures `self` strongly (e.g. the trading coordinator's tick
+    /// and state observers) releases the session rather than leaking it. The terminal
+    /// `.failed` / `.disconnected` is broadcast via `setState` BEFORE this runs, so it's
+    /// still delivered (AsyncStream buffers it) ahead of the finish.
+    ///
+    /// Called only on TERMINAL teardown (`markFailed`, connect-failure, `close`) — NOT
+    /// from `reconnect()`'s `teardown()`, which deliberately keeps consumers registered
+    /// across an in-place transport rebuild so live feeds resume seamlessly.
+    private func finishMulticastStreams() {
+        for (_, c) in tickStreams { c.finish() }
+        tickStreams.removeAll()
+        for (_, c) in orderEventStreams { c.finish() }
+        orderEventStreams.removeAll()
+        for (_, c) in newsEventStreams { c.finish() }
+        newsEventStreams.removeAll()
+        for (_, c) in stateStreams { c.finish() }
+        stateStreams.removeAll()
     }
 
     // MARK: - History
@@ -574,9 +646,96 @@ public actor DukascopySession {
         var req = QuoteSubscribeRequest(instruments: instruments)
         req.requestId = UUID().uuidString
         req.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
-        try await transport.sendFrame(req.encode())
+        // Claim the new set BEFORE the await. The server replaces (not merges) the quote
+        // set, and `ensureSubscribedQuotes` builds its union from `subscribedQuotes`. If we
+        // only recorded the set AFTER `sendFrame`, a reentrant subscribe running during the
+        // suspension would read the stale set, send a union missing this call's additions,
+        // and then this call would overwrite it — silently dropping an instrument from the
+        // server's set (it then never ticks). Claiming first closes that window; roll back
+        // on failure so a retry re-sends.
+        let previous = subscribedQuotes
+        let now = Date()
         subscribedQuotes = instruments
+        for inst in instruments where quoteSubscribedAt[inst] == nil { quoteSubscribedAt[inst] = now }
+        for inst in quoteSubscribedAt.keys where !instruments.contains(inst) { quoteSubscribedAt[inst] = nil }
+        do {
+            try await transport.sendFrame(req.encode())
+        } catch {
+            subscribedQuotes = previous
+            throw error
+        }
         log.info("subscribed to \(instruments.count, privacy: .public) instruments")
+    }
+
+    /// Re-send the CURRENT quote subscription set to the server unconditionally (unlike
+    /// `ensureSubscribedQuotes`, which skips when nothing new is needed). Recovers a
+    /// subscription the server dropped/clobbered — the symptom is a subscribed instrument
+    /// that never ticks while others do. Debounced so the per-chart and session watchdogs
+    /// collapse to one send. Best-effort: a send failure is logged, not thrown.
+    public func resubscribeQuotes() async {
+        guard state == .connected, let transport, !subscribedQuotes.isEmpty else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastResubscribeAt) > 5 else { return }
+        lastResubscribeAt = now
+        var req = QuoteSubscribeRequest(instruments: subscribedQuotes)
+        req.requestId = UUID().uuidString
+        req.timestamp = Int64(now.timeIntervalSince1970 * 1000)
+        do {
+            try await transport.sendFrame(req.encode())
+            log.info("resubscribed \(self.subscribedQuotes.count, privacy: .public) instruments (recovery)")
+        } catch {
+            log.error("resubscribe failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Periodic safety net for a dropped/clobbered quote subscription: if a subscribed
+    /// instrument has NEVER ticked since it was subscribed ≥10s ago, while the feed is
+    /// demonstrably live (some instrument ticked in the last ~12s), re-assert the
+    /// subscription. The "feed is live" gate is what distinguishes a broken subscription
+    /// from a closed market (where nothing ticks and re-sending wouldn't help), so this
+    /// doesn't need a trading-calendar dependency. Started on connect, stopped on teardown.
+    private func startQuoteWatchdog() {
+        quoteWatchdogTask?.cancel()
+        quoteWatchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(8))
+                if Task.isCancelled { return }
+                await self?.checkQuoteSilence()
+            }
+        }
+    }
+
+    private func checkQuoteSilence() async {
+        guard state == .connected else { return }
+        if Self.shouldResubscribe(
+            subscribed: subscribedQuotes, quoteSubscribedAt: quoteSubscribedAt,
+            lastTickAt: lastTickAt, lastAnyTickAt: lastAnyTickAt, now: Date()
+        ) {
+            log.error("quote watchdog: subscribed instrument silent while feed is live — resubscribing")
+            await resubscribeQuotes()
+        }
+    }
+
+    /// Pure decision for the quote watchdog (extracted so it's unit-testable without a
+    /// live socket). Re-assert the subscription when the feed is demonstrably live —
+    /// something ticked within `liveWindow` — yet some subscribed instrument has NEVER
+    /// ticked since it was subscribed at least `graceSeconds` ago. The live-feed gate is
+    /// what separates a dropped subscription from a closed market (nothing ticks at all).
+    static func shouldResubscribe(
+        subscribed: Set<String>,
+        quoteSubscribedAt: [String: Date],
+        lastTickAt: [String: Date],
+        lastAnyTickAt: Date,
+        now: Date,
+        liveWindow: TimeInterval = 12,
+        graceSeconds: TimeInterval = 10
+    ) -> Bool {
+        guard !subscribed.isEmpty else { return false }
+        guard now.timeIntervalSince(lastAnyTickAt) < liveWindow else { return false }
+        return subscribed.contains { inst in
+            lastTickAt[inst] == nil
+                && (quoteSubscribedAt[inst].map { now.timeIntervalSince($0) > graceSeconds } ?? false)
+        }
     }
 
     /// Idempotent subscription union — adds any not-yet-subscribed instruments to the
@@ -1000,6 +1159,9 @@ public actor DukascopySession {
         case .currencyMarket(let cm):
             log.debug("tick \(cm.instrument, privacy: .public) bid=\(cm.bestBid?.description ?? "-", privacy: .public)")
             lastQuotes[cm.instrument] = cm   // most-recent quote per instrument, for order pricing
+            let nowTick = Date()
+            lastTickAt[cm.instrument] = nowTick
+            lastAnyTickAt = nowTick
             for (_, c) in tickStreams { c.yield(cm) }
         case .unknown(let classId, let body):
             // The server sends a primary-socket auth acceptor shortly after connect and
@@ -1027,8 +1189,9 @@ public actor DukascopySession {
 
     private func markFailed(_ reason: String) async {
         log.error("session FAILED: \(reason, privacy: .public)")
-        state = .failed(reason)
+        setState(.failed(reason))
         await teardown()
+        finishMulticastStreams()
     }
 
     private func teardown() async {
@@ -1037,6 +1200,12 @@ public actor DukascopySession {
         readerTask = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
+        quoteWatchdogTask?.cancel()
+        quoteWatchdogTask = nil
+        // Clear per-instrument tick tracking so a fresh connect (incl. `reconnect()`'s
+        // rebuild) re-evaluates silence from scratch rather than trusting pre-rebuild ticks.
+        lastTickAt.removeAll()
+        lastAnyTickAt = .distantPast
         if let transport { await transport.close() }
         transport = nil
     }

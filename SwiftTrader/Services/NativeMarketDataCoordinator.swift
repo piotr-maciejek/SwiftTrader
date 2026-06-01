@@ -185,8 +185,15 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             let task = Task {
                 // Subscribe to quotes for THIS instrument only. The session unions
                 // additions across all open streams, so opening AUD/CAD multi-tf
-                // doesn't pull ticks for the other 27 default pairs.
-                try? await session.ensureSubscribedQuotes([wireInstrument])
+                // doesn't pull ticks for the other 27 default pairs. Surface a subscribe
+                // failure (don't swallow with `try?`) so the chart's retry loop re-attempts
+                // instead of waiting forever for ticks that will never arrive.
+                do {
+                    try await session.ensureSubscribedQuotes([wireInstrument])
+                } catch {
+                    continuation.finish(throwing: error)
+                    return
+                }
                 var current: SwiftTrader.CandleBar?
                 for await tick in await session.tickStream() {
                     if Task.isCancelled { break }
@@ -419,9 +426,24 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         return 0
     }
 
-    /// Intentional no-op: see `clearServerCache`. The session stays up; the cache
-    /// wipe above is what gives the user a recovery action.
-    func forceReconnect() async throws {}
+    /// User-invoked recovery from a stuck chart (the loading card's "Force reconnect"
+    /// button). Rebuilds the session transport in place and re-subscribes quotes via
+    /// `session.reconnect()` — the fix for a wedged/dead DDS channel or a failed session
+    /// that a cache wipe (see `clearServerCache`) can't revive. `reconnect()` is debounced
+    /// internally, so concurrent triggers collapse to one rebuild. This briefly interrupts
+    /// every chart's live feed, which is acceptable for an explicit recovery action the
+    /// user reaches for only when a chart is already broken.
+    func forceReconnect() async throws {
+        guard let session else { return }
+        try await session.reconnect()
+    }
+
+    /// Re-assert the live quote subscription without rebuilding the transport — the cheap
+    /// recovery a chart reaches for when it has history but no ticks. Debounced inside the
+    /// session, so many charts nudging at once collapse to one re-send.
+    func resubscribeLiveData() async {
+        await session?.resubscribeQuotes()
+    }
 
     /// Server mode waits ~12s for the JForex restart cycle; native has no
     /// reconnect step, so the chart can reload immediately after the cache wipe.

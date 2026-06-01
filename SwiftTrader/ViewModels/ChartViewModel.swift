@@ -113,6 +113,7 @@ final class ChartViewModel {
     private var coordinator: any MarketDataProviding
     private var startTask: Task<Void, Never>?
     private var wsTask: Task<Void, Never>?
+    private var liveWatchdogTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
     private var atrTask: Task<Void, Never>?
     private var todayTradingDayStart: Date?
@@ -350,6 +351,7 @@ final class ChartViewModel {
         startTask?.cancel()
         reloadTask?.cancel()
         wsTask?.cancel()
+        liveWatchdogTask?.cancel()
         atrTask?.cancel()
         isLoadingEarlier = false
 
@@ -559,6 +561,7 @@ final class ChartViewModel {
 
     private func connectWebSocket() {
         wsTask?.cancel()
+        startLiveWatchdog()
         let instrument = currentInstrument
         let period = currentPeriod
         let rebucketing = clientSideRebucketing
@@ -606,6 +609,29 @@ final class ChartViewModel {
             } else {
                 let suffix = lastError.map { ": \($0)" } ?? ""
                 error = "Live feed disconnected after \(Self.maxWebSocketAttempts) attempts. Click Retry or Force reconnect\(suffix)"
+            }
+        }
+    }
+
+    /// Recover from a chart that has history but no live ticks — the symptom of a quote
+    /// subscription that didn't take. If the market is open and we still aren't `Live`
+    /// after the interval, nudge the provider to re-assert its subscriptions (a no-op in
+    /// server mode; native re-sends the quote set). Cheap and self-disarming: it only acts
+    /// while `!isConnected`, and the session debounces concurrent nudges from every chart.
+    private func startLiveWatchdog() {
+        liveWatchdogTask?.cancel()
+        let instrument = currentInstrument
+        liveWatchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(12))
+                guard let self, !Task.isCancelled else { return }
+                let now = Date()
+                let marketOpen = !NYTradingCalendar.isMarketClosed(at: now)
+                    && !NYTradingCalendar.isFXHoliday(at: now)
+                guard marketOpen, !self.isConnected, !self.bars.isEmpty,
+                      self.currentInstrument == instrument else { continue }
+                chartLogger.warning("live watchdog: \(instrument, privacy: .public) has bars but no ticks — nudging resubscribe")
+                await self.coordinator.resubscribeLiveData()
             }
         }
     }
@@ -687,6 +713,8 @@ final class ChartViewModel {
         reloadTask = nil
         wsTask?.cancel()
         wsTask = nil
+        liveWatchdogTask?.cancel()
+        liveWatchdogTask = nil
         atrTask?.cancel()
         atrTask = nil
         isConnected = false
