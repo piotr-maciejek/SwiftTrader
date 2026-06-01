@@ -642,7 +642,8 @@ final class ChartViewModel {
             // THREE_MINS has no native server period — it is always aggregated,
             // regardless of the rebucketing toggle (see CacheKey.forDisplay).
             let isDerivedAggregated = currentPeriod == "THREE_MINS"
-                || (rebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY" || currentPeriod == "WEEKLY"))
+                || (rebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY" || currentPeriod == "WEEKLY"
+                    || currentPeriod == "FIVE_MINS" || currentPeriod == "FIFTEEN_MINS" || currentPeriod == "THIRTY_MINS"))
             if !isDerivedAggregated {
                 Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod) }
             }

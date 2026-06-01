@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SwiftTrader
 
@@ -36,6 +37,48 @@ struct CandleCacheTests {
         let bars = [makeBar(time: 100), makeBar(time: 200, partial: true), makeBar(time: 300)]
         let result = await cache.merge(bars, for: testKey)
         #expect(result.count == 2)
+        #expect(result.map(\.time) == [100, 300])
+    }
+
+    @Test("Merge rejects bars with a non-positive OHLC value")
+    func mergeRejectsNonPositiveOHLC() async {
+        let cache = CandleCache()
+        let zeroLow = CandleBar(time: 200, open: 1.0, high: 1.2, low: 0.0, close: 1.1, volume: 1)
+        let negOpen = CandleBar(time: 400, open: -1.0, high: 1.2, low: 0.9, close: 1.1, volume: 1)
+        let zeroClose = CandleBar(time: 500, open: 1.0, high: 1.2, low: 0.9, close: 0.0, volume: 1)
+        let bars = [makeBar(time: 100), zeroLow, makeBar(time: 300), negOpen, zeroClose]
+        let result = await cache.merge(bars, for: testKey)
+        #expect(result.map(\.time) == [100, 300])
+    }
+
+    @Test("appendBar rejects a non-positive OHLC bar")
+    func appendRejectsNonPositiveOHLC() async {
+        let cache = CandleCache()
+        _ = await cache.merge([makeBar(time: 100)], for: testKey)
+        await cache.appendBar(
+            CandleBar(time: 200, open: 0.0, high: 0.0, low: 0.0, close: 0.0, volume: 0),
+            for: testKey
+        )
+        let result = await cache.getBars(for: testKey)
+        #expect(result.map(\.time) == [100])
+    }
+
+    @Test("A zero-OHLC bar persisted on disk is healed on load")
+    func healsPoisonedDiskEntry() async throws {
+        // Simulate an older build (pre write-side guards) that persisted a zero-low bar.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CandleCacheHeal-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let disk = DiskCandleCache(directory: dir)
+        let diskKey = DiskCacheKey(instrument: "EURUSD", period: "ONE_MIN", source: .server)
+        let zeroLow = CandleBar(time: 200, open: 1.0, high: 1.2, low: 0.0, close: 1.1, volume: 1)
+        try await disk.save([makeBar(time: 100), zeroLow, makeBar(time: 300)], for: diskKey)
+
+        // A fresh cache backed by that disk must drop the poisoned bar on first read.
+        let cache = CandleCache(diskCache: disk)
+        let result = await cache.getBars(for: testKey)
         #expect(result.map(\.time) == [100, 300])
     }
 

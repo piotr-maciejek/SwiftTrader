@@ -159,7 +159,7 @@ struct NativeMarketDataCoordinatorRoutingTests {
         }
     }
 
-    @Test("A shallow source cache does not satisfy a deeper aggregated request")
+    @Test("A shallow source cache is deepened by fetching only the missing older bars")
     func shallowSourceCacheTriggersDeepFetch() async throws {
         let cache = CandleCache()
         let key = CandleCache.CacheKey(instrument: "EURUSD", period: "ONE_HOUR", source: .server)
@@ -170,14 +170,21 @@ struct NativeMarketDataCoordinatorRoutingTests {
                 time: nowMs - Int64(i) * 3_600_000, open: 1, high: 1, low: 1, close: 1, volume: 1
             )
         }.sorted { $0.time < $1.time }
+        let earliest = bars.first!.time
         _ = await cache.merge(bars, for: key)
         let (coord, spy) = make(cache: cache) { _ in [] }
         _ = try await coord.fetchCandles(
             instrument: "EURUSD", period: "DAILY", count: 250, rebucketing: false
         )
         let calls = await spy.calls
-        // Daily needs 250×24 = 6000 source 1H bars; the 100-bar cache can't cover it → refetch.
-        #expect(calls == [.init(instrument: "EURUSD", period: "ONE_HOUR", count: 6000, before: nil)])
+        // Daily needs 250×24 = 6000 source 1H bars; the 100-bar cache can't cover it. Rather than
+        // refetching all 6000 from now, deepen by fetching ONLY the missing older slice — anchored
+        // at the earliest cached bar (`before: earliest`), ~5900 bars (6000 window − 100 cached + slop).
+        #expect(calls.count == 1)
+        #expect(calls.first?.period == "ONE_HOUR")
+        #expect(calls.first?.before == earliest)
+        let missing = calls.first?.count ?? 0
+        #expect((5895...5905).contains(missing), "expected ~5902 missing bars, got \(missing)")
     }
 
     @Test("Native mode throttles cold grid loads (server mode stays unbounded)")

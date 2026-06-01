@@ -27,6 +27,7 @@ actor CandleCache {
             instrument: String, period: String, clientSideRebucketing: Bool
         ) -> CacheKey {
             let togglesWithRebucketing = period == "FOUR_HOURS" || period == "DAILY" || period == "WEEKLY"
+                || period == "FIVE_MINS" || period == "FIFTEEN_MINS" || period == "THIRTY_MINS"
             let isAggregated = period == "THREE_MINS" || (togglesWithRebucketing && clientSideRebucketing)
             let source: BarSource = isAggregated ? .aggregated : .server
             return CacheKey(instrument: instrument, period: period, source: source)
@@ -89,6 +90,15 @@ actor CandleCache {
     func getBars(for key: CacheKey) async -> [CandleBar] {
         await ensureLoaded(key)
         guard var entry = store[key] else { return [] }
+        // Self-heal: if an invalid (non-positive OHLC) bar is in memory — persisted by an
+        // older build before the write-side guards, or merged earlier in a long-running
+        // session — drop it and write back the cleaned set, so no consumer ever sees a
+        // zero-priced bar that would collapse the chart's price scale. Cheap: the common
+        // (all-valid) case is a single scan, no copy or rewrite.
+        if entry.bars.contains(where: { $0.open <= 0 || $0.high <= 0 || $0.low <= 0 || $0.close <= 0 }) {
+            entry.bars = entry.bars.filter { $0.open > 0 && $0.high > 0 && $0.low > 0 && $0.close > 0 }
+            scheduleDiskWrite(key: key, bars: entry.bars)
+        }
         entry.lastAccess = .now
         store[key] = entry
         return entry.bars
@@ -111,7 +121,14 @@ actor CandleCache {
     @discardableResult
     func merge(_ fetchedBars: [CandleBar], for key: CacheKey) async -> [CandleBar] {
         await ensureLoaded(key)
-        let completed = fetchedBars.filter { !$0.partial }
+        // A bar with a non-positive open/high/low/close is invalid data — Dukascopy emits
+        // such filler/placeholder bars around session boundaries and for not-yet-ticked
+        // in-progress buckets. A single zero-priced bar collapses the chart's price scale
+        // and corrupts EMA/ATR, so reject them at the cache boundary (the one funnel every
+        // persisted bar flows through) rather than relying on each call site to pre-filter.
+        let completed = fetchedBars.filter {
+            !$0.partial && $0.open > 0 && $0.high > 0 && $0.low > 0 && $0.close > 0
+        }
         guard !completed.isEmpty else {
             return store[key]?.bars ?? []
         }
@@ -146,7 +163,8 @@ actor CandleCache {
 
     /// Append a single completed bar from WebSocket. Ignores partial bars.
     func appendBar(_ bar: CandleBar, for key: CacheKey) async {
-        guard !bar.partial else { return }
+        // Reject partial and non-positive-OHLC bars (see `merge` — same invariant).
+        guard !bar.partial, bar.open > 0, bar.high > 0, bar.low > 0, bar.close > 0 else { return }
         await ensureLoaded(key)
 
         var existing = store[key]?.bars ?? []

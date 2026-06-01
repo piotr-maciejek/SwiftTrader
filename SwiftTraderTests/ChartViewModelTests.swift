@@ -68,14 +68,18 @@ struct ChartViewModelTests {
         #expect(vm.bars[0].partial == false)
     }
 
-    @Test("Completed bar appends and triggers cache")
+    @Test("Completed bar appends and triggers cache (raw period)")
     func handleBarCompletedAppendsAndCaches() async {
         let mock = MockMarketDataCoordinator()
         let vm = ChartViewModel(coordinator: mock)
+        // ONE_HOUR is a raw (non-derived) period, so a completed bar is cached directly.
+        // Derived periods (5m/15m/30m/3m/4H/Daily/Weekly) rebuild from their source and
+        // intentionally skip cacheBar — covered separately below.
+        vm.currentPeriod = "ONE_HOUR"
         vm.bars = [makeBar(time: 1000)]
 
         vm.handleBar(makeBar(time: 2000),
-                     expectedInstrument: "EURUSD", expectedPeriod: "FIFTEEN_MINS")
+                     expectedInstrument: "EURUSD", expectedPeriod: "ONE_HOUR")
 
         #expect(vm.bars.count == 2)
 
@@ -83,6 +87,24 @@ struct ChartViewModelTests {
         try? await Task.sleep(for: .milliseconds(50))
         #expect(mock.cachedBars.count == 1)
         #expect(mock.cachedBars[0].bar.time == 2000)
+    }
+
+    @Test("Completed bar on a derived period appends but skips cache")
+    func handleBarDerivedAppendsButSkipsCache() async {
+        let mock = MockMarketDataCoordinator()
+        let vm = ChartViewModel(coordinator: mock)
+        // 15m is derived from 1m client-side; the derived bar must NOT be persisted
+        // (only its 1m source is cached), or the cache would hold un-refreshable bars.
+        vm.currentPeriod = "FIFTEEN_MINS"
+        vm.bars = [makeBar(time: 1000)]
+
+        vm.handleBar(makeBar(time: 2000),
+                     expectedInstrument: "EURUSD", expectedPeriod: "FIFTEEN_MINS")
+
+        #expect(vm.bars.count == 2)
+
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(mock.cachedBars.isEmpty)
     }
 
     // MARK: - handleBar: stale connection guard
@@ -328,7 +350,13 @@ struct ChartViewModelTests {
         let mock = MockMarketDataCoordinator()
         // Pre-seed the cache as if disk hydration just finished.
         let cached = [makeBar(time: 100), makeBar(time: 200), makeBar(time: 300)]
-        let key = CandleCache.CacheKey(instrument: "EURUSD", period: "FIFTEEN_MINS", source: .server)
+        // Seed the key the VM actually paints from. 15m now toggles with rebucketing
+        // (.aggregated when on), so resolve the display key the same way start() does
+        // rather than hard-coding .server.
+        let key = CandleCache.CacheKey.forDisplay(
+            instrument: "EURUSD", period: "FIFTEEN_MINS",
+            clientSideRebucketing: AppSettings.shared.clientSideRebucketing
+        )
         _ = await mock.cache.merge(cached, for: key)
 
         // Simulate a sluggish server: instruments call fails forever, fetchCandles never returns

@@ -246,7 +246,10 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     ) async -> SwiftTrader.CandleBar {
         let snap = await ensureInProgress(instrument: instrument)
         func extend(_ bar: SwiftTrader.CandleBar?) -> SwiftTrader.CandleBar {
-            guard let b = bar else {
+            // A non-positive seed (zero-OHLC in-progress/placeholder bar) would drag the
+            // live bar's low to 0 via min(low, bid); treat it as no-seed and open at the
+            // tick price. Same invariant the cache enforces for persisted bars.
+            guard let b = bar, b.open > 0, b.high > 0, b.low > 0, b.close > 0 else {
                 return SwiftTrader.CandleBar(
                     time: bucketMs, open: bid, high: bid, low: bid, close: bid,
                     volume: 0, partial: true
@@ -282,11 +285,29 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             }
             return extend(snap?.oneHour)
         case "THIRTY_MINS", "FIFTEEN_MINS", "FIVE_MINS", "THREE_MINS":
+            // Prefer the server's authoritative in-progress bar for THIS period. It holds the
+            // full OHLC accumulated since the bucket opened, so opening the chart 10 minutes
+            // into a 15m candle shows the whole forming bar — not one that starts fresh at the
+            // current tick (the data before connect would otherwise be lost). These grids are
+            // epoch-aligned, so the server bar's time matches `bucketMs`. 3m has no server
+            // bucket, so it always falls through to the 1m aggregation below.
+            let serverPartial: SwiftTrader.CandleBar?
+            switch period {
+            case "THIRTY_MINS":  serverPartial = snap?.thirtyMin
+            case "FIFTEEN_MINS": serverPartial = snap?.fifteenMin
+            case "FIVE_MINS":    serverPartial = snap?.fiveMin
+            default:             serverPartial = nil  // THREE_MINS — no server bucket
+            }
+            if let sp = serverPartial, sp.time == bucketMs {
+                return extend(sp)
+            }
+            // Fallback: aggregate the cached 1m suffix (3m always; other periods only if the
+            // server omitted the partial). Tail = a few buckets' worth so re-aggregation is
+            // O(constant) not O(cache).
             let granularityMs: Int64 = period == "THREE_MINS" ? 180_000
                 : period == "FIVE_MINS" ? 300_000
                 : period == "FIFTEEN_MINS" ? 900_000
                 : 1_800_000
-            // Tail = a few buckets' worth of 1m so re-aggregation is O(constant) not O(cache).
             let tail = period == "THIRTY_MINS" ? 60
                 : period == "FIFTEEN_MINS" ? 30
                 : period == "FIVE_MINS" ? 15
@@ -335,13 +356,23 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                 func bid(at idx: Int) -> SwiftTrader.CandleBar? {
                     guard bars.count > idx else { return nil }
                     let b = bars[idx]
+                    // The freshest in-progress buckets (1m/10s) come back all-zero from
+                    // Dukascopy until the first tick lands in them. Used as a live-bar
+                    // `openPartial` seed, a zero OHLC drags the aggregated bucket's low to 0
+                    // via min(low, bid) and collapses the chart's price scale. Treat a
+                    // non-positive snapshot as "not formed yet" (nil) — `seedLiveBucket`
+                    // then opens the live bar at the tick price instead. Mirrors the
+                    // wire-boundary filter in `fetchViaSession`.
+                    guard b.low > 0, b.high > 0, b.open > 0, b.close > 0 else { return nil }
                     return SwiftTrader.CandleBar(
                         time: b.timeMillis, open: b.open, high: b.high, low: b.low,
                         close: b.close, volume: b.volume, partial: true
                     )
                 }
                 return InProgressSnapshot(
-                    oneHour: bid(at: 9), oneMin: bid(at: 19), fetchedAt: Date()
+                    oneHour: bid(at: 9), oneMin: bid(at: 19),
+                    fiveMin: bid(at: 17), fifteenMin: bid(at: 13), thirtyMin: bid(at: 11),
+                    fetchedAt: Date()
                 )
             } catch {
                 nativeLog.error(
@@ -453,55 +484,51 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         let sourceSeconds = CandlePeriod.parse(source)?.seconds ?? (source == "ONE_HOUR" ? 3600 : 60)
         let targetSeconds = sourceSeconds * Int64(spec.sourceSpan)
 
-        // Is the raw source already fresh AND deep enough (so we wouldn't refetch it)?
-        var sourceFresh = false
-        if let srcLatest = await cache.latestTime(for: sourceKey),
-           Self.isCacheFresh(latestMs: srcLatest, period: source),
-           await cacheCoversWindow(key: sourceKey, periodSeconds: sourceSeconds, count: neededSource) {
-            sourceFresh = true
-        }
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let srcLatest = await cache.latestTime(for: sourceKey)
 
         // Aggregated-cache-first: the derived series (4H/Daily/3m/5m/15m/30m) is itself cached
-        // and persisted to disk. When the source is already up-to-date, a fresh, deep-enough
-        // cached aggregation is authoritative — serve it directly instead of re-running the
-        // per-bar NY-calendar bucketing over the deep source on every launch (the dominant
-        // startup CPU cost). Gating on `sourceFresh` keeps the derived series consistent with
-        // the raw series: if the source is stale and about to be refetched, we re-aggregate.
-        if sourceFresh,
-           let aggLatest = await cache.latestTime(for: aggKey),
+        // and persisted to disk. Serve it straight from disk when it's fresh, deep enough for
+        // `count`, and the source hasn't formed a newer bucket — INDEPENDENT of how deep the
+        // raw source is (source depth only matters for scroll-back / re-aggregation). So a
+        // repeat open paints the cached candles immediately without touching the 1m/1H source.
+        // The last condition catches a forward-fill that advanced the source past the agg's
+        // last bucket (re-aggregate the tail in that case).
+        if let aggLatest = await cache.latestTime(for: aggKey),
            Self.isCacheFresh(latestMs: aggLatest, period: spec.periodCode),
-           await cacheCoversWindow(key: aggKey, periodSeconds: targetSeconds, count: count) {
-            // Also gate on "has the source produced any complete target-bucket beyond what
-            // we've already rolled up?" — without this, a forward gap-fill that brings 1m
-            // through Friday 22:59 still leaves the 15m cache ending at 22:30 (the last
-            // bucket produced before the previous session closed), because the
-            // freshness/coverage gates above accept it as current. Re-aggregate in that case.
-            let srcLatest = await cache.latestTime(for: sourceKey) ?? aggLatest
-            let nextBucketMs = aggLatest + targetSeconds * 1000
-            if srcLatest < nextBucketMs {
-                return await cache.getBars(for: aggKey)
-            }
-            nativeLog.info(
-                "fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): rebuilding — source advanced past agg latest by \((srcLatest - aggLatest) / 1000)s"
-            )
+           await cacheCoversWindow(key: aggKey, periodSeconds: targetSeconds, count: count),
+           (srcLatest ?? aggLatest) < aggLatest + targetSeconds * 1000 {
+            return await cache.getBars(for: aggKey)
         }
 
-        let merged: [SwiftTrader.CandleBar]
+        // Otherwise (re)build the window. Ensure the raw source covers it, but fetch ONLY the
+        // MISSING slice — never refetch bars already on disk. `fetchCandles` has already
+        // forward-filled the source's recent tail, so the only gap here is DEPTH: top up the
+        // older bars before the earliest cached one. A genuinely empty cache fetches the full
+        // window; a partially-deep cache fetches just the shortfall.
+        var merged = await cache.getBars(for: sourceKey)
         var partial: SwiftTrader.CandleBar?
-        if sourceFresh {
-            merged = await cache.getBars(for: sourceKey)
-        } else {
+        let windowStartMs = nowMs - Int64(neededSource) * sourceSeconds * 1000
+        let closureSlackMs: Int64 = 4 * 24 * 60 * 60 * 1000   // mirrors cacheCoversWindow
+
+        if merged.isEmpty {
             let fetched = try await fetchRawCandles(
                 instrument: instrument, period: source, count: neededSource
             )
             merged = await cache.merge(fetched, for: sourceKey)
             partial = fetched.last.flatMap { $0.partial ? $0 : nil }
+        } else if let earliest = merged.first?.time, earliest > windowStartMs + closureSlackMs {
+            let missing = Int((earliest - windowStartMs) / (sourceSeconds * 1000)) + 2
+            let older = try await fetchRawCandles(
+                instrument: instrument, period: source, count: missing, before: earliest
+            )
+            merged = await cache.merge(older, for: sourceKey)
+            nativeLog.info("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): deepened source by \(older.count) \(source, privacy: .public) bars (window needs \(neededSource))")
         }
+        // else: cache already covers the window — aggregate it as-is, no fetch.
 
         // Aggregate only the recent `neededSource` bars, not the entire (possibly years-deep,
-        // prefetched) source cache. Otherwise every chart re-runs per-bar NY-calendar bucket
-        // math over ~12k source bars at startup — the dominant CPU cost. Scroll-back fills
-        // older buckets on demand via fetchEarlierAggregated.
+        // prefetched) source cache. Scroll-back fills older buckets via fetchEarlierAggregated.
         let window = merged.count > neededSource ? Array(merged.suffix(neededSource)) : merged
         let aggregated = spec.bucket(window, partial)
         let cached = await cache.merge(aggregated, for: aggKey)
@@ -1017,6 +1044,12 @@ enum NativeProviderError: LocalizedError {
 struct InProgressSnapshot: Sendable {
     let oneHour: SwiftTrader.CandleBar?
     let oneMin: SwiftTrader.CandleBar?
+    // Epoch-grid intraday partials (same alignment as the chart's fixed-grid buckets), so a
+    // mid-bucket chart open seeds the live bar with the full OHLC the server has accumulated
+    // since the bucket opened — not a fresh candle starting at the current tick.
+    let fiveMin: SwiftTrader.CandleBar?
+    let fifteenMin: SwiftTrader.CandleBar?
+    let thirtyMin: SwiftTrader.CandleBar?
     let fetchedAt: Date
 }
 
