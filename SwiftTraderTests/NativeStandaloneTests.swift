@@ -191,6 +191,31 @@ struct NativeMarketDataCoordinatorRoutingTests {
     func nativeThrottlesColdLoads() {
         #expect(NativeMarketDataCoordinator().maxConcurrentColdLoads == 3)
     }
+
+    @Test("An aggregated cache missing the just-closed bucket is not served (rebuild)")
+    func aggCacheStalenessGate() {
+        // A fixed, market-open instant: Wed 2026-06-03 10:00:30 UTC.
+        var comps = DateComponents()
+        comps.year = 2026; comps.month = 6; comps.day = 3
+        comps.hour = 10; comps.minute = 0; comps.second = 30
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let now = cal.date(from: comps)!
+        let target: Int64 = 900   // 15m
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        let currentBucketStart = (nowMs / (target * 1000)) * (target * 1000)  // 10:00:00
+        let justClosed = currentBucketStart - target * 1000                   // 09:45:00
+
+        // Reaching the just-closed bucket → fresh enough to serve.
+        #expect(NativeMarketDataCoordinator.aggCacheReachesLatestClosedBucket(
+            aggLatestMs: justClosed, period: "FIFTEEN_MINS", targetSeconds: target, now: now))
+        // One bucket behind (09:30) is missing the just-closed bar → must rebuild.
+        #expect(!NativeMarketDataCoordinator.aggCacheReachesLatestClosedBucket(
+            aggLatestMs: justClosed - target * 1000, period: "FIFTEEN_MINS", targetSeconds: target, now: now))
+        // Session-aligned periods keep prior behavior (gate is a no-op for them).
+        #expect(NativeMarketDataCoordinator.aggCacheReachesLatestClosedBucket(
+            aggLatestMs: 0, period: "DAILY", targetSeconds: 86_400, now: now))
+    }
 }
 
 @Suite("Native instrument wire form")

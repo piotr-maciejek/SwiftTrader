@@ -494,12 +494,22 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         // repeat open paints the cached candles immediately without touching the 1m/1H source.
         // The last condition catches a forward-fill that advanced the source past the agg's
         // last bucket (re-aggregate the tail in that case).
-        if let aggLatest = await cache.latestTime(for: aggKey),
+        let aggLatestOpt = await cache.latestTime(for: aggKey)
+        if let aggLatest = aggLatestOpt,
            Self.isCacheFresh(latestMs: aggLatest, period: spec.periodCode),
            await cacheCoversWindow(key: aggKey, periodSeconds: targetSeconds, count: count),
-           (srcLatest ?? aggLatest) < aggLatest + targetSeconds * 1000 {
+           (srcLatest ?? aggLatest) < aggLatest + targetSeconds * 1000,
+           // Don't serve an agg cache that's missing the just-closed bucket. `isCacheFresh`
+           // is a days-scale gate (weekend/gap detection); on its own it happily serves a
+           // cache 30 min behind, leaving a hole at the most-recent closed bucket (e.g. the
+           // 08:45 15m bar). The source-advanced guard above only catches it when the 1m/1H
+           // source is itself fresh — which it may not be in the launch window before the
+           // forward-fill lands. This makes the staleness check tight enough to rebuild.
+           Self.aggCacheReachesLatestClosedBucket(aggLatestMs: aggLatest, period: spec.periodCode, targetSeconds: targetSeconds) {
+            nativeLog.debug("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): served cache (aggLatest=\(aggLatest), srcLatest=\(srcLatest ?? -1))")
             return await cache.getBars(for: aggKey)
         }
+        nativeLog.debug("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): rebuilding (aggLatest=\(aggLatestOpt ?? -1), srcLatest=\(srcLatest ?? -1))")
 
         // Otherwise (re)build the window. Ensure the raw source covers it, but fetch ONLY the
         // MISSING slice — never refetch bars already on disk. `fetchCandles` has already
@@ -747,6 +757,24 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         default: 60 * 24 * 60 * 60 * 1000
         }
         return ageMs < threshold
+    }
+
+    /// True when an aggregated cache reaches the most-recent CLOSED bucket — i.e. it isn't
+    /// missing a bar that has already closed. Used to gate the aggregated-cache-first path so
+    /// a cache one bucket behind (the just-closed bar) triggers a rebuild instead of being
+    /// served with a hole. Only the fixed epoch-grid intraday periods (3m/5m/15m/30m) use a
+    /// simple floor; session-aligned 4H/Daily/Weekly keep the prior guards (return true). When
+    /// the market is closed no new bucket forms, so the cache can't be missing one (return true).
+    static func aggCacheReachesLatestClosedBucket(
+        aggLatestMs: Int64, period: String, targetSeconds: Int64, now: Date = Date()
+    ) -> Bool {
+        guard ["THREE_MINS", "FIVE_MINS", "FIFTEEN_MINS", "THIRTY_MINS"].contains(period) else { return true }
+        guard !NYTradingCalendar.isMarketClosed(at: now), !NYTradingCalendar.isFXHoliday(at: now) else { return true }
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        let targetMs = targetSeconds * 1000
+        let currentBucketStart = (nowMs / targetMs) * targetMs
+        // The latest completed bar must be at least the just-closed bucket (currentBucketStart − 1).
+        return aggLatestMs >= currentBucketStart - targetMs
     }
 
     /// The app identifies pairs by slashless code ("EURUSD"); DukascopyClient's instrument
