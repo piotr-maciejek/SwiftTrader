@@ -174,9 +174,8 @@ struct BottomPanel: View {
             Button("Close") {
                 Task { await trading.closePosition(label: position.label) }
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(TextActionButtonStyle(tint: .red))
             .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(.red)
             .frame(width: 50)
         }
         .padding(.horizontal, 12)
@@ -274,9 +273,8 @@ struct BottomPanel: View {
             Button("Cancel") {
                 Task { await trading.closePosition(label: order.label) }
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(TextActionButtonStyle(tint: .red))
             .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(.red)
             .frame(width: 60)
         }
         .padding(.horizontal, 12)

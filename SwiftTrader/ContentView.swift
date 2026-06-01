@@ -863,24 +863,14 @@ struct ContentView: View {
                 trading.beginVisualOrder(
                     direction: "BUY", instrument: vm.currentInstrument, bars: vm.bars)
             }
-            .buttonStyle(.borderless)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.6))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(tradingEnabled ? Color.green : Color.gray, in: RoundedRectangle(cornerRadius: 4))
+            .buttonStyle(FilledActionButtonStyle(fill: .green, enabled: tradingEnabled))
             .disabled(!tradingEnabled)
 
             Button("Sell") {
                 trading.beginVisualOrder(
                     direction: "SELL", instrument: vm.currentInstrument, bars: vm.bars)
             }
-            .buttonStyle(.borderless)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.6))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(tradingEnabled ? Color.red : Color.gray, in: RoundedRectangle(cornerRadius: 4))
+            .buttonStyle(FilledActionButtonStyle(fill: .red, enabled: tradingEnabled))
             .disabled(!tradingEnabled)
         }
     }
@@ -903,12 +893,7 @@ struct ContentView: View {
                         direction: "BUY", instrument: vm.instrument, bars: cell.bars)
                 }
             }
-            .buttonStyle(.borderless)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.6))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(tradingEnabled ? Color.green : Color.gray, in: RoundedRectangle(cornerRadius: 4))
+            .buttonStyle(FilledActionButtonStyle(fill: .green, enabled: tradingEnabled))
             .disabled(!tradingEnabled)
 
             Button("Sell") {
@@ -917,12 +902,7 @@ struct ContentView: View {
                         direction: "SELL", instrument: vm.instrument, bars: cell.bars)
                 }
             }
-            .buttonStyle(.borderless)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(tradingEnabled ? .white : .white.opacity(0.6))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(tradingEnabled ? Color.red : Color.gray, in: RoundedRectangle(cornerRadius: 4))
+            .buttonStyle(FilledActionButtonStyle(fill: .red, enabled: tradingEnabled))
             .disabled(!tradingEnabled)
         }
     }
