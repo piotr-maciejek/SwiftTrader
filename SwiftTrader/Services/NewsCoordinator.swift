@@ -1,6 +1,12 @@
 import Foundation
 
-final class NewsCoordinator: Sendable {
+/// Source of news/calendar items for the right panel. Server mode reads the jforex-server
+/// WebSocket; standalone mode (`NativeNewsCoordinator`) decodes Dukascopy's feed directly.
+protocol NewsProviding: Sendable {
+    func streamNews() -> AsyncThrowingStream<[NewsItem], Error>
+}
+
+final class NewsCoordinator: NewsProviding, Sendable {
     private let host: String
     private let port: Int
 

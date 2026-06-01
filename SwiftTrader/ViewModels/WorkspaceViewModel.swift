@@ -40,7 +40,7 @@ final class WorkspaceViewModel {
     /// URLSession + connection pool instead of N + 6M, so a startup fan-out
     /// doesn't fragment HTTP traffic into separate per-tab pools.
     private var marketData: any MarketDataProviding
-    private var newsCoordinator: NewsCoordinator
+    private var newsCoordinator: any NewsProviding
     private var newsTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
     var tabs: [Tab] = []
@@ -321,6 +321,11 @@ final class WorkspaceViewModel {
         // Route trading natively through this session: positions / account / spreads now
         // stream from the session, and orders place directly (no jforex-server).
         trading.reconnect(coordinator: NativeTradingCoordinator(session: session))
+        // News/calendar also comes from this session in native mode (Dukascopy's own feed),
+        // so the right panel works without jforex-server. Re-subscribes on account switch.
+        newsCoordinator = NativeNewsCoordinator(session: session)
+        newsItems = []
+        connectNews()
     }
 
     func reconnectAll(port: Int) {

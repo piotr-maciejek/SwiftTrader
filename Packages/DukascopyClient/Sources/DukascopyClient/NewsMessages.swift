@@ -31,6 +31,16 @@ public struct CalendarEventMsg: Sendable {
     public var longDescription: String?
     public var details: [CalendarEventDetailMsg] = []
 
+    public init(eventId: String? = nil, country: String? = nil, eventCategory: String? = nil,
+                organisation: String? = nil, period: String? = nil, eventDate: Int64? = nil,
+                eventTimestamp: Int64? = nil, description: String? = nil,
+                longDescription: String? = nil, details: [CalendarEventDetailMsg] = []) {
+        self.eventId = eventId; self.country = country; self.eventCategory = eventCategory
+        self.organisation = organisation; self.period = period; self.eventDate = eventDate
+        self.eventTimestamp = eventTimestamp; self.description = description
+        self.longDescription = longDescription; self.details = details
+    }
+
     public static func decode(from reader: inout BinaryReader) throws -> CalendarEventMsg {
         var m = CalendarEventMsg()
         while let field = try readField(from: &reader) {
@@ -65,6 +75,14 @@ public struct CalendarEventDetailMsg: Sendable {
     public var previous: String?
     public var tag: String?
 
+    public init(detailId: String? = nil, importance: String? = nil, description: String? = nil,
+                actual: String? = nil, delta: String? = nil, expected: String? = nil,
+                previous: String? = nil, tag: String? = nil) {
+        self.detailId = detailId; self.importance = importance; self.description = description
+        self.actual = actual; self.delta = delta; self.expected = expected
+        self.previous = previous; self.tag = tag
+    }
+
     public static func decode(from reader: inout BinaryReader) throws -> CalendarEventDetailMsg {
         var m = CalendarEventDetailMsg()
         while let field = try readField(from: &reader) {
@@ -96,6 +114,13 @@ public struct NewsStoryMsg: Sendable {
     public var currencies: Set<String> = []
     public var language: String?
     public var content: CalendarEventMsg?   // present → this story is a calendar event
+
+    public init(newsId: String? = nil, publishDate: Int64? = nil, header: String? = nil,
+                hot: Bool = false, currencies: Set<String> = [], language: String? = nil,
+                content: CalendarEventMsg? = nil) {
+        self.newsId = newsId; self.publishDate = publishDate; self.header = header
+        self.hot = hot; self.currencies = currencies; self.language = language; self.content = content
+    }
 
     public static func decode(from reader: inout BinaryReader) throws -> NewsStoryMsg {
         var m = NewsStoryMsg()

@@ -311,3 +311,43 @@ struct BarAggregatorFixedGridTests {
         #expect(thirtyMin.map(\.time) == [0, 1_800_000])
     }
 }
+
+@Suite("Native news/calendar mapping")
+struct NativeNewsMappingTests {
+    @Test("Calendar event maps to a CALENDAR NewsItem with details + positive time")
+    func calendarMapping() {
+        let detail = CalendarEventDetailMsg(
+            importance: "H", description: "GDP, Y/Y%", actual: nil, expected: "2.0%", previous: "1.8%")
+        let cal = CalendarEventMsg(
+            eventId: "EV1", country: "US", eventCategory: "GDP", period: "Q1",
+            eventDate: Int64.min, eventTimestamp: Int64.min,   // unset → MIN_VALUE
+            description: "Gross Domestic Product", details: [detail])
+        let story = NewsStoryMsg(newsId: "N1", publishDate: 1_780_000_000_000, header: "", hot: false)
+
+        let item = NativeNewsCoordinator.map(.calendar(cal, story: story))
+        let r = try! #require(item)
+        #expect(r.id == "N1")
+        #expect(r.type == "CALENDAR")
+        #expect(r.country == "US")
+        #expect(r.eventCategory == "GDP")
+        #expect(r.header == "Gross Domestic Product")   // empty story header → calendar description
+        #expect(r.publishDate == 1_780_000_000_000)     // MIN_VALUE skipped, story publish used
+        #expect(r.hot)                                  // importance H → hot
+        #expect(r.details?.count == 1)
+        #expect(r.details?.first?.expected == "2.0%")
+    }
+
+    @Test("Plain news story maps to a NEWS NewsItem")
+    func storyMapping() {
+        let story = NewsStoryMsg(newsId: "S1", publishDate: 1_780_000_000_000,
+                                 header: "ECB speaks", hot: true, currencies: ["EUR"])
+        let item = NativeNewsCoordinator.map(.story(story))
+        let r = try! #require(item)
+        #expect(r.id == "S1")
+        #expect(r.type == "NEWS")
+        #expect(r.header == "ECB speaks")
+        #expect(r.hot)
+        #expect(r.currencies == ["EUR"])
+        #expect(r.isCalendar == false)
+    }
+}
