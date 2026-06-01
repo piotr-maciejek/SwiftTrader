@@ -706,9 +706,10 @@ public actor DukascopySession {
         stopLoss: BigDecimalValue? = nil, takeProfit: BigDecimalValue? = nil, label: String
     ) async throws -> String {
         guard state == .connected, let transport else { throw SessionError.notConnected }
-        guard let priceClient = await currentPrice(instrument: instrument, buy: side == "BUY") else {
-            throw SessionError.timedOut("pending: no price for \(instrument)")
-        }
+        // `priceClient` is just the reference market price; if no tick arrives quickly
+        // (e.g. a quiet pair that wasn't subscribed) fall back to the trigger price so
+        // the order isn't blocked — the trigger is what actually matters for a pending.
+        let priceClient = await currentPrice(instrument: instrument, buy: side == "BUY") ?? triggerPrice
         let reqId = UUID().uuidString
         let frame = encodePendingOrderGroup(
             instrument: instrument, side: side, kind: kind, amount: amount,
@@ -768,7 +769,7 @@ public actor DukascopySession {
     }
 
     /// First quote for `instrument` (ask if `buy`, else bid), bounded by `timeout`.
-    private func currentPrice(instrument: String, buy: Bool, timeout: TimeInterval = 6) async -> BigDecimalValue? {
+    private func currentPrice(instrument: String, buy: Bool, timeout: TimeInterval = 8) async -> BigDecimalValue? {
         try? await ensureSubscribedQuotes([instrument])
         return await withTaskGroup(of: BigDecimalValue?.self) { group in
             group.addTask { [weak self] in
