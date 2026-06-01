@@ -88,6 +88,7 @@ public actor DukascopySession {
     private var positions: [String: OrderGroup] = [:]
     /// Multicast order/position event consumers (mirrors `tickStreams`).
     private var orderEventStreams: [UUID: AsyncStream<OrderEvent>.Continuation] = [:]
+    private var newsEventStreams: [UUID: AsyncStream<NewsEvent>.Continuation] = [:]
     /// Debounce flag for the silent-DDS watchdog: when a fetchHistory idle-times-out
     /// every subsequent fetchHistory is hung on the same wedged channel, so we trigger
     /// a forced reconnect — but multiple in-flight requests hitting their timeouts
@@ -673,6 +674,42 @@ public actor DukascopySession {
         orderEventStreams.removeValue(forKey: id)
     }
 
+    /// Multicast stream of inbound news/calendar events (after `subscribeNews`).
+    public func newsEvents() -> AsyncStream<NewsEvent> {
+        let id = UUID()
+        return AsyncStream<NewsEvent> { continuation in
+            Task { [weak self] in await self?.registerNewsStream(id: id, continuation: continuation) }
+            continuation.onTermination = { [weak self] _ in
+                Task { [weak self] in await self?.unregisterNewsStream(id: id) }
+            }
+        }
+    }
+    private func registerNewsStream(id: UUID, continuation: AsyncStream<NewsEvent>.Continuation) {
+        newsEventStreams[id] = continuation
+    }
+    private func unregisterNewsStream(id: UUID) {
+        newsEventStreams.removeValue(forKey: id)
+    }
+
+    /// Subscribe to the news/calendar feed. `sources` are `NewsSource` constant names
+    /// ("DJ_LIVE_CALENDAR" for the economic calendar, "FXSPIDER_NEWS" for headlines).
+    /// Events then arrive on `newsEvents()`.
+    @discardableResult
+    public func subscribeNews(
+        sources: [String], from: Int64, to: Int64, calendarType: String?
+    ) async throws -> String {
+        guard state == .connected, let transport else { throw SessionError.notConnected }
+        let reqId = UUID().uuidString
+        let frame = encodeNewsSubscribeRequest(
+            sources: sources, from: from, to: to, calendarType: calendarType,
+            userId: latestAccount?.userId, accountLoginId: latestAccount?.accountLoginId,
+            sessionId: authSessionId, requestId: reqId,
+            timestamp: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        try await transport.sendFrame(frame)
+        return reqId
+    }
+
     /// Submit a MARKET order by sending an `OrderGroupMessage` (the desktop client's
     /// path). Fire-and-forget: the server streams the resulting order/position state
     /// back via `orderEvents()`. Returns the `requestId` so the caller can correlate.
@@ -948,6 +985,18 @@ public actor DukascopySession {
             for (_, c) in orderEventStreams { c.yield(.order(o)) }
         case .orderResponse(let r):
             handleOrderResponse(r)
+        case .calendarEvent(let e):
+            log.info("calendar event: \(e.country ?? "-", privacy: .public) [\(e.eventCategory ?? "-", privacy: .public)] \(e.description ?? "-", privacy: .public)")
+            for (_, c) in newsEventStreams { c.yield(.calendar(e, story: NewsStoryMsg())) }
+        case .newsStory(let s):
+            if let cal = s.content {
+                // Calendar entries arrive embedded in a NewsStoryMessage's content.
+                log.info("calendar event: \(cal.country ?? "-", privacy: .public) [\(cal.eventCategory ?? "-", privacy: .public)] \(cal.description ?? "-", privacy: .public)")
+                for (_, c) in newsEventStreams { c.yield(.calendar(cal, story: s)) }
+            } else {
+                log.info("news story: [hot=\(s.hot)] \(s.header ?? "-", privacy: .public)")
+                for (_, c) in newsEventStreams { c.yield(.story(s)) }
+            }
         case .currencyMarket(let cm):
             log.debug("tick \(cm.instrument, privacy: .public) bid=\(cm.bestBid?.description ?? "-", privacy: .public)")
             lastQuotes[cm.instrument] = cm   // most-recent quote per instrument, for order pricing
@@ -967,6 +1016,8 @@ public actor DukascopySession {
                 } catch {
                     log.error("primary socket auth echo failed: \(error.localizedDescription, privacy: .public)")
                 }
+            } else {
+                log.debug("unknown inbound frame classId=\(classId) len=\(body.count)")
             }
         default:
             // Market / position routing layers onto dispatch in later slices.

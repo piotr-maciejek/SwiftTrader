@@ -8,7 +8,7 @@ struct DukascopyCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dukascopy-cli",
         abstract: "Dukascopy native protocol prototyping CLI.",
-        subcommands: [JNLPCommand.self, AuthCommand.self, LoginInfoCommand.self, CaptchaCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self, BulkSpikeCommand.self, PositionsCommand.self, SubmitCommand.self, CloseCommand.self, CancelCommand.self, ModifyCommand.self, HashOfCommand.self]
+        subcommands: [JNLPCommand.self, AuthCommand.self, LoginInfoCommand.self, CaptchaCommand.self, ConnectTestCommand.self, StreamCommand.self, AccountCommand.self, HistoryCommand.self, SessionCommand.self, BulkSpikeCommand.self, PositionsCommand.self, SubmitCommand.self, CloseCommand.self, CancelCommand.self, ModifyCommand.self, NewsCommand.self, HashOfCommand.self]
     )
 }
 
@@ -368,7 +368,8 @@ struct StreamCommand: AsyncParsableCommand {
             case .error(let e):
                 FileHandle.standardError.write(Data("server error: \(e)\n".utf8))
                 return
-            case .ok, .halo, .packedAccountInfo, .candleHistoryGroup, .orderGroup, .order, .orderResponse:
+            case .ok, .halo, .packedAccountInfo, .candleHistoryGroup, .orderGroup, .order, .orderResponse,
+                 .calendarEvent, .newsStory:
                 break
             case .unknown(let classId, let body):
                 if ProcessInfo.processInfo.environment["DUKASCOPY_CLI_VERBOSE"] != nil {
@@ -748,6 +749,72 @@ struct ModifyCommand: AsyncParsableCommand {
         printer.cancel()
         print("--- group after ---")
         for g in await session.positionsSnapshot() where g.orderGroupId == orderGroupId { printGroup(g) }
+        await session.close()
+    }
+}
+
+private func fmtNewsMs(_ ms: Int64) -> String {
+    guard ms > 0 else { return "-" }
+    let f = DateFormatter()
+    f.dateFormat = "MM-dd HH:mm"
+    return f.string(from: Date(timeIntervalSince1970: Double(ms) / 1000.0))
+}
+
+struct NewsCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "news",
+        abstract: "Subscribe to the Dukascopy news/calendar feed and print incoming events."
+    )
+    @Option(name: .long, help: "Target environment: demo or live") var env: String = "demo"
+    @Option(name: .long, help: "Login") var user: String
+    @Option(name: .long, help: "Password") var pass: String
+    @Option(name: .long, help: "Comma-separated NewsSource names (e.g. DJ_LIVE_CALENDAR,FXSPIDER_NEWS)") var sources: String = "DJ_LIVE_CALENDAR"
+    @Option(name: .long, help: "CalendarType (ICC/IEP/IDC) or empty to omit") var calendarType: String = "ICC"
+    @Option(name: .long, help: "Window start: days before now") var fromDays: Int = 7
+    @Option(name: .long, help: "Window end: days after now") var toDays: Int = 7
+    @Option(name: .long, help: "Seconds to watch for events") var observe: Double = 20
+
+    func run() async throws {
+        guard let target = DukascopyEnvironment(rawValue: env.lowercased()) else {
+            throw ValidationError("env must be 'demo' or 'live'")
+        }
+        let session = DukascopySession(
+            environment: target, credentials: AuthCredentials(login: user, password: pass)
+        )
+        try await session.connect()
+        _ = try? await session.accountSnapshot()
+
+        let events = await session.newsEvents()
+        let printer = Task {
+            for await ev in events {
+                switch ev {
+                case .calendar(let e, let story):
+                    let t = e.eventTimestamp ?? e.eventDate ?? story.publishDate ?? 0
+                    print("CAL \(fmtNewsMs(t)) \(e.country ?? "-") [\(e.eventCategory ?? "-")] \(e.description ?? story.header ?? "-")")
+                    for d in e.details {
+                        print("      • \(d.description ?? "") act=\(d.actual ?? "-") exp=\(d.expected ?? "-") prev=\(d.previous ?? "-") imp=\(d.importance ?? "-")")
+                    }
+                case .story(let s):
+                    print("NEWS \(fmtNewsMs(s.publishDate ?? 0)) [hot=\(s.hot)] \(s.header ?? "-")  \(s.currencies.sorted().joined(separator: ","))")
+                }
+            }
+        }
+
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let from = nowMs - Int64(fromDays) * 86_400_000
+        let to = nowMs + Int64(toDays) * 86_400_000
+        let srcList = sources.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        let ct = calendarType.isEmpty ? nil : calendarType
+        print("subscribing sources=\(srcList) calendarType=\(ct ?? "-") from=\(fmtNewsMs(from)) to=\(fmtNewsMs(to)) …")
+        do {
+            let r = try await session.subscribeNews(sources: srcList, from: from, to: to, calendarType: ct)
+            print("SUBSCRIBE SENT: reqId=\(r) — watching for \(Int(observe))s …")
+        } catch {
+            print("SUBSCRIBE FAILED: \(error)")
+        }
+        try? await Task.sleep(for: .seconds(observe))
+        printer.cancel()
+        print("--- done watching ---")
         await session.close()
     }
 }

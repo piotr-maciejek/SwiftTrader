@@ -211,6 +211,8 @@ public enum InboundMessage: Sendable {
     case orderGroup(OrderGroup)          // live position update
     case order(OrderMsg)                 // live single-order update
     case orderResponse(ExtApiOrderResponse)  // order submit/close/modify ack
+    case calendarEvent(CalendarEventMsg)     // economic-calendar event
+    case newsStory(NewsStoryMsg)             // news story
     case unknown(classId: Int32, body: Data)
 }
 
@@ -242,6 +244,10 @@ public enum MessageDecoder {
             return .order(try OrderMsg.decode(from: &fields))
         case javaStringHashCode(WireClass.extApiOrderResponse):
             return .orderResponse(try ExtApiOrderResponse.decode(from: &fields))
+        case javaStringHashCode(NewsWire.calendarEvent):
+            return .calendarEvent(try CalendarEventMsg.decode(from: &fields))
+        case javaStringHashCode(NewsWire.newsStoryMessage):
+            return .newsStory(try NewsStoryMsg.decode(from: &fields))
         default:
             let remaining = try fields.readBytes(fields.remaining)
             return .unknown(classId: classId, body: remaining)
