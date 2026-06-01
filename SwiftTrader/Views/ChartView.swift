@@ -1082,16 +1082,30 @@ struct ChartView: View {
     static let visualOrderPanelWidth: CGFloat = 180
     static let visualOrderPanelHeight: CGFloat = 140
 
+    /// Panel sits BESIDE the box (not on top of it) so the red/green SL/TP zones stay
+    /// visible. Prefer the right of the box; fall back to the left when the right would
+    /// overflow the chart; as a last resort (narrow cell) use whichever side has more room,
+    /// clamped on-screen. Vertically centred on the entry line. `isBuy` is no longer used
+    /// for placement (kept for signature stability across the drawing + hit-test call sites).
     static func visualOrderPanelRect(boxLeft: CGFloat, boxRight: CGFloat,
                                      entryY: CGFloat, isBuy: Bool,
                                      chartWidth: CGFloat, chartHeight: CGFloat) -> CGRect {
         let width = visualOrderPanelWidth
         let height = visualOrderPanelHeight
-        let midX = (boxLeft + boxRight) / 2
-        var x = midX - width / 2
-        x = max(4, min(chartWidth - width - 4, x))
-        let desiredY: CGFloat = isBuy ? entryY - height - 8 : entryY + 8
-        let y = max(4, min(chartHeight - height - 4, desiredY))
+        let gap: CGFloat = 10
+        let rightX = boxRight + gap
+        let leftX = boxLeft - gap - width
+        let x: CGFloat
+        if rightX + width <= chartWidth - 4 {
+            x = rightX                                   // fits to the right (preferred)
+        } else if leftX >= 4 {
+            x = leftX                                    // else to the left
+        } else if (chartWidth - boxRight) >= boxLeft {
+            x = min(chartWidth - width - 4, rightX)      // neither fits: more room on the right
+        } else {
+            x = max(4, leftX)                            // more room on the left
+        }
+        let y = max(4, min(chartHeight - height - 4, entryY - height / 2))
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
@@ -1200,25 +1214,30 @@ struct ChartView: View {
                            style: StrokeStyle(lineWidth: 1))
         }
 
-        // SL/TP price labels on right side of bar-anchored box (unchanged — sit on the
-        // dashed lines at the box's right edge, on the chart).
-        let labelFont = Font.system(size: 9, weight: .medium, design: .monospaced)
-        let decimalPlaces = order.instrument.contains("JPY") ? 3 : 5
-        let slLabel = context.resolve(Text(String(format: "SL %.\(decimalPlaces)f", order.stopLoss))
-            .font(labelFont).foregroundStyle(bearishColor))
-        context.draw(slLabel, at: CGPoint(x: rightX + 4, y: slY), anchor: .leading)
-
-        let tpLabel = context.resolve(Text(String(format: "TP %.\(decimalPlaces)f", order.takeProfit))
-            .font(labelFont).foregroundStyle(bullishColor))
-        context.draw(tpLabel, at: CGPoint(x: rightX + 4, y: tpY), anchor: .leading)
-
-        // Fixed-size control panel — sticker over the box that keeps amount/RR/buttons
-        // legible regardless of how shallow the price-based box is.
+        // Fixed-size control panel — sits beside the box (right-preferred). Computed before
+        // the SL/TP labels so the labels can be placed on the OPPOSITE side and never hide
+        // behind the panel.
         let panelRect = Self.visualOrderPanelRect(
             boxLeft: leftX, boxRight: rightX,
             entryY: entryY, isBuy: isBuy,
             chartWidth: chartWidth, chartHeight: chartHeight
         )
+
+        // SL/TP price labels sit on the dashed lines at the box edge, on the side AWAY from
+        // the panel (panel right → labels left, and vice versa) so they're always legible.
+        let panelOnRight = panelRect.minX >= rightX
+        let labelFont = Font.system(size: 9, weight: .medium, design: .monospaced)
+        let decimalPlaces = order.instrument.contains("JPY") ? 3 : 5
+        let labelX = panelOnRight ? leftX - 4 : rightX + 4
+        let labelAnchor: UnitPoint = panelOnRight ? .trailing : .leading
+        let slLabel = context.resolve(Text(String(format: "SL %.\(decimalPlaces)f", order.stopLoss))
+            .font(labelFont).foregroundStyle(bearishColor))
+        context.draw(slLabel, at: CGPoint(x: labelX, y: slY), anchor: labelAnchor)
+
+        let tpLabel = context.resolve(Text(String(format: "TP %.\(decimalPlaces)f", order.takeProfit))
+            .font(labelFont).foregroundStyle(bullishColor))
+        context.draw(tpLabel, at: CGPoint(x: labelX, y: tpY), anchor: labelAnchor)
+
         context.fill(Path(roundedRect: panelRect, cornerRadius: 5),
                      with: .color(.black.opacity(0.78 * alpha)))
         context.stroke(Path(roundedRect: panelRect, cornerRadius: 5),
