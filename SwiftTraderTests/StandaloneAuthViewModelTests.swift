@@ -96,4 +96,61 @@ struct StandaloneAuthViewModelTests {
         vm.handleSessionFailure("late event")
         #expect(vm.phase == .idle)
     }
+
+    @Test("connectOrSwitch tears down a ready session when a different account is selected")
+    func switchDisconnectsFirst() async {
+        let vm = StandaloneAuthViewModel()  // backed by AccountStore.shared
+        let store = AccountStore.shared
+        let saved = store.selectedAccountID
+        defer { store.selectedAccountID = saved }
+
+        // Pretend we're connected, then "select" an account id the store doesn't hold.
+        // connectedAccountID is nil (no real connect), so it differs from the selection,
+        // forcing the switch branch: disconnect() runs, then connectSelected() lands on
+        // .idle via its missing-account guard. A plain connectSelected() would instead
+        // have returned immediately at its `phase == .ready` guard, leaving phase == .ready.
+        vm.phase = .ready
+        store.selectedAccountID = UUID()
+        await vm.connectOrSwitch()
+
+        #expect(vm.phase == .idle)
+        #expect(vm.session == nil)
+    }
+}
+
+/// `AccountStore` no longer swallows Keychain write failures — they surface via
+/// `lastSaveError` so the UI can warn instead of persisting an account that can't connect.
+@MainActor
+@Suite("AccountStore credential persistence")
+struct AccountStoreCredentialTests {
+    private struct ThrowingSecretStore: SecretStore {
+        func setSecret(_ secret: String, for key: String) throws {
+            throw KeychainError.unexpectedStatus(-25299)
+        }
+        func secret(for key: String) -> String? { nil }
+        func removeSecret(for key: String) throws {}
+    }
+
+    private final class InMemorySecretStore: SecretStore, @unchecked Sendable {
+        private var store: [String: String] = [:]
+        func setSecret(_ secret: String, for key: String) throws { store[key] = secret }
+        func secret(for key: String) -> String? { store[key] }
+        func removeSecret(for key: String) throws { store[key] = nil }
+    }
+
+    @Test("a failed Keychain write surfaces via lastSaveError")
+    func failureSurfaces() {
+        let store = AccountStore(secrets: ThrowingSecretStore())
+        let account = store.addAccount(label: "Demo", login: "123", password: "pw", environment: .demo)
+        defer { store.removeAccount(account.id) }
+        #expect(store.lastSaveError != nil)
+    }
+
+    @Test("a successful Keychain write leaves lastSaveError nil")
+    func successClears() {
+        let store = AccountStore(secrets: InMemorySecretStore())
+        let account = store.addAccount(label: "Demo", login: "123", password: "pw", environment: .demo)
+        defer { store.removeAccount(account.id) }
+        #expect(store.lastSaveError == nil)
+    }
 }

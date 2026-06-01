@@ -34,6 +34,10 @@ final class WorkspaceViewModel {
     let trading: TradingViewModel
     let tradeHistory: TradeHistoryViewModel
     var newsItems: [NewsItem] = []
+    /// Non-nil while the news/calendar feed is failing (e.g. a subscribe error). Drives a
+    /// "news unavailable" badge in the right panel so a failed feed reads differently from
+    /// a genuinely empty day. Cleared once events flow again.
+    var newsError: String?
     private let diskCache = DiskCandleCache()
     private let candleCache: CandleCache
     /// Shared by every ChartViewModel (regular tabs + correlation cells). One
@@ -140,6 +144,7 @@ final class WorkspaceViewModel {
             while !Task.isCancelled {
                 do {
                     for try await batch in newsCoordinator.streamNews() {
+                        newsError = nil
                         for item in batch {
                             if let idx = newsItems.firstIndex(where: { $0.id == item.id }) {
                                 newsItems[idx] = item
@@ -154,6 +159,7 @@ final class WorkspaceViewModel {
                 } catch is CancellationError {
                     break
                 } catch {
+                    newsError = String(describing: error)
                     try? await Task.sleep(for: .seconds(3))
                 }
             }

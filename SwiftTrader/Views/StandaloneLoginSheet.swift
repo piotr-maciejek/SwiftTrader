@@ -27,6 +27,14 @@ struct StandaloneLoginSheet: View {
                 accountList
             }
 
+            if let saveError = accounts.lastSaveError {
+                Text("Couldn't save credentials to the Keychain: \(String(describing: saveError))")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+
             switch auth.phase {
             case .connecting:
                 HStack(spacing: 6) {
@@ -116,13 +124,16 @@ struct StandaloneLoginSheet: View {
         accounts.addAccount(
             label: newLabel, login: newLogin, password: newPassword, environment: newEnv
         )
+        // Keep the form (and the typed values) up if the Keychain write failed, so the
+        // user sees the error and can retry rather than losing an account that can't connect.
+        guard accounts.lastSaveError == nil else { return }
         newLabel = ""; newLogin = ""; newPassword = ""; newEnv = .demo
         isAddingAccount = false
     }
 
     private func connect() {
         Task {
-            await auth.connectSelected()
+            await auth.connectOrSwitch()
             if auth.phase == .ready { dismiss() }
         }
     }

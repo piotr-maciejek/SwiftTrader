@@ -17,24 +17,30 @@ final class NativeNewsCoordinator: NewsProviding, Sendable {
         }
         return AsyncThrowingStream { continuation in
             let task = Task {
-                // Calendar via DJ_LIVE_CALENDAR over a window around today (the panel shows
-                // today's events); headlines via FXSPIDER_NEWS (its window is open-ended,
-                // matching the desktop client's Long.MIN_VALUE sentinel).
-                let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-                let dayMs: Int64 = 24 * 60 * 60 * 1000
-                try? await session.subscribeNews(
-                    sources: ["DJ_LIVE_CALENDAR"], from: nowMs - 2 * dayMs, to: nowMs + 3 * dayMs,
-                    calendarType: "ICC")
-                try? await session.subscribeNews(
-                    sources: ["FXSPIDER_NEWS"], from: Int64.min, to: Int64.min, calendarType: nil)
+                do {
+                    // Calendar via DJ_LIVE_CALENDAR over a window around today (the panel shows
+                    // today's events); headlines via FXSPIDER_NEWS (its window is open-ended,
+                    // matching the desktop client's Long.MIN_VALUE sentinel). A subscribe
+                    // failure finishes the stream with the error so the consumer can surface
+                    // it (and retry) instead of leaving a silently-empty panel.
+                    let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                    let dayMs: Int64 = 24 * 60 * 60 * 1000
+                    try await session.subscribeNews(
+                        sources: ["DJ_LIVE_CALENDAR"], from: nowMs - 2 * dayMs, to: nowMs + 3 * dayMs,
+                        calendarType: "ICC")
+                    try await session.subscribeNews(
+                        sources: ["FXSPIDER_NEWS"], from: Int64.min, to: Int64.min, calendarType: nil)
 
-                for await event in await session.newsEvents() {
-                    if Task.isCancelled { break }
-                    if let item = Self.map(event) {
-                        continuation.yield([item])
+                    for await event in await session.newsEvents() {
+                        if Task.isCancelled { break }
+                        if let item = Self.map(event) {
+                            continuation.yield([item])
+                        }
                     }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
                 }
-                continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }

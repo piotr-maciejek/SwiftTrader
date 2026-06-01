@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RightPanel: View {
     var newsItems: [NewsItem]
+    /// Non-nil when the news feed is failing; shown instead of the empty-day message.
+    var newsError: String? = nil
     @State private var showHeadlines = false
     @State private var expandedRowIDs: Set<String> = []
 
@@ -36,10 +38,17 @@ struct RightPanel: View {
             Divider()
 
             if rows.isEmpty {
-                Text("No events today")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if newsError != nil {
+                    Text("News unavailable — retrying…")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Text("No events today")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {

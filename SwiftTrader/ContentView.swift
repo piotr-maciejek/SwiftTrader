@@ -185,7 +185,7 @@ struct ContentView: View {
 
                 if workspace.showRightPanel {
                     Divider()
-                    RightPanel(newsItems: workspace.newsItems)
+                    RightPanel(newsItems: workspace.newsItems, newsError: workspace.newsError)
                 }
             }
 
@@ -281,6 +281,21 @@ struct ContentView: View {
             .help("Keyboard Shortcuts")
             .popover(isPresented: $showShortcuts) {
                 ShortcutsPopover()
+            }
+
+            // Native mode: switch the connected account without restarting. Re-opens the
+            // login sheet; picking a different account + Connect tears down the old session
+            // (see StandaloneAuthViewModel.connectOrSwitch).
+            if provider == .native {
+                Button(action: { showLoginSheet = true }) {
+                    Image(systemName: "person.crop.circle")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Switch account")
             }
 
             Button(action: { workspace.showSettings = true }) {

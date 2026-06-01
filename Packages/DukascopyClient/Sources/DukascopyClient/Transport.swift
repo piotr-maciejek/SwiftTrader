@@ -119,22 +119,39 @@ public actor Transport {
         let conn = NWConnection(to: endpoint, using: parameters)
         self.connection = conn
 
+        // Race `.ready` against a timeout so an unreachable host fails into `.failed`
+        // with a timeout instead of hanging forever. The latch makes the first of
+        // {ready, connection-failure, timeout} win; the loser's resume is a no-op.
         let latch = VoidContinuationLatch()
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            conn.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    latch.tryResumeSuccess(cont)
-                case .failed(let err):
-                    latch.tryResumeFailure(cont, TransportError.connectionFailed(err.debugDescription))
-                case .cancelled:
-                    latch.tryResumeFailure(cont, TransportError.closed)
-                default:
-                    break
+        var timeoutTask: Task<Void, Never>?
+        do {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                timeoutTask = Task {
+                    try? await Task.sleep(for: .seconds(timeout))
+                    latch.tryResumeFailure(cont, TransportError.timedOut)
                 }
+                conn.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready:
+                        latch.tryResumeSuccess(cont)
+                    case .failed(let err):
+                        latch.tryResumeFailure(cont, TransportError.connectionFailed(err.debugDescription))
+                    case .cancelled:
+                        latch.tryResumeFailure(cont, TransportError.closed)
+                    default:
+                        break
+                    }
+                }
+                conn.start(queue: .global(qos: .userInitiated))
             }
-            conn.start(queue: .global(qos: .userInitiated))
+        } catch {
+            // Tear down the dangling NWConnection on timeout/failure so it can't linger.
+            timeoutTask?.cancel()
+            conn.cancel()
+            self.connection = nil
+            throw error
         }
+        timeoutTask?.cancel()
     }
 
     // MARK: - Version negotiation

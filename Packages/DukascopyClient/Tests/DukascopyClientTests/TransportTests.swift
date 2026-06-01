@@ -16,6 +16,26 @@ struct TransportTests {
         #expect(ServerAddress.parse("api.example.com:99999") == nil)
     }
 
+    @Test("connect enforces the timeout instead of hanging on an unreachable host")
+    func connectEnforcesTimeout() async {
+        // 10.255.255.1 is a reserved address that typically blackholes packets, so the
+        // TLS connection neither completes nor resets — exactly the hang the timeout guards.
+        let transport = Transport(address: ServerAddress(host: "10.255.255.1", port: 443))
+        let clock = ContinuousClock()
+        let start = clock.now
+        var threw = false
+        do {
+            try await transport.connect(timeout: 1.0)
+        } catch {
+            threw = true
+        }
+        let elapsed = start.duration(to: clock.now)
+        #expect(threw)
+        // Without the timeout this would never return; allow generous slack for CI.
+        #expect(elapsed < .seconds(6))
+        await transport.close()
+    }
+
     @Test("Big-endian read/write round-trips")
     func bigEndianRoundTrip() {
         var data = Data()

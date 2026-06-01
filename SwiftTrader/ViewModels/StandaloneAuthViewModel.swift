@@ -24,6 +24,10 @@ final class StandaloneAuthViewModel {
     var phase: Phase = .idle
     private(set) var session: DukascopySession?
 
+    /// The account the current session is connected as. Lets `connectOrSwitch()` detect a
+    /// voluntary account change while already connected so it can tear down first.
+    private(set) var connectedAccountID: UUID?
+
     /// The captcha PNG to display while `phase == .pinRequired`.
     var captchaImageData: Data?
     /// The PIN the user is typing into the sheet.
@@ -46,6 +50,18 @@ final class StandaloneAuthViewModel {
     }
 
     var hasSelectedAccount: Bool { accounts.selectedAccount != nil }
+
+    /// Connect the selected account, switching away from a live session first if the user
+    /// picked a *different* account while already connected. Reconnecting the same account
+    /// stays a no-op (so re-opening the login sheet and hitting Connect does nothing). On a
+    /// switch, `disconnect()` closes the old session (phase → `.idle`) so the workspace
+    /// re-attaches the new one via the usual `.ready` transition.
+    func connectOrSwitch() async {
+        if phase == .ready, accounts.selectedAccountID != connectedAccountID {
+            await disconnect()
+        }
+        await connectSelected()
+    }
 
     /// Connect the currently selected account. No-op while connecting or already ready.
     /// On a wrong PIN the loop rebuilds the session and re-prompts with a fresh captcha
@@ -72,6 +88,7 @@ final class StandaloneAuthViewModel {
             do {
                 try await session.connect()
                 self.session = session
+                connectedAccountID = account.id
                 pinError = nil
                 phase = .ready
                 observeSessionState(session)
@@ -125,6 +142,7 @@ final class StandaloneAuthViewModel {
         stateObserver = nil
         if let session { await session.close() }
         session = nil
+        connectedAccountID = nil
         phase = .idle
     }
 
@@ -151,5 +169,6 @@ final class StandaloneAuthViewModel {
         guard phase == .ready else { return }
         phase = .failed("Connection lost: \(reason)")
         session = nil
+        connectedAccountID = nil
     }
 }

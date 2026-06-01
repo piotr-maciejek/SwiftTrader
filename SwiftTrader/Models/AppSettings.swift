@@ -8,15 +8,16 @@ enum PairsGroupingMode: String, CaseIterable, Codable {
 /// Where market data comes from. Picked at launch; switching requires a restart
 /// so subscriptions aren't torn down and rebuilt against a different backend mid-flight.
 enum DataProviderMode: String, CaseIterable, Codable {
-    /// jforex-server over HTTP/WebSocket (the trusted default).
+    /// jforex-server over HTTP/WebSocket.
     case server
-    /// Native Swift Dukascopy client, no JVM. Read-only; orders still route via server.
+    /// Native Swift Dukascopy client, no JVM. Self-contained: market data, orders
+    /// (market/limit/stop, close, cancel, modify SL/TP) and news all run over the wire.
     case native
 
     var label: String {
         switch self {
         case .server: return "Server"
-        case .native: return "Standalone (experimental, read-only)"
+        case .native: return "Standalone"
         }
     }
 }
@@ -55,7 +56,8 @@ final class AppSettings {
         let raw = UserDefaults.standard.string(forKey: "pairsGroupingMode")
         self.pairsGroupingMode = raw.flatMap(PairsGroupingMode.init(rawValue:)) ?? .alphabetical
         self.incognitoMode = (UserDefaults.standard.object(forKey: "incognitoMode") as? Bool) ?? false
+        // Standalone is the default since 2026-05; an explicit stored choice still wins.
         let provider = UserDefaults.standard.string(forKey: "dataProvider")
-        self.dataProvider = provider.flatMap(DataProviderMode.init(rawValue:)) ?? .server
+        self.dataProvider = provider.flatMap(DataProviderMode.init(rawValue:)) ?? .native
     }
 }

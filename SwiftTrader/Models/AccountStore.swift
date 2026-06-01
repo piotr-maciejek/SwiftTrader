@@ -11,6 +11,11 @@ final class AccountStore {
         didSet { UserDefaults.standard.set(selectedAccountID?.uuidString, forKey: Self.selectionKey) }
     }
 
+    /// Set when the last credential write to the Keychain failed; nil after a successful
+    /// write. The UI reads this so a failed save doesn't silently look successful (the
+    /// account would persist in UserDefaults but `credentials(for:)` would return nil).
+    private(set) var lastSaveError: Error?
+
     private let secrets: SecretStore
     private static let accountsKey = "dukascopyAccounts"
     private static let selectionKey = "dukascopySelectedAccountID"
@@ -39,7 +44,7 @@ final class AccountStore {
         label: String, login: String, password: String, environment: DukascopyEnvironment
     ) -> DukascopyAccount {
         let account = DukascopyAccount(label: label, login: login, environment: environment)
-        try? secrets.setSecret(AuthCredentialEncoder.hashIdentity(password), for: account.id.uuidString)
+        storePassword(password, for: account.id)
         accounts.append(account)
         persistAccounts()
         if selectedAccountID == nil { selectedAccountID = account.id }
@@ -51,9 +56,20 @@ final class AccountStore {
         guard let idx = accounts.firstIndex(where: { $0.id == account.id }) else { return }
         accounts[idx] = account
         if let password {
-            try? secrets.setSecret(AuthCredentialEncoder.hashIdentity(password), for: account.id.uuidString)
+            storePassword(password, for: account.id)
         }
         persistAccounts()
+    }
+
+    /// Hash and store the password in the Keychain, capturing any failure into
+    /// `lastSaveError` instead of silently dropping it.
+    private func storePassword(_ password: String, for id: UUID) {
+        do {
+            try secrets.setSecret(AuthCredentialEncoder.hashIdentity(password), for: id.uuidString)
+            lastSaveError = nil
+        } catch {
+            lastSaveError = error
+        }
     }
 
     func removeAccount(_ id: UUID) {
