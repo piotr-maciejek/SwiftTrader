@@ -80,6 +80,9 @@ public actor DukascopySession {
     // when a CurrencyMarket message arrives. Consumers filter to the instruments they care
     // about. Removed on stream termination so this dictionary stays bounded.
     private var tickStreams: [UUID: AsyncStream<CurrencyMarket>.Continuation] = [:]
+    /// Most-recent quote per slashed instrument — lets order pricing use the last
+    /// known price immediately instead of waiting for the next (possibly seconds-away) tick.
+    private var lastQuotes: [String: CurrencyMarket] = [:]
     /// Open positions by `orderGroupId`, seeded from the connect-time PackedAccountInfo
     /// and kept current by live OrderGroup updates (removed when a group goes CLOSE).
     private var positions: [String: OrderGroup] = [:]
@@ -768,8 +771,14 @@ public actor DukascopySession {
         return reqId
     }
 
-    /// First quote for `instrument` (ask if `buy`, else bid), bounded by `timeout`.
+    /// Current price for `instrument` (ask if `buy`, else bid). Uses the last-known
+    /// quote immediately when available (FX pairs can go 5–10s between ticks, so
+    /// waiting for the *next* tick is unreliable); otherwise subscribes and waits up
+    /// to `timeout` for the first tick.
     private func currentPrice(instrument: String, buy: Bool, timeout: TimeInterval = 8) async -> BigDecimalValue? {
+        if let cached = lastQuotes[instrument] {
+            if let p = buy ? cached.bestAsk : cached.bestBid { return p }
+        }
         try? await ensureSubscribedQuotes([instrument])
         return await withTaskGroup(of: BigDecimalValue?.self) { group in
             group.addTask { [weak self] in
@@ -912,6 +921,7 @@ public actor DukascopySession {
             handleOrderResponse(r)
         case .currencyMarket(let cm):
             log.debug("tick \(cm.instrument, privacy: .public) bid=\(cm.bestBid?.description ?? "-", privacy: .public)")
+            lastQuotes[cm.instrument] = cm   // most-recent quote per instrument, for order pricing
             for (_, c) in tickStreams { c.yield(cm) }
         case .unknown(let classId, let body):
             // The server sends a primary-socket auth acceptor shortly after connect and
