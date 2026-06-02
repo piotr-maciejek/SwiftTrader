@@ -104,25 +104,17 @@ final class ChartViewModel {
         ("WEEKLY", "W"),
     ]
 
-    /// Set by ChartView via GeometryReader so scroll calculations use real width.
-    /// Cell width in points, reported by the view once it's laid out. `0` means
-    /// "not measured yet" — the real width arrives *after* the first `scrollToEnd()`
-    /// (which runs on history/cache load), most visibly in the dense multi-timeframe
-    /// /correlation grids. `scrollToEnd()` defers while this is `0` rather than
-    /// scrolling with a guessed width (which parked the chart left of the live edge),
-    /// and the first real measurement honours that deferred snap — even if a stray
-    /// scroll/zoom flipped `autoScroll` off in the meantime. Later width changes
-    /// (window resize) only re-snap while autoscroll is active, so a manual
-    /// scroll-back isn't yanked to the end.
+    /// Latest measured cell width in points, reported by `ChartView` once it's laid out
+    /// (`0` before first layout). Used only for the short-chart earlier-history check and
+    /// `onUserScroll`'s at-edge detection — NOT for positioning: the view owns the live-edge
+    /// snap (it always has the correct width at render). Resizing while autoscrolling
+    /// re-requests a snap so the margin tracks the new width.
     var chartWidth: CGFloat = 0 {
         didSet {
-            guard chartWidth != oldValue, chartWidth > 0 else { return }
-            if autoScroll || pendingSnapToEnd { scrollToEnd() }
+            guard chartWidth != oldValue, chartWidth > 0, autoScroll else { return }
+            scrollToEnd()
         }
     }
-    /// Set when `scrollToEnd()` was asked to snap before the width was known; cleared
-    /// the moment a real width lets the snap actually happen.
-    private var pendingSnapToEnd = false
 
     private var coordinator: any MarketDataProviding
     private var startTask: Task<Void, Never>?
@@ -711,37 +703,19 @@ final class ChartViewModel {
         updateATRFromBar(bar)
     }
 
-    /// Empty space (in candle slots, so it scales with zoom) left to the right of
-    /// the newest candle when scrolled to the live edge, so it isn't flush against
-    /// the price axis.
-    static let rightEdgePaddingSlots: CGFloat = 4
-
-    /// Conservative cell width assumed before the view reports its real one. Chosen at/below
-    /// the smallest real cell (the 4-column correlation grid) so the live edge is always
-    /// visible — a too-small guess only risks empty space on the right, never hiding the
-    /// newest bars. Refined to the exact width by the `chartWidth` didSet once measured.
-    static let assumedUnmeasuredWidth: CGFloat = 300
-
+    /// Request the chart to (re)position at the live edge. The actual snap is performed by
+    /// `ChartView`, which alone has the reliably-correct cell width — it fires once per loaded
+    /// dataset (gated by `transform.hasAutoScrolledToEnd`) and never fights a manual scroll or
+    /// a tab switch. Here we just clear that one-shot guard and, if we already know the width,
+    /// pull older bars when the chart is too short to fill the viewport.
     func scrollToEnd() {
-        // Before the cell is laid out, chartWidth is 0. Don't park the chart on the OLDEST
-        // bars (xOffset 0) — scroll to the newest bars using a conservative minimum width and
-        // remember to re-snap precisely once the real width arrives (the didSet). Restored /
-        // background correlation+MTF tabs hit this: their data loads at launch but the cells
-        // aren't measured until the tab is shown.
-        let measured = chartWidth > 0
-        let effectiveWidth = measured ? chartWidth : Self.assumedUnmeasuredWidth
-        pendingSnapToEnd = !measured
-        let totalWidth = CGFloat(bars.count) * transform.candleSlotWidth
-        let rightPadding = transform.candleSlotWidth * Self.rightEdgePaddingSlots
-        // Only add the margin when content overflows the viewport; a short chart that doesn't
-        // fill the width stays left-anchored (it already has space on the right).
-        transform.xOffset = totalWidth > effectiveWidth ? (totalWidth - effectiveWidth + rightPadding) : 0
-
-        // Auto-load earlier history only once the real width says the chart is genuinely short
-        // (an unmeasured cell with a tiny assumed width must not spuriously page).
-        if measured && totalWidth < chartWidth && !isLoadingEarlier && !bars.isEmpty {
-            isLoadingEarlier = true
-            Task { await loadEarlierBars() }
+        transform.hasAutoScrolledToEnd = false
+        if chartWidth > 0 {
+            let totalWidth = CGFloat(bars.count) * transform.candleSlotWidth
+            if totalWidth < chartWidth && !isLoadingEarlier && !bars.isEmpty {
+                isLoadingEarlier = true
+                Task { await loadEarlierBars() }
+            }
         }
     }
 

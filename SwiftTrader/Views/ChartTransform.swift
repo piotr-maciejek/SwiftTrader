@@ -11,6 +11,12 @@ struct ChartTransform: Equatable {
     /// Reserved for a future axis-pan gesture; defaults to 0.
     var yOffset: Double = 0
 
+    /// One-shot guard: the view snaps `xOffset` to the live edge the first time it can
+    /// measure the chart (real cell width), then sets this true and never auto-positions
+    /// again — so a manual scroll is preserved across live ticks and tab switches. Reset to
+    /// false (via `scrollToEnd()` / a transform reset) only when a fresh dataset loads.
+    var hasAutoScrolledToEnd = false
+
     // Base candle width at scale 1.0
     private let baseCandleWidth: CGFloat = 10
 
