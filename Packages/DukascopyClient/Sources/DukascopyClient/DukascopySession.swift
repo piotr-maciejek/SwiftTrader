@@ -113,6 +113,16 @@ public actor DukascopySession {
     /// simultaneously must collapse to a single rebuild cycle, not stack on each other.
     private var reconnectInProgress = false
 
+    /// A transport read failure (e.g. a sleep/network blip — `POSIXErrorCode 60`) is usually
+    /// transient, not a dead account, so we try a bounded number of in-place reconnects before
+    /// surfacing a terminal failure (which sends the user back to the login gate). The budget
+    /// resets once the connection has stayed up longer than `readReconnectResetInterval`, so a
+    /// genuinely flapping connection still falls through to the login gate instead of looping.
+    private var readReconnectAttempts = 0
+    private var lastReadReconnectAt: Date = .distantPast
+    private let maxReadReconnectAttempts = 2
+    private let readReconnectResetInterval: TimeInterval = 120
+
     /// Slashed instrument names currently subscribed for quote ticks. Mutated only on
     /// `subscribeQuotes` (which sends the full set to the server) so `ensureSubscribed`
     /// can compute additions and skip the round-trip when nothing new is needed.
@@ -1212,7 +1222,7 @@ public actor DukascopySession {
             do {
                 frame = try await transport.receiveFrame()
             } catch {
-                if !Task.isCancelled { await markFailed("read: \(error)") }
+                if !Task.isCancelled { await handleReadFailure(error) }
                 return
             }
             guard let msg = try? MessageDecoder.decode(frame) else {
@@ -1322,6 +1332,35 @@ public actor DukascopySession {
         default:
             // Market / position routing layers onto dispatch in later slices.
             break
+        }
+    }
+
+    /// Decide what to do when the reader's transport read throws. A read failure is usually a
+    /// transient drop (sleep/network), so attempt a bounded in-place `reconnect()` — which keeps
+    /// the multicast consumers registered, so charts resume seamlessly — before marking the
+    /// session failed. The reconnect is fired on a SEPARATE task (mirroring the history
+    /// watchdog): `reconnect()` tears down + cancels THIS reader task and starts a fresh one, so
+    /// it must not run on the dying reader task. This loop simply returns after triggering it.
+    private func handleReadFailure(_ error: Error) async {
+        let now = Date()
+        if now.timeIntervalSince(lastReadReconnectAt) > readReconnectResetInterval {
+            readReconnectAttempts = 0   // connection had been stable — fresh budget for this blip
+        }
+        guard readReconnectAttempts < maxReadReconnectAttempts else {
+            await markFailed("read: \(error) — \(readReconnectAttempts) in-place reconnect(s) exhausted")
+            return
+        }
+        readReconnectAttempts += 1
+        lastReadReconnectAt = now
+        let attempt = readReconnectAttempts
+        log.warning("transport read failed (\(error.localizedDescription, privacy: .public)); in-place reconnect attempt \(attempt)/\(self.maxReadReconnectAttempts)")
+        Task { [weak self] in
+            do {
+                try await self?.reconnect()
+                log.info("in-place reconnect succeeded after transport read failure")
+            } catch {
+                await self?.markFailed("read failure; reconnect failed: \(error.localizedDescription)")
+            }
         }
     }
 
