@@ -560,8 +560,19 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
            // source is itself fresh — which it may not be in the launch window before the
            // forward-fill lands. This makes the staleness check tight enough to rebuild.
            Self.aggCacheReachesLatestClosedBucket(aggLatestMs: aggLatest, period: spec.periodCode, targetSeconds: targetSeconds) {
-            nativeLog.debug("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): served cache (aggLatest=\(aggLatest), srcLatest=\(srcLatest ?? -1))")
-            return await cache.getBars(for: aggKey)
+            let cached = await cache.getBars(for: aggKey)
+            // Don't serve a derived cache that has a SPURIOUS internal hole. The aggregated cache
+            // can persist a non-weekend gap — a rebuild that ran while the 1m source was
+            // transiently gappy aggregated+stored the hole; the source later healed but nothing
+            // re-checks the derived cache (the background gap-repair only scans 1m/1H), so the
+            // hole is served forever. Fall through to rebuild from the now-complete source, which
+            // `merge` stitches (it appends the missing timestamps). Bounded to the served window
+            // so an out-of-window deep hole can't cause repeated rebuilds.
+            if !Self.hasSpuriousGap(Array(cached.suffix(count)), periodSeconds: targetSeconds) {
+                nativeLog.debug("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): served cache (aggLatest=\(aggLatest), srcLatest=\(srcLatest ?? -1))")
+                return cached
+            }
+            nativeLog.notice("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): cached series has a non-weekend gap — rebuilding from source to heal")
         }
         nativeLog.debug("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): rebuilding (aggLatest=\(aggLatestOpt ?? -1), srcLatest=\(srcLatest ?? -1))")
 
@@ -794,6 +805,22 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             nativeLog.error("history \(instrument, privacy: .public) \(period, privacy: .public) FAILED after \(ms)ms: \(error.localizedDescription, privacy: .public)")
             throw error
         }
+    }
+
+    /// True if `bars` has an internal hole wider than one bucket that is NOT a weekend/holiday
+    /// closure — i.e. a spurious gap in a derived series that should be healed by re-aggregating
+    /// from the (gap-free) source. Weekend/holiday closures are expected and ignored (via
+    /// `NYTradingCalendar.isClosedThroughout`, which early-exits on the first trading slot).
+    static func hasSpuriousGap(_ bars: [SwiftTrader.CandleBar], periodSeconds: Int64) -> Bool {
+        guard bars.count >= 2, periodSeconds > 0 else { return false }
+        let cadenceMs = periodSeconds * 1000
+        for i in 1..<bars.count {
+            let prev = bars[i - 1].time, curr = bars[i].time
+            if curr <= prev + cadenceMs { continue }
+            if NYTradingCalendar.isClosedThroughout(fromMs: prev + cadenceMs, toMs: curr - cadenceMs) { continue }
+            return true
+        }
+        return false
     }
 
     /// Period-aware cache freshness, clamped to the newest bar that *can* exist (the last
