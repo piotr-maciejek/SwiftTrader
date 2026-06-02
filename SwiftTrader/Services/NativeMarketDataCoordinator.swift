@@ -45,6 +45,17 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// Fills deep history for all pairs in the background, one idle-gated request at a
     /// time. Only present with a live session (a real `rawFetch`); nil for tests.
     private let prefetcher: HistoryPrefetcher?
+    /// One shared live-candle aggregation per (instrument, period), fanned out to every chart —
+    /// so a main chart, MTF panel and correlation cell of the same pair+timeframe show the
+    /// identical live bar instead of each building (and diverging on) its own. See `streamCandles`.
+    private let multicaster = LiveCandleMulticaster()
+
+    deinit {
+        // Safety net: if any chart subscription leaked, make sure its driver stops consuming this
+        // (about-to-be-replaced) session's ticks. Normal teardown already happens via unsubscribe.
+        let multicaster = self.multicaster
+        Task { await multicaster.shutdown() }
+    }
 
     init(
         session: DukascopySession? = nil,
@@ -175,6 +186,27 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     }
 
     func streamCandles(
+        instrument: String, period: String, rebucketing: Bool
+    ) -> AsyncThrowingStream<SwiftTrader.CandleBar, Error> {
+        guard session != nil else {
+            return AsyncThrowingStream { $0.finish(throwing: NativeProviderError.missingCredentials) }
+        }
+        // One shared aggregation per (instrument, period): all charts of the same pair+timeframe
+        // (main chart, MTF panel, correlation cell) attach to the SAME live bar instead of each
+        // building its own from the shared tick feed (which diverged). A freshly-attaching chart
+        // replays the current forming bar immediately, so it matches the others on the spot.
+        let key = LiveCandleMulticaster.Key(instrument: instrument, period: period)
+        return multicaster.subscribe(key: key) { [weak self] in
+            guard let self else { return AsyncThrowingStream { $0.finish() } }
+            return self.rawCandleStream(instrument: instrument, period: period, rebucketing: rebucketing)
+        }
+    }
+
+    /// The single per-(instrument, period) live aggregation: subscribe quotes, consume the shared
+    /// tick feed, and build the forming bar (seed on a bucket change via `seedLiveBucket`, extend
+    /// within a bucket). Run ONCE per key by `LiveCandleMulticaster` and fanned out to every
+    /// chart — never per chart. (Body unchanged from the previous per-call `streamCandles`.)
+    private func rawCandleStream(
         instrument: String, period: String, rebucketing: Bool
     ) -> AsyncThrowingStream<SwiftTrader.CandleBar, Error> {
         guard let session else {
