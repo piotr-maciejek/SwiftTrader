@@ -6,6 +6,10 @@ struct ContentView: View {
     @State private var auth = AuthViewModel(port: AppSettings.shared.port)
     @State private var standaloneAuth = StandaloneAuthViewModel()
     @State private var showLoginSheet = false
+    /// Grace-debounced visibility for the connection-health banner: suppressed during a routine
+    /// in-place reconnect (~5–21s) so a transient drop reconnects silently. Only shown if the
+    /// unhealthy state persists; a failed reconnect goes to the login gate instead (the real error).
+    @State private var healthBannerVisible = false
 
     private var provider: DataProviderMode { AppSettings.shared.dataProvider }
 
@@ -150,7 +154,7 @@ struct ContentView: View {
 
     private var mainContent: some View {
         VStack(spacing: 0) {
-            if let account = workspace.trading.account, account.isHealthStale {
+            if healthBannerVisible, let account = workspace.trading.account, account.isHealthStale {
                 connectionBanner(account: account)
             }
 
@@ -197,6 +201,19 @@ struct ContentView: View {
         .frame(minWidth: 800, minHeight: 500)
         .background(WindowAccessor())
         .focusedSceneValue(\.workspace, workspace)
+        // Debounce the health banner: only show it once the unhealthy state has persisted past a
+        // routine in-place reconnect, so a transient transport drop recovers silently. `.task(id:)`
+        // restarts whenever health flips, so a quick recovery cancels the pending show.
+        .task(id: workspace.trading.account?.isHealthStale ?? false) {
+            guard workspace.trading.account?.isHealthStale ?? false else {
+                healthBannerVisible = false
+                return
+            }
+            try? await Task.sleep(for: .seconds(30))
+            if !Task.isCancelled {
+                healthBannerVisible = workspace.trading.account?.isHealthStale ?? false
+            }
+        }
     }
 
     // MARK: - Connection health banner
