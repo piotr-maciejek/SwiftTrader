@@ -469,4 +469,77 @@ struct ChartViewModelTests {
         #expect(vm.transform.xOffset == 0)
         vm.stop()                            // cancel the loadEarlierBars task it kicked off
     }
+
+    // MARK: - Stale-cache backfill detection (launch "Updating…" badge / forming-bar gate)
+
+    /// A Date in UTC from y/m/d h:m — the trading calendar resolves weekday/hour in ET,
+    /// so a UTC noon lands mid-session on a weekday and well inside the weekend on Sat.
+    private func utc(_ y: Int, _ mo: Int, _ d: Int, _ h: Int = 12, _ mi: Int = 0) -> Date {
+        var c = DateComponents()
+        c.year = y; c.month = mo; c.day = d; c.hour = h; c.minute = mi
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        return cal.date(from: c)!
+    }
+
+    @Test("cacheIsBehind false when the newest closed bar trails by under ~2 intervals")
+    func cacheBehindFreshIsFalse() {
+        let now = utc(2026, 6, 3)                       // Wednesday — market open, ref == now
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        // Newest closed 1H bar 90 min back: the current bucket is still forming, so this is
+        // a healthy cache — gap (1.5h) is under the 2-interval (2h) threshold.
+        let bars = [makeBar(time: nowMs - 90 * 60 * 1000)]
+        #expect(ChartViewModel.cacheIsBehind(bars: bars, period: "ONE_HOUR", now: now) == false)
+    }
+
+    @Test("cacheIsBehind true when the cache trails by many intervals")
+    func cacheBehindStaleIsTrue() {
+        let now = utc(2026, 6, 3)                       // Wednesday — market open
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        let bars = [makeBar(time: nowMs - 10 * 3600 * 1000)]  // 10h behind → many missing 1H bars
+        #expect(ChartViewModel.cacheIsBehind(bars: bars, period: "ONE_HOUR", now: now) == true)
+    }
+
+    @Test("cacheIsBehind false over the weekend when the cache reaches the Friday close")
+    func cacheBehindWeekendClampIsFalse() {
+        let now = utc(2026, 6, 6)                       // Saturday — market closed
+        // A cache that ends exactly at the last session close has nothing missing; without
+        // the lastSessionClose clamp the Sat-noon "now" would wrongly read it as ~19h stale.
+        let fridayCloseMs = NYTradingCalendar.lastSessionCloseMs(at: now)
+        let bars = [makeBar(time: fridayCloseMs)]
+        #expect(ChartViewModel.cacheIsBehind(bars: bars, period: "ONE_HOUR", now: now) == false)
+    }
+
+    @Test("cacheIsBehind false for an empty or unknown-period series")
+    func cacheBehindDegenerateIsFalse() {
+        let now = utc(2026, 6, 3)
+        #expect(ChartViewModel.cacheIsBehind(bars: [], period: "ONE_HOUR", now: now) == false)
+        let bars = [makeBar(time: 0)]
+        #expect(ChartViewModel.cacheIsBehind(bars: bars, period: "NOT_A_PERIOD", now: now) == false)
+    }
+
+    @Test("handleBar suppresses a forming bar beyond the tail while backfilling")
+    func handleBarSuppressesFormingBarWhileBackfilling() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.bars = [makeBar(time: 1000)]
+        vm.isBackfilling = true
+        // A live tick opens a bucket beyond the stale tail — appending it would jam a
+        // candle against the unfilled gap, so it must be dropped until backfill finishes.
+        vm.handleBar(makeBar(time: 5000, partial: true),
+                     expectedInstrument: "EURUSD", expectedPeriod: "FIFTEEN_MINS")
+        #expect(vm.bars.count == 1)
+    }
+
+    @Test("handleBar still updates the same-timestamp bar in place while backfilling")
+    func handleBarUpdatesSameTimestampWhileBackfilling() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.bars = [makeBar(time: 1000, close: 1.1)]
+        vm.isBackfilling = true
+        // The gate only blocks new buckets beyond the tail; an in-place refresh of the
+        // current bar is still allowed.
+        vm.handleBar(makeBar(time: 1000, close: 1.5, partial: true),
+                     expectedInstrument: "EURUSD", expectedPeriod: "FIFTEEN_MINS")
+        #expect(vm.bars.count == 1)
+        #expect(vm.bars[0].close == 1.5)
+    }
 }

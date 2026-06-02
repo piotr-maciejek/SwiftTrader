@@ -489,7 +489,15 @@ struct ContentView: View {
 
             Spacer()
 
-            if vm.isConnected {
+            if vm.isBackfilling {
+                // Stale cache painted at launch — recently-closed bars are still being
+                // backfilled. Takes precedence over "Live" so the visible (gapped) chart
+                // is clearly marked as catching up, not a finished render.
+                ProgressView().controlSize(.small).scaleEffect(0.7)
+                Text("Updating…")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else if vm.isConnected {
                 Circle().fill(.green).frame(width: 8, height: 8)
                 Text("Live")
                     .font(.caption)

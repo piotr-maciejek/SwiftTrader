@@ -59,6 +59,13 @@ final class ChartViewModel {
     var todayATRPercent: Double?
     var isRefreshingCache = false
     var loadingStatus: LoadingStatus?
+    /// True while a warm-but-stale cache painted at launch is being caught up — the newest
+    /// painted bar ends well before the last session close, so recently-closed bars are
+    /// missing and a forward-fill / history fetch is in flight. Drives the header
+    /// "Updating…" badge and suppresses the live forming bar (see `handleBar`) so we don't
+    /// jam a fresh candle against the stale tail across the unfilled gap. Cleared when the
+    /// history fetch returns (the full, current series replaces the stale bars).
+    var isBackfilling = false
 
     /// User-drawn lines/arrows anchored in (time, price). Persisted with the tab.
     var drawings: [Drawing] = [] {
@@ -401,6 +408,13 @@ final class ChartViewModel {
         // tells us whether we have a warm or cold cache — drives the loading-card detail.
         let coldCache = bars.isEmpty
 
+        // A warm cache that ends well before the last session close means we painted stale
+        // bars and are about to backfill the missing ones. Flag it (synchronously, before
+        // the first await — so the live feed that opened in parallel can't append a forming
+        // bar across the gap before the flag is set) and clear it however we leave here.
+        isBackfilling = !coldCache && Self.cacheIsBehind(bars: bars, period: period)
+        defer { isBackfilling = false }
+
         var attempt = 1
         var lastError: String?
         var serverHintMs: Int?
@@ -649,6 +663,11 @@ final class ChartViewModel {
             if let lastIndex = bars.indices.last, bars[lastIndex].time == bar.time {
                 bars[lastIndex] = bar
             } else if bar.time > bars[bars.count - 1].time {
+                // While catching up a stale launch cache, don't append a forming bar beyond
+                // the tail — the bars between the stale tail and this bucket haven't been
+                // filled yet, so it would render as a candle jammed against a gap. The
+                // in-flight history fetch will paint the full series (this bucket included).
+                guard !isBackfilling else { return }
                 bars.append(bar)
                 if autoScroll { advanceByOneCandle() }
             }
@@ -663,6 +682,10 @@ final class ChartViewModel {
             if let lastIndex = bars.indices.last, bars[lastIndex].time == bar.time {
                 bars[lastIndex] = bar
             } else {
+                // Same gap guard as the partial branch: don't paint a completed bar beyond
+                // the stale tail mid-backfill. Skipping the cacheBar write below is fine —
+                // the history fetch returns and merges this bar anyway.
+                guard !isBackfilling else { return }
                 bars.append(bar)
                 if autoScroll { advanceByOneCandle() }
             }
@@ -751,6 +774,38 @@ final class ChartViewModel {
         case "ONE_HOUR":   return 500  // ~3 weeks
         case "THREE_MINS": return 1000 // ~2 days (×3 = ~3000 ONE_MIN bars fetched)
         default:           return 1000 // intraday
+        }
+    }
+
+    /// True when the newest painted (closed) bar ends more than ~2 intervals before the
+    /// last possible session close — i.e. the warm cache is stale and recently-closed bars
+    /// are missing. Clamped to the last session close (via `NYTradingCalendar`) so a
+    /// Friday-evening cache opened over the weekend reads as current, not stale. The ~2x
+    /// slack absorbs the normal lag of the newest *closed* bar (the current bucket is still
+    /// forming, so the last closed bar's timestamp already sits up to ~2 intervals behind
+    /// "now"), so only a genuine multi-bar gap trips it.
+    static func cacheIsBehind(bars: [CandleBar], period: String, now: Date = Date()) -> Bool {
+        guard let cadenceSeconds = periodSeconds(period) else { return false }
+        guard let latest = (bars.last { !$0.partial } ?? bars.last)?.time else { return false }
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        let referenceMs = min(nowMs, NYTradingCalendar.lastSessionCloseMs(at: now))
+        return referenceMs - latest > cadenceSeconds * 1000 * 2
+    }
+
+    /// Bar interval in seconds for the chart's period codes (incl. the client-only
+    /// `THREE_MINS` aggregation). nil for an unrecognised code.
+    private static func periodSeconds(_ period: String) -> Int64? {
+        switch period {
+        case "ONE_MIN":      return 60
+        case "THREE_MINS":   return 180
+        case "FIVE_MINS":    return 300
+        case "FIFTEEN_MINS": return 900
+        case "THIRTY_MINS":  return 1800
+        case "ONE_HOUR":     return 3600
+        case "FOUR_HOURS":   return 14400
+        case "DAILY":        return 86400
+        case "WEEKLY":       return 604800
+        default:             return nil
         }
     }
 
