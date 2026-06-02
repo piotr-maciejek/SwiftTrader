@@ -412,98 +412,52 @@ struct ChartViewModelTests {
         (0..<n).map { makeBar(time: Int64($0 + 1) * 1000) }
     }
 
-    @Test("scrollToEnd keeps the last bar on-screen with a right-edge margin")
-    func scrollToEndLeavesRightMargin() {
-        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
-        vm.bars = bars(100)                 // totalWidth = 1000 (slot 10)
-        vm.chartWidth = 300                 // overflows the viewport
-        vm.scrollToEnd()
+    @Test("liveEdgeOffset puts the last bar at the live edge with a 10% right margin")
+    func liveEdgeOffsetLeavesRightMargin() {
+        // 100 bars × 10px slot = 1000 content; 300px viewport.
+        let off = ChartView.liveEdgeOffset(barCount: 100, slotWidth: 10, chartWidth: 300)
+        #expect(off == 1000 - 300 * (1 - ChartView.rightMarginFraction))   // 1000 - 270 = 730
 
-        let slot = vm.transform.candleSlotWidth
-        let padding = slot * ChartViewModel.rightEdgePaddingSlots
-        let totalWidth = CGFloat(vm.bars.count) * slot
-        #expect(vm.transform.xOffset == totalWidth - vm.chartWidth + padding)
-
-        // Last bar's screen x sits inside the viewport but not flush against the edge.
-        let lastX = CGFloat(vm.bars.count - 1) * slot - vm.transform.xOffset + slot / 2
-        #expect(lastX < vm.chartWidth)
-        #expect(lastX < vm.chartWidth - padding + slot)   // margin actually present
+        // Last bar's screen x sits inside the viewport, ~10% from the right edge.
+        let lastX = CGFloat(100 - 1) * 10 - off + 10 / 2   // index*slot - offset + half-slot
+        #expect(lastX < 300)
+        #expect(lastX > 300 * (1 - ChartView.rightMarginFraction) - 10)
     }
 
-    @Test("Changing chartWidth re-runs scrollToEnd (the real-width race fix)")
-    func widthChangeRescrolls() {
+    @Test("liveEdgeOffset keeps a chart shorter than the viewport left-anchored")
+    func liveEdgeOffsetShortChartLeftAnchored() {
+        // 5 bars × 10 = 50 content, well under a 300px viewport → offset clamps to 0.
+        let off = ChartView.liveEdgeOffset(barCount: 5, slotWidth: 10, chartWidth: 300)
+        #expect(off == 0)
+    }
+
+    @Test("scrollToEnd clears the one-shot guard so the view re-positions for a fresh dataset")
+    func scrollToEndClearsGuard() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.bars = bars(100)
+        vm.transform.hasAutoScrolledToEnd = true   // a prior snap already happened
+        vm.scrollToEnd()
+        #expect(vm.transform.hasAutoScrolledToEnd == false)
+        vm.stop()
+    }
+
+    @Test("a width change while autoscrolling re-requests a snap; a manual scroll-back is left alone")
+    func widthChangeReSnapsOnlyWhileAutoscrolling() {
         let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
         vm.bars = bars(100)
 
-        vm.chartWidth = 300                 // didSet → scrollToEnd for a 300px viewport
-        let narrow = vm.transform.xOffset
+        // Autoscrolling: a new width clears the guard so the view snaps to the new margin.
+        vm.transform.hasAutoScrolledToEnd = true
+        vm.autoScroll = true
+        vm.chartWidth = 600
+        #expect(vm.transform.hasAutoScrolledToEnd == false)
 
-        vm.chartWidth = 600                 // real cell width arrives → re-snap
-        let wide = vm.transform.xOffset
-
-        let slot = vm.transform.candleSlotWidth
-        let padding = slot * ChartViewModel.rightEdgePaddingSlots
-        let totalWidth = CGFloat(vm.bars.count) * slot
-        #expect(narrow == totalWidth - 300 + padding)
-        #expect(wide == totalWidth - 600 + padding)
-        #expect(wide != narrow)
-    }
-
-    @Test("Width change does not re-scroll once the user has scrolled away")
-    func widthChangeRespectsManualScroll() {
-        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
-        vm.bars = bars(100)
-        vm.autoScroll = false               // user scrolled back
-        vm.transform.xOffset = 123
-
-        vm.chartWidth = 600                  // would re-snap if autoScroll were on
-        #expect(vm.transform.xOffset == 123) // left where the user put it
-    }
-
-    @Test("Short chart that doesn't fill the width stays left-anchored")
-    func shortChartLeftAnchored() {
-        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
-        vm.bars = bars(5)                    // totalWidth = 50, well under the width
-        vm.chartWidth = 300
-        vm.scrollToEnd()
-        #expect(vm.transform.xOffset == 0)
-        vm.stop()                            // cancel the loadEarlierBars task it kicked off
-    }
-
-    @Test("Unmeasured width shows the NEWEST bars (not the oldest), then refines on real width")
-    func scrollToEndUnmeasuredShowsNewest() {
-        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
-        vm.bars = bars(100)                  // totalWidth = 1000
-        let slot = vm.transform.candleSlotWidth
-        let padding = slot * ChartViewModel.rightEdgePaddingSlots
-        let totalWidth = CGFloat(vm.bars.count) * slot
-
-        // chartWidth is still 0 (cell not laid out). Must scroll toward the live edge using
-        // the conservative assumed width — never park on the oldest bars (xOffset 0).
-        vm.scrollToEnd()
-        #expect(vm.transform.xOffset == totalWidth - ChartViewModel.assumedUnmeasuredWidth + padding)
-        #expect(vm.transform.xOffset > 0)
-
-        // Real width arrives → refine to the exact live-edge offset.
-        vm.chartWidth = 500
-        #expect(vm.transform.xOffset == totalWidth - 500 + padding)
-    }
-
-    @Test("Pending snap still refines on first measurement even if autoScroll was flipped off")
-    func pendingSnapRefinesDespiteAutoScrollOff() {
-        // The cold-load snap runs unmeasured (assumed width), then a stray scroll/zoom flips
-        // autoScroll off before the cell is measured. The first real width must still honour
-        // the pending snap — otherwise the chart stays at the assumed-width position.
-        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
-        vm.bars = bars(100)
-        vm.scrollToEnd()                     // unmeasured (chartWidth == 0), pending set
-        vm.autoScroll = false                // stray gesture during the load window
-
-        vm.chartWidth = 500                  // first measurement honours the pending snap
-        let slot = vm.transform.candleSlotWidth
-        let padding = slot * ChartViewModel.rightEdgePaddingSlots
-        let totalWidth = CGFloat(vm.bars.count) * slot
-        #expect(vm.transform.xOffset == totalWidth - 500 + padding)
+        // Scrolled back: a width change must NOT re-request a snap.
+        vm.transform.hasAutoScrolledToEnd = true
+        vm.autoScroll = false
+        vm.chartWidth = 800
+        #expect(vm.transform.hasAutoScrolledToEnd == true)
+        vm.stop()
     }
 
     // MARK: - Stale-cache backfill detection (launch "Updating…" badge / forming-bar gate)

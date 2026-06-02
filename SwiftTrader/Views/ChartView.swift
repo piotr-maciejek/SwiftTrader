@@ -226,13 +226,27 @@ struct ChartView: View {
                 } message: {
                     Text(pendingSLTPEdit?.confirmationMessage ?? "")
                 }
-                // `initial: true` fires immediately with the laid-out width AND on every
-                // later change — more reliable than `.onAppear`, which can run before the
-                // GeometryReader has a real size (reporting 0) and then miss the 0→real
-                // update for a cell that's built off-screen and shown later (restored
-                // correlation/MTF tabs).
-                .onChange(of: chartWidth, initial: true) { _, newWidth in
+                // The view owns the one-time live-edge snap, because only it has the reliably
+                // correct cell width (the view-model's delivered width is missed for grid cells
+                // across tab switches). `snapOnceToLiveEdge` is gated by
+                // `transform.hasAutoScrolledToEnd`, so it positions exactly once per loaded
+                // dataset and then leaves the scroll alone — a manual scroll-back survives live
+                // ticks and tab switches. Three triggers, all idempotent via the guard, cover
+                // the first valid (width + bars) moment however it arrives:
+                //   • the guard flipping false (first display, or `scrollToEnd()` on reload)
+                //   • bars loading after the guard was cleared
+                //   • the cell's width settling
+                .onChange(of: transform.hasAutoScrolledToEnd, initial: true) { _, _ in
+                    snapOnceToLiveEdge(chartWidth: chartWidth)
+                }
+                .onChange(of: bars.last?.time) { _, _ in
+                    snapOnceToLiveEdge(chartWidth: chartWidth)
+                }
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.width - priceAxisWidth
+                } action: { newWidth in
                     onChartWidthChanged?(newWidth)
+                    snapOnceToLiveEdge(chartWidth: newWidth)
                 }
                 .onChange(of: crosshair) { _, newCrosshair in
                     let time: Int64? = newCrosshair.flatMap { ch in
@@ -315,6 +329,32 @@ struct ChartView: View {
     }()
 
     // MARK: - Visible range calculation
+
+    /// Fraction of the viewport left empty to the right of the newest candle when first
+    /// positioned at the live edge — a small breathing gap so the last bar isn't flush
+    /// against the price axis.
+    static let rightMarginFraction: CGFloat = 0.10
+
+    /// The `xOffset` that puts the newest bar at the right with `rightMarginFraction` of the
+    /// viewport empty beyond it. `max(0, …)` keeps a chart shorter than the viewport left-
+    /// anchored. Pure math, so it's unit-testable.
+    static func liveEdgeOffset(barCount: Int, slotWidth: CGFloat, chartWidth: CGFloat) -> CGFloat {
+        let totalContentWidth = CGFloat(barCount) * slotWidth
+        return max(0, totalContentWidth - chartWidth * (1 - rightMarginFraction))
+    }
+
+    /// Position the chart at the live edge exactly once per loaded dataset. Gated by
+    /// `transform.hasAutoScrolledToEnd` so it never runs again — manual scrolling and tab
+    /// switches keep whatever the user left. Uses the live geometry `chartWidth`, the only
+    /// reliably-correct width, so grid cells (correlation / multi-timeframe) position right
+    /// even when the view-model never received a width.
+    private func snapOnceToLiveEdge(chartWidth: CGFloat) {
+        guard !transform.hasAutoScrolledToEnd, chartWidth > 0, !bars.isEmpty else { return }
+        transform.xOffset = Self.liveEdgeOffset(
+            barCount: bars.count, slotWidth: transform.candleSlotWidth, chartWidth: chartWidth
+        )
+        transform.hasAutoScrolledToEnd = true
+    }
 
     private func visibleBarRange(chartWidth: CGFloat) -> Range<Int> {
         guard !bars.isEmpty, chartWidth > 0 else { return 0..<0 }

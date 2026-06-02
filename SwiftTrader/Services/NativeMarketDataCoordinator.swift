@@ -45,6 +45,17 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// Fills deep history for all pairs in the background, one idle-gated request at a
     /// time. Only present with a live session (a real `rawFetch`); nil for tests.
     private let prefetcher: HistoryPrefetcher?
+    /// One shared live-candle aggregation per (instrument, period), fanned out to every chart —
+    /// so a main chart, MTF panel and correlation cell of the same pair+timeframe show the
+    /// identical live bar instead of each building (and diverging on) its own. See `streamCandles`.
+    private let multicaster = LiveCandleMulticaster()
+
+    deinit {
+        // Safety net: if any chart subscription leaked, make sure its driver stops consuming this
+        // (about-to-be-replaced) session's ticks. Normal teardown already happens via unsubscribe.
+        let multicaster = self.multicaster
+        Task { await multicaster.shutdown() }
+    }
 
     init(
         session: DukascopySession? = nil,
@@ -175,6 +186,27 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     }
 
     func streamCandles(
+        instrument: String, period: String, rebucketing: Bool
+    ) -> AsyncThrowingStream<SwiftTrader.CandleBar, Error> {
+        guard session != nil else {
+            return AsyncThrowingStream { $0.finish(throwing: NativeProviderError.missingCredentials) }
+        }
+        // One shared aggregation per (instrument, period): all charts of the same pair+timeframe
+        // (main chart, MTF panel, correlation cell) attach to the SAME live bar instead of each
+        // building its own from the shared tick feed (which diverged). A freshly-attaching chart
+        // replays the current forming bar immediately, so it matches the others on the spot.
+        let key = LiveCandleMulticaster.Key(instrument: instrument, period: period)
+        return multicaster.subscribe(key: key) { [weak self] in
+            guard let self else { return AsyncThrowingStream { $0.finish() } }
+            return self.rawCandleStream(instrument: instrument, period: period, rebucketing: rebucketing)
+        }
+    }
+
+    /// The single per-(instrument, period) live aggregation: subscribe quotes, consume the shared
+    /// tick feed, and build the forming bar (seed on a bucket change via `seedLiveBucket`, extend
+    /// within a bucket). Run ONCE per key by `LiveCandleMulticaster` and fanned out to every
+    /// chart — never per chart. (Body unchanged from the previous per-call `streamCandles`.)
+    private func rawCandleStream(
         instrument: String, period: String, rebucketing: Bool
     ) -> AsyncThrowingStream<SwiftTrader.CandleBar, Error> {
         guard let session else {
@@ -528,8 +560,19 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
            // source is itself fresh — which it may not be in the launch window before the
            // forward-fill lands. This makes the staleness check tight enough to rebuild.
            Self.aggCacheReachesLatestClosedBucket(aggLatestMs: aggLatest, period: spec.periodCode, targetSeconds: targetSeconds) {
-            nativeLog.debug("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): served cache (aggLatest=\(aggLatest), srcLatest=\(srcLatest ?? -1))")
-            return await cache.getBars(for: aggKey)
+            let cached = await cache.getBars(for: aggKey)
+            // Don't serve a derived cache that has a SPURIOUS internal hole. The aggregated cache
+            // can persist a non-weekend gap — a rebuild that ran while the 1m source was
+            // transiently gappy aggregated+stored the hole; the source later healed but nothing
+            // re-checks the derived cache (the background gap-repair only scans 1m/1H), so the
+            // hole is served forever. Fall through to rebuild from the now-complete source, which
+            // `merge` stitches (it appends the missing timestamps). Bounded to the served window
+            // so an out-of-window deep hole can't cause repeated rebuilds.
+            if !Self.hasSpuriousGap(Array(cached.suffix(count)), periodSeconds: targetSeconds) {
+                nativeLog.debug("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): served cache (aggLatest=\(aggLatest), srcLatest=\(srcLatest ?? -1))")
+                return cached
+            }
+            nativeLog.notice("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): cached series has a non-weekend gap — rebuilding from source to heal")
         }
         nativeLog.debug("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): rebuilding (aggLatest=\(aggLatestOpt ?? -1), srcLatest=\(srcLatest ?? -1))")
 
@@ -762,6 +805,22 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             nativeLog.error("history \(instrument, privacy: .public) \(period, privacy: .public) FAILED after \(ms)ms: \(error.localizedDescription, privacy: .public)")
             throw error
         }
+    }
+
+    /// True if `bars` has an internal hole wider than one bucket that is NOT a weekend/holiday
+    /// closure — i.e. a spurious gap in a derived series that should be healed by re-aggregating
+    /// from the (gap-free) source. Weekend/holiday closures are expected and ignored (via
+    /// `NYTradingCalendar.isClosedThroughout`, which early-exits on the first trading slot).
+    static func hasSpuriousGap(_ bars: [SwiftTrader.CandleBar], periodSeconds: Int64) -> Bool {
+        guard bars.count >= 2, periodSeconds > 0 else { return false }
+        let cadenceMs = periodSeconds * 1000
+        for i in 1..<bars.count {
+            let prev = bars[i - 1].time, curr = bars[i].time
+            if curr <= prev + cadenceMs { continue }
+            if NYTradingCalendar.isClosedThroughout(fromMs: prev + cadenceMs, toMs: curr - cadenceMs) { continue }
+            return true
+        }
+        return false
     }
 
     /// Period-aware cache freshness, clamped to the newest bar that *can* exist (the last

@@ -369,3 +369,38 @@ struct NativeNewsMappingTests {
         #expect(r.isCalendar == false)
     }
 }
+
+@Suite("Aggregated cache gap detection")
+struct AggregatedGapTests {
+    private func ms(_ y: Int, _ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Int64 {
+        var c = DateComponents(); c.year = y; c.month = mo; c.day = d; c.hour = h; c.minute = mi
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        return Int64(cal.date(from: c)!.timeIntervalSince1970 * 1000)
+    }
+    private func bar(_ t: Int64) -> SwiftTrader.CandleBar {
+        SwiftTrader.CandleBar(time: t, open: 1, high: 1, low: 1, close: 1, volume: 0)
+    }
+
+    @Test("a contiguous 15m series has no spurious gap")
+    func contiguousIsClean() {
+        let t0 = ms(2026, 6, 3, 10, 0)   // Wednesday, mid-session
+        let bars = (0..<8).map { bar(t0 + Int64($0) * 900_000) }
+        #expect(NativeMarketDataCoordinator.hasSpuriousGap(bars, periodSeconds: 900) == false)
+    }
+
+    @Test("a weekday hole IS a spurious gap (the AUD/CAD 15m bug)")
+    func weekdayHoleIsSpurious() {
+        let t0 = ms(2026, 6, 3, 10, 0)   // Wednesday
+        // two contiguous bars, then a 14-hour hole — entirely within an open trading day
+        let bars = [bar(t0), bar(t0 + 900_000), bar(t0 + 14 * 3_600_000)]
+        #expect(NativeMarketDataCoordinator.hasSpuriousGap(bars, periodSeconds: 900) == true)
+    }
+
+    @Test("a weekend closure is NOT a spurious gap")
+    func weekendIsNotSpurious() {
+        // Last bar Fri 20:45 UTC (16:45 ET, open); first bar back Sun 21:00 UTC (17:00 ET reopen).
+        let fri = ms(2026, 6, 5, 20, 45)   // Friday
+        let sun = ms(2026, 6, 7, 21, 0)    // Sunday reopen
+        #expect(NativeMarketDataCoordinator.hasSpuriousGap([bar(fri), bar(sun)], periodSeconds: 900) == false)
+    }
+}

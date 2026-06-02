@@ -104,31 +104,29 @@ final class ChartViewModel {
         ("WEEKLY", "W"),
     ]
 
-    /// Set by ChartView via GeometryReader so scroll calculations use real width.
-    /// Cell width in points, reported by the view once it's laid out. `0` means
-    /// "not measured yet" — the real width arrives *after* the first `scrollToEnd()`
-    /// (which runs on history/cache load), most visibly in the dense multi-timeframe
-    /// /correlation grids. `scrollToEnd()` defers while this is `0` rather than
-    /// scrolling with a guessed width (which parked the chart left of the live edge),
-    /// and the first real measurement honours that deferred snap — even if a stray
-    /// scroll/zoom flipped `autoScroll` off in the meantime. Later width changes
-    /// (window resize) only re-snap while autoscroll is active, so a manual
-    /// scroll-back isn't yanked to the end.
+    /// Latest measured cell width in points, reported by `ChartView` once it's laid out
+    /// (`0` before first layout). Used only for the short-chart earlier-history check and
+    /// `onUserScroll`'s at-edge detection — NOT for positioning: the view owns the live-edge
+    /// snap (it always has the correct width at render). Resizing while autoscrolling
+    /// re-requests a snap so the margin tracks the new width.
     var chartWidth: CGFloat = 0 {
         didSet {
-            guard chartWidth != oldValue, chartWidth > 0 else { return }
-            if autoScroll || pendingSnapToEnd { scrollToEnd() }
+            guard chartWidth != oldValue, chartWidth > 0, autoScroll else { return }
+            scrollToEnd()
         }
     }
-    /// Set when `scrollToEnd()` was asked to snap before the width was known; cleared
-    /// the moment a real width lets the snap actually happen.
-    private var pendingSnapToEnd = false
 
     private var coordinator: any MarketDataProviding
     private var startTask: Task<Void, Never>?
     private var wsTask: Task<Void, Never>?
     private var liveWatchdogTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
+    private var reconcileTask: Task<Void, Never>?
+    /// Set when a live stream drops with bars already on screen; the next bar after we
+    /// re-subscribe triggers a closed-bar reconcile so a bucket frozen mid-formation at the
+    /// instant of the drop (e.g. an MTF cell stuck on a 2-minute-old 15m bar) is healed
+    /// immediately — not only if this chart happens to witness the next bucket rollover.
+    private var resyncClosedBarsOnResume = false
     private var atrTask: Task<Void, Never>?
     private var todayTradingDayStart: Date?
     private var todayHigh: Double?
@@ -604,6 +602,15 @@ final class ChartViewModel {
                         // opening the feed early (parallel with the history load) never shows a
                         // live-but-empty chart; the badge stays "Connecting…" until bars exist.
                         if !isConnected && !bars.isEmpty { isConnected = true }
+                        // First bar after re-subscribing post-drop: heal any closed bar that froze
+                        // at a mid-bucket partial when the stream died. Reconcile is period-agnostic
+                        // (swaps closed bars for the authoritative aggregation, keeps the live one),
+                        // so this re-converges every chart on the cache, not just ones that witness
+                        // the next rollover.
+                        if resyncClosedBarsOnResume {
+                            resyncClosedBarsOnResume = false
+                            scheduleAggregatedReconcile()
+                        }
                     }
                     // Stream ended cleanly without an error — treat as a transient
                     // disconnect and try to reconnect within the same retry budget.
@@ -613,6 +620,10 @@ final class ChartViewModel {
                     isConnected = false
                     lastError = error.localizedDescription
                 }
+                // Stream ended (clean drop or error) with a chart already on screen: mark that the
+                // closed-bar window needs a reconcile once we re-subscribe, so a bar frozen at the
+                // instant of the drop doesn't linger until the next witnessed rollover.
+                if !bars.isEmpty { resyncClosedBarsOnResume = true }
                 attempt += 1
                 if attempt <= Self.maxWebSocketAttempts {
                     let backoffSeconds = min(30, 3 * (1 << min(attempt - 1, 4)))
@@ -657,6 +668,17 @@ final class ChartViewModel {
         }
     }
 
+    /// True when the current period is built client-side by bundling smaller bars (3m always;
+    /// 5m/15m/30m/4H/Daily/Weekly when rebucketing is on). For these the live "forming" bar is
+    /// assembled per-instance and is NOT written to the shared cache, so a just-closed bucket can
+    /// freeze with an incomplete OHLC/volume until reconciled against the authoritative bundle.
+    var isDerivedAggregatedPeriod: Bool {
+        currentPeriod == "THREE_MINS"
+            || (clientSideRebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY"
+                || currentPeriod == "WEEKLY" || currentPeriod == "FIVE_MINS"
+                || currentPeriod == "FIFTEEN_MINS" || currentPeriod == "THIRTY_MINS"))
+    }
+
     func handleBar(_ bar: CandleBar, expectedInstrument: String, expectedPeriod: String) {
         // Discard bars from a stale WebSocket that hasn't been cancelled yet
         guard expectedInstrument == currentInstrument, expectedPeriod == currentPeriod else { return }
@@ -677,6 +699,10 @@ final class ChartViewModel {
                 guard !isBackfilling else { return }
                 bars.append(bar)
                 if autoScroll { advanceByOneCandle() }
+                // A derived bucket just rolled over: the bar that was forming is now frozen and
+                // may hold an incomplete client-side bundle. Reconcile the recent window against
+                // the authoritative aggregation so the just-closed bar gets its real OHLC/volume.
+                if isDerivedAggregatedPeriod { scheduleAggregatedReconcile() }
             }
         } else {
             // Mirror the partial-branch guard: don't paint a lone completed bar
@@ -698,50 +724,57 @@ final class ChartViewModel {
             }
             // For the aggregated derived path the coordinator already writes into the
             // `.aggregated` cache itself; the outer write would target the wrong key.
-            let rebucketing = clientSideRebucketing
-            // THREE_MINS has no native server period — it is always aggregated,
-            // regardless of the rebucketing toggle (see CacheKey.forDisplay).
-            let isDerivedAggregated = currentPeriod == "THREE_MINS"
-                || (rebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY" || currentPeriod == "WEEKLY"
-                    || currentPeriod == "FIVE_MINS" || currentPeriod == "FIFTEEN_MINS" || currentPeriod == "THIRTY_MINS"))
-            if !isDerivedAggregated {
+            if !isDerivedAggregatedPeriod {
                 Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod) }
             }
         }
         updateATRFromBar(bar)
     }
 
-    /// Empty space (in candle slots, so it scales with zoom) left to the right of
-    /// the newest candle when scrolled to the live edge, so it isn't flush against
-    /// the price axis.
-    static let rightEdgePaddingSlots: CGFloat = 4
+    /// Re-fetch the derived series and swap our recent CLOSED bars for the authoritative
+    /// re-bundled ones, while keeping the live forming bar. Triggered when a derived bucket
+    /// rolls over, so the just-closed bar's client-side bundle (possibly incomplete — see
+    /// `isDerivedAggregatedPeriod`) is corrected promptly instead of only on the next full
+    /// reload. The fetch is coalesced across charts, and we never touch `transform`, so scroll
+    /// position and the one-time live-edge snap are preserved.
+    private func scheduleAggregatedReconcile() {
+        reconcileTask?.cancel()
+        let instrument = currentInstrument
+        let period = currentPeriod
+        let rebucketing = clientSideRebucketing
+        reconcileTask = Task {
+            guard let authoritative = try? await coordinator.fetchCandles(
+                instrument: instrument, period: period,
+                count: Self.barCount(for: period), rebucketing: rebucketing
+            ) else { return }
+            guard !Task.isCancelled,
+                  instrument == currentInstrument, period == currentPeriod,
+                  !authoritative.isEmpty else { return }
+            // Authoritative closed bars + our own live forming bar (if it's newer than the last
+            // authoritative bar). Keeps the chart live while correcting the frozen buckets.
+            let livePartial = (bars.last?.partial == true) ? bars.last : nil
+            var corrected = authoritative.filter { !$0.partial }
+            if let live = livePartial, live.time > (corrected.last?.time ?? .min) {
+                corrected.append(live)
+            }
+            guard corrected != bars else { return }
+            bars = corrected
+        }
+    }
 
-    /// Conservative cell width assumed before the view reports its real one. Chosen at/below
-    /// the smallest real cell (the 4-column correlation grid) so the live edge is always
-    /// visible — a too-small guess only risks empty space on the right, never hiding the
-    /// newest bars. Refined to the exact width by the `chartWidth` didSet once measured.
-    static let assumedUnmeasuredWidth: CGFloat = 300
-
+    /// Request the chart to (re)position at the live edge. The actual snap is performed by
+    /// `ChartView`, which alone has the reliably-correct cell width — it fires once per loaded
+    /// dataset (gated by `transform.hasAutoScrolledToEnd`) and never fights a manual scroll or
+    /// a tab switch. Here we just clear that one-shot guard and, if we already know the width,
+    /// pull older bars when the chart is too short to fill the viewport.
     func scrollToEnd() {
-        // Before the cell is laid out, chartWidth is 0. Don't park the chart on the OLDEST
-        // bars (xOffset 0) — scroll to the newest bars using a conservative minimum width and
-        // remember to re-snap precisely once the real width arrives (the didSet). Restored /
-        // background correlation+MTF tabs hit this: their data loads at launch but the cells
-        // aren't measured until the tab is shown.
-        let measured = chartWidth > 0
-        let effectiveWidth = measured ? chartWidth : Self.assumedUnmeasuredWidth
-        pendingSnapToEnd = !measured
-        let totalWidth = CGFloat(bars.count) * transform.candleSlotWidth
-        let rightPadding = transform.candleSlotWidth * Self.rightEdgePaddingSlots
-        // Only add the margin when content overflows the viewport; a short chart that doesn't
-        // fill the width stays left-anchored (it already has space on the right).
-        transform.xOffset = totalWidth > effectiveWidth ? (totalWidth - effectiveWidth + rightPadding) : 0
-
-        // Auto-load earlier history only once the real width says the chart is genuinely short
-        // (an unmeasured cell with a tiny assumed width must not spuriously page).
-        if measured && totalWidth < chartWidth && !isLoadingEarlier && !bars.isEmpty {
-            isLoadingEarlier = true
-            Task { await loadEarlierBars() }
+        transform.hasAutoScrolledToEnd = false
+        if chartWidth > 0 {
+            let totalWidth = CGFloat(bars.count) * transform.candleSlotWidth
+            if totalWidth < chartWidth && !isLoadingEarlier && !bars.isEmpty {
+                isLoadingEarlier = true
+                Task { await loadEarlierBars() }
+            }
         }
     }
 
@@ -755,6 +788,8 @@ final class ChartViewModel {
         startTask = nil
         reloadTask?.cancel()
         reloadTask = nil
+        reconcileTask?.cancel()
+        reconcileTask = nil
         wsTask?.cancel()
         wsTask = nil
         liveWatchdogTask?.cancel()

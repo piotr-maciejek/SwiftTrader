@@ -20,6 +20,13 @@ the in-tree `Packages/DukascopyClient/` Swift package.
 Daily work is collected on a per-day branch, merged to `main`, then the version is
 bumped on `main` and tagged. We don't ship straight to `main` anymore.
 
+**Cadence — read this first.** Work accrues on the day branch with as many commits as
+needed *throughout the day*. Do **not** merge to `main` after each fix. The merge to
+`main` and the version bump happen **once, at the end of the day, only on the user's
+explicit go-ahead**. When the user says "lock in" / "commit" / "save this", that means
+**commit to the day branch** — NOT merge, NOT bump, NOT tag. Steps 2–4 below run only at
+end-of-day when the user asks to wrap up.
+
 **Scheme:** SemVer, **patch-per-day**. Each merged day bumps the patch
 (`0.1.0 → 0.1.1 → 0.1.2`). A minor bump (`0.2.0`) is reserved for a milestone you
 explicitly declare; `1.0.0` when it's a real release. The build number
