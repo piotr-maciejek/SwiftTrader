@@ -121,6 +121,7 @@ final class ChartViewModel {
     private var wsTask: Task<Void, Never>?
     private var liveWatchdogTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
+    private var reconcileTask: Task<Void, Never>?
     private var atrTask: Task<Void, Never>?
     private var todayTradingDayStart: Date?
     private var todayHigh: Double?
@@ -649,6 +650,17 @@ final class ChartViewModel {
         }
     }
 
+    /// True when the current period is built client-side by bundling smaller bars (3m always;
+    /// 5m/15m/30m/4H/Daily/Weekly when rebucketing is on). For these the live "forming" bar is
+    /// assembled per-instance and is NOT written to the shared cache, so a just-closed bucket can
+    /// freeze with an incomplete OHLC/volume until reconciled against the authoritative bundle.
+    var isDerivedAggregatedPeriod: Bool {
+        currentPeriod == "THREE_MINS"
+            || (clientSideRebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY"
+                || currentPeriod == "WEEKLY" || currentPeriod == "FIVE_MINS"
+                || currentPeriod == "FIFTEEN_MINS" || currentPeriod == "THIRTY_MINS"))
+    }
+
     func handleBar(_ bar: CandleBar, expectedInstrument: String, expectedPeriod: String) {
         // Discard bars from a stale WebSocket that hasn't been cancelled yet
         guard expectedInstrument == currentInstrument, expectedPeriod == currentPeriod else { return }
@@ -669,6 +681,10 @@ final class ChartViewModel {
                 guard !isBackfilling else { return }
                 bars.append(bar)
                 if autoScroll { advanceByOneCandle() }
+                // A derived bucket just rolled over: the bar that was forming is now frozen and
+                // may hold an incomplete client-side bundle. Reconcile the recent window against
+                // the authoritative aggregation so the just-closed bar gets its real OHLC/volume.
+                if isDerivedAggregatedPeriod { scheduleAggregatedReconcile() }
             }
         } else {
             // Mirror the partial-branch guard: don't paint a lone completed bar
@@ -690,17 +706,42 @@ final class ChartViewModel {
             }
             // For the aggregated derived path the coordinator already writes into the
             // `.aggregated` cache itself; the outer write would target the wrong key.
-            let rebucketing = clientSideRebucketing
-            // THREE_MINS has no native server period — it is always aggregated,
-            // regardless of the rebucketing toggle (see CacheKey.forDisplay).
-            let isDerivedAggregated = currentPeriod == "THREE_MINS"
-                || (rebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY" || currentPeriod == "WEEKLY"
-                    || currentPeriod == "FIVE_MINS" || currentPeriod == "FIFTEEN_MINS" || currentPeriod == "THIRTY_MINS"))
-            if !isDerivedAggregated {
+            if !isDerivedAggregatedPeriod {
                 Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod) }
             }
         }
         updateATRFromBar(bar)
+    }
+
+    /// Re-fetch the derived series and swap our recent CLOSED bars for the authoritative
+    /// re-bundled ones, while keeping the live forming bar. Triggered when a derived bucket
+    /// rolls over, so the just-closed bar's client-side bundle (possibly incomplete — see
+    /// `isDerivedAggregatedPeriod`) is corrected promptly instead of only on the next full
+    /// reload. The fetch is coalesced across charts, and we never touch `transform`, so scroll
+    /// position and the one-time live-edge snap are preserved.
+    private func scheduleAggregatedReconcile() {
+        reconcileTask?.cancel()
+        let instrument = currentInstrument
+        let period = currentPeriod
+        let rebucketing = clientSideRebucketing
+        reconcileTask = Task {
+            guard let authoritative = try? await coordinator.fetchCandles(
+                instrument: instrument, period: period,
+                count: Self.barCount(for: period), rebucketing: rebucketing
+            ) else { return }
+            guard !Task.isCancelled,
+                  instrument == currentInstrument, period == currentPeriod,
+                  !authoritative.isEmpty else { return }
+            // Authoritative closed bars + our own live forming bar (if it's newer than the last
+            // authoritative bar). Keeps the chart live while correcting the frozen buckets.
+            let livePartial = (bars.last?.partial == true) ? bars.last : nil
+            var corrected = authoritative.filter { !$0.partial }
+            if let live = livePartial, live.time > (corrected.last?.time ?? .min) {
+                corrected.append(live)
+            }
+            guard corrected != bars else { return }
+            bars = corrected
+        }
     }
 
     /// Request the chart to (re)position at the live edge. The actual snap is performed by
@@ -729,6 +770,8 @@ final class ChartViewModel {
         startTask = nil
         reloadTask?.cancel()
         reloadTask = nil
+        reconcileTask?.cancel()
+        reconcileTask = nil
         wsTask?.cancel()
         wsTask = nil
         liveWatchdogTask?.cancel()
