@@ -15,6 +15,51 @@ the in-tree `Packages/DukascopyClient/` Swift package.
 > Editing sources under `Packages/DukascopyClient/` requires a clean app rebuild
 > (`rm -rf build` first); incremental `xcodebuild` won't recompile the local package.
 
+## Versioning & release process
+
+Daily work is collected on a per-day branch, merged to `main`, then the version is
+bumped on `main` and tagged. We don't ship straight to `main` anymore.
+
+**Scheme:** SemVer, **patch-per-day**. Each merged day bumps the patch
+(`0.1.0 → 0.1.1 → 0.1.2`). A minor bump (`0.2.0`) is reserved for a milestone you
+explicitly declare; `1.0.0` when it's a real release. The build number
+(`CURRENT_PROJECT_VERSION`) increments by 1 on every bump, never resets.
+
+**Where the version lives:** the app target uses `GENERATE_INFOPLIST_FILE = YES`, so
+the two build settings in `SwiftTrader.xcodeproj/project.pbxproj` ARE the version (no
+hand-maintained `Info.plist`). Each appears **twice** (Debug + Release config) — update
+**all** occurrences so both configs match:
+
+- `MARKETING_VERSION` → `CFBundleShortVersionString` (the `X.Y.Z` users see)
+- `CURRENT_PROJECT_VERSION` → `CFBundleVersion` (the monotonic build number)
+
+**Daily flow:**
+
+```bash
+cd /Users/piotrmaciejek/Projects/trading/SwiftTrader
+
+# 1. Start the day on a branch
+git switch -c day/$(date +%F)        # e.g. day/2026-06-02
+#    … commit the day's work to this branch …
+
+# 2. End of day: merge to main (--no-ff keeps the day grouped under one merge commit)
+git switch main
+git merge --no-ff day/$(date +%F) -m "Merge day/$(date +%F)"
+
+# 3. Bump on main: hand-edit BOTH MARKETING_VERSION (×2) to the new patch and BOTH
+#    CURRENT_PROJECT_VERSION (×2) to +1 in project.pbxproj, then:
+git commit -am "Bump version to 0.1.1"
+git tag -a v0.1.1 -m "v0.1.1"
+
+# 4. Push branch deletion + main + the tag
+git push origin main --follow-tags
+git branch -d day/$(date +%F)
+```
+
+Always run the full test suite before the merge/bump (see Testing in the root
+`CLAUDE.md`). Tags are annotated (`-a`) and named `vX.Y.Z`. The installed
+`/Applications/SwiftTrader.app` only reflects a new version after a Release rebuild.
+
 ## Modes
 
 Picked at launch via Settings → Data provider; switching requires a restart so
