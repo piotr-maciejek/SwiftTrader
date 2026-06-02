@@ -105,17 +105,24 @@ final class ChartViewModel {
     ]
 
     /// Set by ChartView via GeometryReader so scroll calculations use real width.
-    /// The real cell width often arrives *after* the first `scrollToEnd()` (which
-    /// runs on history/cache load with the 1200 default) — most visibly in the
-    /// dense multi-timeframe/correlation grids. Re-snap to the live edge when the
-    /// width actually changes, but only while autoscroll is active so a manual
-    /// scroll-back or a later window resize isn't yanked to the end.
-    var chartWidth: CGFloat = 1200 {
+    /// Cell width in points, reported by the view once it's laid out. `0` means
+    /// "not measured yet" — the real width arrives *after* the first `scrollToEnd()`
+    /// (which runs on history/cache load), most visibly in the dense multi-timeframe
+    /// /correlation grids. `scrollToEnd()` defers while this is `0` rather than
+    /// scrolling with a guessed width (which parked the chart left of the live edge),
+    /// and the first real measurement honours that deferred snap — even if a stray
+    /// scroll/zoom flipped `autoScroll` off in the meantime. Later width changes
+    /// (window resize) only re-snap while autoscroll is active, so a manual
+    /// scroll-back isn't yanked to the end.
+    var chartWidth: CGFloat = 0 {
         didSet {
-            guard chartWidth != oldValue, autoScroll, !bars.isEmpty else { return }
-            scrollToEnd()
+            guard chartWidth != oldValue, chartWidth > 0 else { return }
+            if autoScroll || pendingSnapToEnd { scrollToEnd() }
         }
     }
+    /// Set when `scrollToEnd()` was asked to snap before the width was known; cleared
+    /// the moment a real width lets the snap actually happen.
+    private var pendingSnapToEnd = false
 
     private var coordinator: any MarketDataProviding
     private var startTask: Task<Void, Never>?
@@ -709,16 +716,30 @@ final class ChartViewModel {
     /// the price axis.
     static let rightEdgePaddingSlots: CGFloat = 4
 
+    /// Conservative cell width assumed before the view reports its real one. Chosen at/below
+    /// the smallest real cell (the 4-column correlation grid) so the live edge is always
+    /// visible — a too-small guess only risks empty space on the right, never hiding the
+    /// newest bars. Refined to the exact width by the `chartWidth` didSet once measured.
+    static let assumedUnmeasuredWidth: CGFloat = 300
+
     func scrollToEnd() {
+        // Before the cell is laid out, chartWidth is 0. Don't park the chart on the OLDEST
+        // bars (xOffset 0) — scroll to the newest bars using a conservative minimum width and
+        // remember to re-snap precisely once the real width arrives (the didSet). Restored /
+        // background correlation+MTF tabs hit this: their data loads at launch but the cells
+        // aren't measured until the tab is shown.
+        let measured = chartWidth > 0
+        let effectiveWidth = measured ? chartWidth : Self.assumedUnmeasuredWidth
+        pendingSnapToEnd = !measured
         let totalWidth = CGFloat(bars.count) * transform.candleSlotWidth
         let rightPadding = transform.candleSlotWidth * Self.rightEdgePaddingSlots
-        // Only add the margin when content overflows the viewport; a short chart
-        // that doesn't fill the width stays left-anchored (it already has space on
-        // the right) instead of being pushed left by the padding.
-        transform.xOffset = totalWidth > chartWidth ? (totalWidth - chartWidth + rightPadding) : 0
+        // Only add the margin when content overflows the viewport; a short chart that doesn't
+        // fill the width stays left-anchored (it already has space on the right).
+        transform.xOffset = totalWidth > effectiveWidth ? (totalWidth - effectiveWidth + rightPadding) : 0
 
-        // If bars don't fill the screen, fetch earlier bars automatically
-        if totalWidth < chartWidth && !isLoadingEarlier && !bars.isEmpty {
+        // Auto-load earlier history only once the real width says the chart is genuinely short
+        // (an unmeasured cell with a tiny assumed width must not spuriously page).
+        if measured && totalWidth < chartWidth && !isLoadingEarlier && !bars.isEmpty {
             isLoadingEarlier = true
             Task { await loadEarlierBars() }
         }

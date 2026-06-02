@@ -226,10 +226,12 @@ struct ChartView: View {
                 } message: {
                     Text(pendingSLTPEdit?.confirmationMessage ?? "")
                 }
-                .onAppear {
-                    onChartWidthChanged?(chartWidth)
-                }
-                .onChange(of: chartWidth) { _, newWidth in
+                // `initial: true` fires immediately with the laid-out width AND on every
+                // later change — more reliable than `.onAppear`, which can run before the
+                // GeometryReader has a real size (reporting 0) and then miss the 0→real
+                // update for a cell that's built off-screen and shown later (restored
+                // correlation/MTF tabs).
+                .onChange(of: chartWidth, initial: true) { _, newWidth in
                     onChartWidthChanged?(newWidth)
                 }
                 .onChange(of: crosshair) { _, newCrosshair in

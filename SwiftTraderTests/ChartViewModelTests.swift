@@ -470,6 +470,42 @@ struct ChartViewModelTests {
         vm.stop()                            // cancel the loadEarlierBars task it kicked off
     }
 
+    @Test("Unmeasured width shows the NEWEST bars (not the oldest), then refines on real width")
+    func scrollToEndUnmeasuredShowsNewest() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.bars = bars(100)                  // totalWidth = 1000
+        let slot = vm.transform.candleSlotWidth
+        let padding = slot * ChartViewModel.rightEdgePaddingSlots
+        let totalWidth = CGFloat(vm.bars.count) * slot
+
+        // chartWidth is still 0 (cell not laid out). Must scroll toward the live edge using
+        // the conservative assumed width — never park on the oldest bars (xOffset 0).
+        vm.scrollToEnd()
+        #expect(vm.transform.xOffset == totalWidth - ChartViewModel.assumedUnmeasuredWidth + padding)
+        #expect(vm.transform.xOffset > 0)
+
+        // Real width arrives → refine to the exact live-edge offset.
+        vm.chartWidth = 500
+        #expect(vm.transform.xOffset == totalWidth - 500 + padding)
+    }
+
+    @Test("Pending snap still refines on first measurement even if autoScroll was flipped off")
+    func pendingSnapRefinesDespiteAutoScrollOff() {
+        // The cold-load snap runs unmeasured (assumed width), then a stray scroll/zoom flips
+        // autoScroll off before the cell is measured. The first real width must still honour
+        // the pending snap — otherwise the chart stays at the assumed-width position.
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.bars = bars(100)
+        vm.scrollToEnd()                     // unmeasured (chartWidth == 0), pending set
+        vm.autoScroll = false                // stray gesture during the load window
+
+        vm.chartWidth = 500                  // first measurement honours the pending snap
+        let slot = vm.transform.candleSlotWidth
+        let padding = slot * ChartViewModel.rightEdgePaddingSlots
+        let totalWidth = CGFloat(vm.bars.count) * slot
+        #expect(vm.transform.xOffset == totalWidth - 500 + padding)
+    }
+
     // MARK: - Stale-cache backfill detection (launch "Updating…" badge / forming-bar gate)
 
     /// A Date in UTC from y/m/d h:m — the trading calendar resolves weekday/hour in ET,
