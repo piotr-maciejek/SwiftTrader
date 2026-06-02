@@ -122,6 +122,11 @@ final class ChartViewModel {
     private var liveWatchdogTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
     private var reconcileTask: Task<Void, Never>?
+    /// Set when a live stream drops with bars already on screen; the next bar after we
+    /// re-subscribe triggers a closed-bar reconcile so a bucket frozen mid-formation at the
+    /// instant of the drop (e.g. an MTF cell stuck on a 2-minute-old 15m bar) is healed
+    /// immediately — not only if this chart happens to witness the next bucket rollover.
+    private var resyncClosedBarsOnResume = false
     private var atrTask: Task<Void, Never>?
     private var todayTradingDayStart: Date?
     private var todayHigh: Double?
@@ -597,6 +602,15 @@ final class ChartViewModel {
                         // opening the feed early (parallel with the history load) never shows a
                         // live-but-empty chart; the badge stays "Connecting…" until bars exist.
                         if !isConnected && !bars.isEmpty { isConnected = true }
+                        // First bar after re-subscribing post-drop: heal any closed bar that froze
+                        // at a mid-bucket partial when the stream died. Reconcile is period-agnostic
+                        // (swaps closed bars for the authoritative aggregation, keeps the live one),
+                        // so this re-converges every chart on the cache, not just ones that witness
+                        // the next rollover.
+                        if resyncClosedBarsOnResume {
+                            resyncClosedBarsOnResume = false
+                            scheduleAggregatedReconcile()
+                        }
                     }
                     // Stream ended cleanly without an error — treat as a transient
                     // disconnect and try to reconnect within the same retry budget.
@@ -606,6 +620,10 @@ final class ChartViewModel {
                     isConnected = false
                     lastError = error.localizedDescription
                 }
+                // Stream ended (clean drop or error) with a chart already on screen: mark that the
+                // closed-bar window needs a reconcile once we re-subscribe, so a bar frozen at the
+                // instant of the drop doesn't linger until the next witnessed rollover.
+                if !bars.isEmpty { resyncClosedBarsOnResume = true }
                 attempt += 1
                 if attempt <= Self.maxWebSocketAttempts {
                     let backoffSeconds = min(30, 3 * (1 << min(attempt - 1, 4)))
