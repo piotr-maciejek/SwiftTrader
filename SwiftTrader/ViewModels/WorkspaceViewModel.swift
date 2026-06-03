@@ -148,6 +148,18 @@ final class WorkspaceViewModel {
         }
     }
 
+    /// Dump the focused tab's chart state to the log (Cmd+Shift+G) so a suspected gap can be
+    /// diagnosed as a data-hole vs a render/layout artifact. Covers the main chart, every MTF cell,
+    /// or every correlation cell — whichever the selected tab shows. See ChartViewModel.captureGapDiagnostic.
+    func captureGapDiagnostics() {
+        guard let tab = selectedTab else { return }
+        switch tab.content {
+        case .chart(let vm): vm.captureGapDiagnostic()
+        case .multiTimeframe(let vm): vm.chartViewModels.forEach { $0.captureGapDiagnostic() }
+        case .correlation(let vm): vm.chartViewModels.forEach { $0.captureGapDiagnostic() }
+        }
+    }
+
     /// Starts a tab's VM(s) on demand. Idempotent — safe to call repeatedly.
     /// `ChartViewModel.start()` and child VMs in `CorrelationViewModel.startAll()`
     /// / `MultiTimeframeViewModel.startAll()` are guarded by their own

@@ -683,6 +683,56 @@ final class ChartViewModel {
         Self.intraSessionGapIndex(in: bars, period: currentPeriod)
     }
 
+    /// On-demand dump of this chart's exact state when the user sees a (suspected) gap, so we can
+    /// tell a DATA hole (missing/degenerate bars) from a RENDER/layout artifact (bars contiguous
+    /// but drawn with a band). Triggered by Cmd+Shift+G. Read back with:
+    ///   log show --predicate 'subsystem == "com.swifttrader"' --last 5m | grep GAP-DIAG
+    func captureGapDiagnostic() {
+        let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm"; f.timeZone = .current
+        func ts(_ ms: Int64) -> String { f.string(from: Date(timeIntervalSince1970: Double(ms) / 1000)) }
+        func emit(_ s: String) { chartLogger.notice("\(s, privacy: .public)") }
+
+        let slot = transform.candleSlotWidth
+        // Mirror ChartView.visibleBarRange so the dump covers exactly what's on screen.
+        let canMeasure = !bars.isEmpty && chartWidth > 0 && slot > 0
+        let start = canMeasure ? max(0, Int((transform.xOffset / slot).rounded(.down))) : 0
+        let end = canMeasure ? min(bars.count, Int(((transform.xOffset + chartWidth) / slot).rounded(.up)) + 1) : 0
+
+        emit(String(format: "GAP-DIAG %@ %@: bars=%d visible=%d..<%d xOffset=%.0f xScale=%.2f slot=%.1f chartW=%.0f snappedEnd=%@",
+                    currentInstrument, currentPeriod, bars.count, start, end,
+                    transform.xOffset, transform.xScale, slot, chartWidth,
+                    transform.hasAutoScrolledToEnd ? "Y" : "N"))
+
+        // Whole-series continuity (uniform-grid periods): is there an actual time-hole in `bars`?
+        if let step = Self.fixedGridStepMs(for: currentPeriod), bars.count > 1 {
+            var gaps: [String] = []
+            for i in 1..<bars.count {
+                let d = bars[i].time - bars[i - 1].time
+                if d != step { gaps.append("idx\(i-1)->\(i) \(ts(bars[i-1].time))->\(ts(bars[i].time)) \(d/1000)s(\(d/step)x)") }
+            }
+            emit(gaps.isEmpty
+                 ? "GAP-DIAG \(currentInstrument) \(currentPeriod): bars CONTIGUOUS — no data hole (gap is render/layout)"
+                 : "GAP-DIAG \(currentInstrument) \(currentPeriod): \(gaps.count) time-gap(s): " + gaps.suffix(8).joined(separator: " | "))
+        } else {
+            emit("GAP-DIAG \(currentInstrument) \(currentPeriod): session-aligned/raw period — step-continuity scan skipped")
+        }
+
+        // Dump the LIVE-EDGE tail (last ~25 on-screen bars) — where a just-closed derived bar can
+        // render thin/incomplete — not the head. Flags degenerate OHLC, partials, and a suspiciously
+        // small body (range < 1/4 of the neighbours' median) that hints at an unfilled just-closed bar.
+        let lo = max(start, end - 25)
+        if lo < end {
+            for i in lo..<end {
+                let b = bars[i]
+                let bad = (b.open <= 0 || b.high <= 0 || b.low <= 0 || b.close <= 0) ? " ZERO" : ""
+                emit(String(format: "GAP-DIAG bar[%d] %@ O%.5f H%.5f L%.5f C%.5f range=%.1fpip V%.0f %@%@",
+                            i, ts(b.time), b.open, b.high, b.low, b.close,
+                            (b.high - b.low) * PnLConverter.pipFactor(for: currentInstrument),
+                            b.volume, b.partial ? "P" : "-", bad))
+            }
+        }
+    }
+
     /// Safety net for chart-series gaps. A hole can creep into the in-memory `bars` through more
     /// than one live path — a late subscriber replaying a forming bar that's already ahead of its
     /// loaded tail, a brief stream skip between buckets — and the on-disk cache is the continuous
@@ -836,9 +886,14 @@ final class ChartViewModel {
                   instrument == currentInstrument, period == currentPeriod,
                   !authoritative.isEmpty else { return }
             let livePartial = (bars.last?.partial == true) ? bars.last : nil
-            let corrected = Self.reconciledBars(authoritative: authoritative, liveForming: livePartial)
+            let corrected = Self.reconciledBars(authoritative: authoritative, current: bars, liveForming: livePartial)
             guard corrected != bars else { return }
             bars = corrected
+            // A reconcile can change the bar COUNT (backfilling a stalled chart, swapping closed
+            // bars). `xOffset` is a pixel offset measured in bars, so a count change drifts the live
+            // edge and opens an empty right-margin "gap". Re-anchor when tracking the live edge; a
+            // manual scroll-back (autoScroll == false) is left untouched.
+            if autoScroll { scrollToEnd() }
         }
     }
 
@@ -851,9 +906,34 @@ final class ChartViewModel {
     /// overwrite the good live bar and render as a thin "missing-data" candle that differs between
     /// two charts of the same instrument/period. So drop any authoritative bar at or after the
     /// forming bucket and re-append the live bar.
-    static func reconciledBars(authoritative: [CandleBar], liveForming: CandleBar?) -> [CandleBar] {
-        var corrected = authoritative.filter { !$0.partial }
-        if let live = liveForming, live.partial {
+    static func reconciledBars(authoritative: [CandleBar], current: [CandleBar], liveForming: CandleBar?) -> [CandleBar] {
+        // Non-shrinking merge. The authoritative re-aggregation can LAG at a bucket rollover — its 1m
+        // source hasn't flushed the just-closed bucket's last minutes yet — so blindly swapping a
+        // just-closed bar for the authoritative one DOWNGRADES it (a thin bar that loses the low/close
+        // the live aggregation already captured, then "heals" only on a later reload). Instead, merge:
+        // take the WIDER high/low of (current, authoritative), and keep the live open/close when the
+        // live bar already spans the authoritative range (its OHLC is the complete one); otherwise
+        // trust authoritative (the live bar opened mid-bucket and is the incomplete one).
+        var curByTime: [Int64: CandleBar] = [:]
+        for b in current { curByTime[b.time] = b }
+        var corrected = authoritative.filter { !$0.partial }.map { auth -> CandleBar in
+            guard let cur = curByTime[auth.time] else { return auth }
+            let liveSpansAuth = cur.low <= auth.low && cur.high >= auth.high
+            return CandleBar(
+                time: auth.time,
+                open: liveSpansAuth ? cur.open : auth.open,
+                high: max(auth.high, cur.high),
+                low: min(auth.low, cur.low),
+                close: liveSpansAuth ? cur.close : auth.close,
+                volume: max(auth.volume, cur.volume),
+                partial: false)
+        }
+        // Only keep the live forming bar if it's actually CURRENT — its time is at/after the newest
+        // authoritative closed bar. A STALE last bar (the chart's live feed stalled, then authoritative
+        // backfilled newer bars on recovery) must NOT pin the series to the past: drop it and adopt the
+        // fresher authoritative series, so a stalled chart catches up on its own without a manual reload
+        // / timeframe switch (the next live tick then appends the real forming bar contiguously).
+        if let live = liveForming, live.partial, live.time >= (corrected.last?.time ?? .min) {
             corrected.removeAll { $0.time >= live.time }
             corrected.append(live)
         }

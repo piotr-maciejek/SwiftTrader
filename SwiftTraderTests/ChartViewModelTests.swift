@@ -234,7 +234,7 @@ struct ChartViewModelTests {
             makeBar(time: 900_000, high: 1.05, low: 0.99, close: 1.0, partial: false),
         ]
 
-        let result = ChartViewModel.reconciledBars(authoritative: authoritative, liveForming: live)
+        let result = ChartViewModel.reconciledBars(authoritative: authoritative, current: [], liveForming: live)
 
         #expect(result.count == 2)
         #expect(result.last?.time == 900_000)
@@ -247,7 +247,7 @@ struct ChartViewModelTests {
         let live = makeBar(time: 1_800_000, partial: true)
         let authoritative = [makeBar(time: 0), makeBar(time: 900_000)]
 
-        let result = ChartViewModel.reconciledBars(authoritative: authoritative, liveForming: live)
+        let result = ChartViewModel.reconciledBars(authoritative: authoritative, current: [], liveForming: live)
 
         #expect(result.map(\.time) == [0, 900_000, 1_800_000])
         #expect(result.last?.partial == true)
@@ -257,7 +257,7 @@ struct ChartViewModelTests {
     func reconcileFiltersAuthoritativePartials() {
         let authoritative = [makeBar(time: 0), makeBar(time: 900_000, partial: true)]
 
-        let result = ChartViewModel.reconciledBars(authoritative: authoritative, liveForming: nil)
+        let result = ChartViewModel.reconciledBars(authoritative: authoritative, current: [], liveForming: nil)
 
         #expect(result.count == 1)
         #expect(result.last?.time == 0)
@@ -268,9 +268,63 @@ struct ChartViewModelTests {
         let authoritative = [makeBar(time: 0), makeBar(time: 900_000)]
 
         let result = ChartViewModel.reconciledBars(
-            authoritative: authoritative, liveForming: makeBar(time: 1_800_000, partial: false))
+            authoritative: authoritative, current: [], liveForming: makeBar(time: 1_800_000, partial: false))
 
         #expect(result.map(\.time) == [0, 900_000])
+    }
+
+    @Test("Reconcile never shrinks a just-closed bar (the AUDCAD 3m downgrade bug)")
+    func reconcileDoesNotShrinkJustClosed() {
+        // The just-closed bar the live aggregation captured COMPLETELY (wide range, real close)...
+        let liveClosed = makeBar(time: 900_000, open: 1.10, high: 1.1010, low: 1.0980, close: 1.0995)
+        let forming = makeBar(time: 1_800_000, partial: true)
+        let current = [makeBar(time: 0), liveClosed, forming]
+        // ...but authoritative LAGS (narrower low/high, an earlier close) because its 1m source
+        // hasn't flushed the bucket. Merge must keep the wider live data, not downgrade.
+        let authoritative = [makeBar(time: 0),
+                             makeBar(time: 900_000, open: 1.10, high: 1.1005, low: 1.0990, close: 1.0998)]
+
+        let merged = ChartViewModel.reconciledBars(
+            authoritative: authoritative, current: current, liveForming: forming)
+            .first { $0.time == 900_000 }
+
+        #expect(merged?.low == 1.0980)    // kept the live low, not authoritative's 1.0990
+        #expect(merged?.high == 1.1010)   // kept the live high
+        #expect(merged?.close == 1.0995)  // kept the live close (live spans authoritative)
+    }
+
+    @Test("Reconcile widens a genuinely-incomplete live bar from authoritative")
+    func reconcileWidensIncompleteLive() {
+        // Live opened mid-bucket (narrow); authoritative is the complete, wider one → take it.
+        let liveNarrow = makeBar(time: 900_000, open: 1.1000, high: 1.1002, low: 1.0998, close: 1.1001)
+        let current = [makeBar(time: 0), liveNarrow]
+        let authoritative = [makeBar(time: 0),
+                             makeBar(time: 900_000, open: 1.0990, high: 1.1010, low: 1.0980, close: 1.1005)]
+
+        let merged = ChartViewModel.reconciledBars(
+            authoritative: authoritative, current: current, liveForming: nil)
+            .first { $0.time == 900_000 }
+
+        #expect(merged?.low == 1.0980)    // union low (authoritative wider)
+        #expect(merged?.high == 1.1010)   // union high
+        #expect(merged?.open == 1.0990)   // authoritative open (live didn't span it → incomplete)
+        #expect(merged?.close == 1.1005)  // authoritative close
+    }
+
+    @Test("Reconcile catches up a STALE chart (drops the stale tail for the newer authoritative series)")
+    func reconcileCatchesUpStaleChart() {
+        // The chart's live feed stalled: its last (frozen, partial) bar is OLD. Authoritative has
+        // since backfilled newer closed bars. The stale bar must NOT pin the series to the past.
+        let staleLast = makeBar(time: 900_000, partial: true)
+        let current = [makeBar(time: 0), staleLast]
+        let authoritative = [makeBar(time: 0), makeBar(time: 900_000),
+                             makeBar(time: 1_800_000), makeBar(time: 2_700_000)]
+
+        let result = ChartViewModel.reconciledBars(
+            authoritative: authoritative, current: current, liveForming: staleLast)
+
+        #expect(result.map(\.time) == [0, 900_000, 1_800_000, 2_700_000])  // caught up to the newer series
+        #expect(result.last?.partial == false)   // adopted authoritative's closed bar, not the stale partial
     }
 
     // MARK: - handleBar: stale connection guard

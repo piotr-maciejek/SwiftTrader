@@ -201,6 +201,13 @@ struct ContentView: View {
         }
         .frame(minWidth: 800, minHeight: 500)
         .background(WindowAccessor())
+        // Hidden Cmd+Shift+G: dump the focused tab's chart state to the log when a gap is on
+        // screen, so we can tell a data-hole from a render artifact. Read: log show … | grep GAP-DIAG
+        .background(
+            Button("") { workspace.captureGapDiagnostics() }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .opacity(0)
+        )
         .focusedSceneValue(\.workspace, workspace)
         // Debounce the health banner: only show it once the unhealthy state has persisted past a
         // routine in-place reconnect, so a transient transport drop recovers silently. `.task(id:)`
