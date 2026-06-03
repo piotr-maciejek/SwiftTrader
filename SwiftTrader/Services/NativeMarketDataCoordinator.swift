@@ -610,9 +610,32 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         // prefetched) source cache. Scroll-back fills older buckets via fetchEarlierAggregated.
         let window = merged.count > neededSource ? Array(merged.suffix(neededSource)) : merged
         let aggregated = spec.bucket(window, partial)
-        let cached = await cache.merge(aggregated, for: aggKey)
-        if let last = aggregated.last, last.partial { return cached + [last] }
-        return cached
+        // Persist ONLY fully-covered buckets. A CLOSED bucket missing a market-open source slot —
+        // e.g. only 1 of a 4H bucket's four 1H bars arrived before it closed during a history-feed
+        // stall — is INCOMPLETE and must never be cached: the serve path doesn't re-validate a
+        // persisted bar's OHLC, so an incomplete bar would poison the cache indefinitely, at any
+        // depth (the AUD/USD & EUR/AUD 4H bug). The full `aggregated` is still RETURNED for display
+        // (provisional) and re-aggregated until its source fills in — then it's complete and persists.
+        // Session-edge buckets (Fri close, holidays) have no market-open slots after the close, so
+        // they count complete despite fewer source bars.
+        let sourceTimes = Set(merged.map(\.time))
+        let sourceStepMs = sourceSeconds * 1000
+        let persistable = aggregated.filter {
+            Self.aggregatedBucketComplete(bucketStartMs: $0.time, spanMs: targetSeconds * 1000,
+                                          sourceStepMs: sourceStepMs, sourceTimes: sourceTimes, nowMs: nowMs)
+        }
+        let cached = await cache.merge(persistable, for: aggKey)
+        guard persistable.count != aggregated.count else {
+            if let last = aggregated.last, last.partial { return cached + [last] }
+            return cached
+        }
+        // Some buckets were withheld (incomplete). Overlay the freshly-aggregated window — including
+        // those provisional buckets — onto the deep cached series for DISPLAY, keyed by time, without
+        // persisting the incomplete ones.
+        var byTime: [Int64: SwiftTrader.CandleBar] = [:]
+        for b in cached { byTime[b.time] = b }
+        for b in aggregated { byTime[b.time] = b }
+        return byTime.values.sorted { $0.time < $1.time }
     }
 
     private func fetchEarlierAggregated(
@@ -825,6 +848,28 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     static func inProgressSeed(_ partial: SwiftTrader.CandleBar?, bucketMs: Int64) -> SwiftTrader.CandleBar? {
         guard let p = partial, p.time == bucketMs else { return nil }
         return p
+    }
+
+    /// A CLOSED aggregated bucket is "complete" (safe to persist) only when the source has a bar at
+    /// every market-OPEN slot inside it. Slots when the market was closed — Fri-evening into the
+    /// weekend, holidays, or the session-edge that legitimately ends a bucket early — are not
+    /// expected, so a short session-edge bucket still counts complete. A still-forming bucket (end
+    /// in the future) returns true here; its `partial` flag keeps it off disk separately.
+    static func aggregatedBucketComplete(
+        bucketStartMs: Int64, spanMs: Int64, sourceStepMs: Int64,
+        sourceTimes: Set<Int64>, nowMs: Int64
+    ) -> Bool {
+        guard sourceStepMs > 0, spanMs > 0 else { return true }
+        let bucketEnd = bucketStartMs + spanMs
+        guard bucketEnd <= nowMs else { return true }   // forming — handled by the partial flag
+        var slot = bucketStartMs
+        while slot < bucketEnd {
+            let date = Date(timeIntervalSince1970: Double(slot) / 1000)
+            let marketOpen = !NYTradingCalendar.isMarketClosed(at: date) && !NYTradingCalendar.isFXHoliday(at: date)
+            if marketOpen && !sourceTimes.contains(slot) { return false }
+            slot += sourceStepMs
+        }
+        return true
     }
 
     static func hasSpuriousGap(_ bars: [SwiftTrader.CandleBar], periodSeconds: Int64) -> Bool {

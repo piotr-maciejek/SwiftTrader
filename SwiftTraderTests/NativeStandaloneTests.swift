@@ -432,3 +432,44 @@ struct InProgressSeedTests {
         #expect(NativeMarketDataCoordinator.inProgressSeed(nil, bucketMs: 3_600_000) == nil)
     }
 }
+
+@Suite("Aggregated bucket completeness (never persist incomplete)")
+struct AggregatedBucketCompleteTests {
+    private func ms(_ y: Int, _ mo: Int, _ d: Int, _ h: Int) -> Int64 {
+        var c = DateComponents(); c.year = y; c.month = mo; c.day = d; c.hour = h
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        return Int64(cal.date(from: c)!.timeIntervalSince1970 * 1000)
+    }
+    private let hour: Int64 = 3_600_000
+    private let fourH: Int64 = 4 * 3_600_000
+
+    @Test("A full mid-week 4H bucket (all four 1H bars) is complete")
+    func fullBucketComplete() {
+        let start = ms(2026, 6, 3, 13)   // Wednesday 13:00 UTC, mid-session
+        let src = Set([0, 1, 2, 3].map { start + Int64($0) * hour })
+        #expect(NativeMarketDataCoordinator.aggregatedBucketComplete(
+            bucketStartMs: start, spanMs: fourH, sourceStepMs: hour, sourceTimes: src, nowMs: start + fourH + hour))
+    }
+
+    @Test("A 1-of-4 mid-week 4H bucket is INCOMPLETE (the cache-poisoning bug)")
+    func incompleteBucketRejected() {
+        let start = ms(2026, 6, 3, 13)
+        let src: Set<Int64> = [start]   // only the first 1H bar arrived (history stall)
+        #expect(!NativeMarketDataCoordinator.aggregatedBucketComplete(
+            bucketStartMs: start, spanMs: fourH, sourceStepMs: hour, sourceTimes: src, nowMs: start + fourH + hour))
+    }
+
+    @Test("A weekend bucket counts complete even with no bars (slots are market-closed)")
+    func weekendBucketComplete() {
+        let start = ms(2026, 6, 6, 0)   // Saturday 00:00 UTC — market closed, no bars expected
+        #expect(NativeMarketDataCoordinator.aggregatedBucketComplete(
+            bucketStartMs: start, spanMs: fourH, sourceStepMs: hour, sourceTimes: Set(), nowMs: start + fourH + hour))
+    }
+
+    @Test("A still-forming bucket is never flagged incomplete (handled by the partial flag)")
+    func formingBucketComplete() {
+        let start = ms(2026, 6, 3, 13)
+        #expect(NativeMarketDataCoordinator.aggregatedBucketComplete(
+            bucketStartMs: start, spanMs: fourH, sourceStepMs: hour, sourceTimes: [start], nowMs: start + hour))
+    }
+}
