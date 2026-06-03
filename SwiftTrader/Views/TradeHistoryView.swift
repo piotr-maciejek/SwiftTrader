@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TradeHistoryView: View {
     @Bindable var vm: TradeHistoryViewModel
+    /// Per-position R-multiple / slippage metadata, joined by `positionId`.
+    var metadata: [String: PositionMetadata] = [:]
     @Bindable var settings: AppSettings = AppSettings.shared
 
     private static let dateTimeFormatter: DateFormatter = {
@@ -127,6 +129,8 @@ struct TradeHistoryView: View {
                     headerCell("Open", width: 80)
                     headerCell("Close", width: 80)
                     headerCell("Pips", width: 60)
+                    headerCell("R", width: 50)
+                    headerCell("Slip", width: 56)
                     if !settings.incognitoMode {
                         headerCell("Net P&L", width: 80)
                     }
@@ -161,6 +165,9 @@ struct TradeHistoryView: View {
             cell(String(format: "%.5f", t.closePrice), width: 80)
             cell(String(format: "%.1f", t.profitLossPips), width: 60,
                  color: t.profitLossPips >= 0 ? .green : .red)
+            // R + slippage are pips/ratios, not money — shown even in incognito mode.
+            rCell(metadata[t.positionId]?.realizedR(closePrice: t.closePrice), width: 50)
+            slipCell(metadata[t.positionId]?.slippagePips, width: 56)
             if !settings.incognitoMode {
                 cell(String(format: "%.2f", t.profitLoss), width: 80,
                      color: t.profitLoss >= 0 ? .green : .red)
@@ -183,5 +190,29 @@ struct TradeHistoryView: View {
         Text(text)
             .foregroundStyle(color)
             .frame(width: width, alignment: .leading)
+    }
+
+    /// Realized R-multiple: signed, sign-colored; "—" when metadata is missing or risk is undefined.
+    @ViewBuilder
+    private func rCell(_ r: Double?, width: CGFloat) -> some View {
+        if let r {
+            Text(String(format: "%.2fR", r))
+                .foregroundStyle(r >= 0 ? Color.green : Color.red)
+                .frame(width: width, alignment: .leading)
+        } else {
+            Text("—").foregroundStyle(.tertiary).frame(width: width, alignment: .leading)
+        }
+    }
+
+    /// Slippage in pips: positive (worse fill) red, ≤0 green; "—" when absent.
+    @ViewBuilder
+    private func slipCell(_ pips: Double?, width: CGFloat) -> some View {
+        if let pips {
+            Text(String(format: "%.1f", pips))
+                .foregroundStyle(pips > 0 ? Color.red : Color.green)
+                .frame(width: width, alignment: .leading)
+        } else {
+            Text("—").foregroundStyle(.tertiary).frame(width: width, alignment: .leading)
+        }
     }
 }

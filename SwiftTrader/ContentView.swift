@@ -183,7 +183,8 @@ struct ContentView: View {
 
                     if workspace.showBottomPanel {
                         Divider()
-                        BottomPanel(trading: workspace.trading, tradeHistory: workspace.tradeHistory)
+                        BottomPanel(trading: workspace.trading, tradeHistory: workspace.tradeHistory,
+                                    metadata: workspace.positionMetadata)
                     }
                 }
 

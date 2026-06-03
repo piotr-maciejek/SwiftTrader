@@ -13,9 +13,28 @@ final class TradingViewModel {
     var orderError: String?
     var visualOrders: [String: VisualOrderState] = [:]
 
+    /// R-multiple / slippage persistence. Injected by `WorkspaceViewModel`; nil → capture is a no-op.
+    var metadataStore: PositionMetadataStore?
+    var accountID: UUID?
+
     private var coordinator: any TradingCoordinating
     private var wsTask: Task<Void, Never>?
     private var pendingWsTask: Task<Void, Never>?
+
+    /// Submit-time captures awaiting the position's first appearance in the snapshot stream.
+    private var pendingCaptures: [PendingCapture] = []
+    /// Labels already seen (pre-existing at connect, or already bound) — never (re)bind these.
+    private var knownPositionIds: Set<String> = []
+    private var didSeedKnownIds = false
+
+    private struct PendingCapture {
+        let instrument: String
+        let direction: String
+        let pressPrice: Double
+        let initialStopLoss: Double
+        let initialTakeProfit: Double
+        let submitTimeMs: Int64
+    }
 
     var amount = 0.01
 
@@ -34,6 +53,11 @@ final class TradingViewModel {
         pendingWsTask?.cancel()
         pendingWsTask = nil
         isConnected = false
+        // A reconnect / account switch invalidates the binding state: positions re-seed and any
+        // unmatched captures belong to the old session.
+        pendingCaptures.removeAll()
+        knownPositionIds.removeAll()
+        didSeedKnownIds = false
     }
 
     func reconnect(port: Int) {
@@ -206,6 +230,17 @@ final class TradingViewModel {
         isSubmitting = true
         defer { isSubmitting = false }
         orderError = nil
+        // Snapshot the press-time market price + initial SL/TP for R-multiple & slippage. For a
+        // MARKET order the press price is the live tick; for a pending order it's the intended
+        // entry. Buffered now, bound to the resulting position's id when it appears (see
+        // bindPendingCaptures), and only on a SUCCESSFUL submit (appended inside the `do`).
+        let capture = PendingCapture(
+            instrument: order.instrument,
+            direction: order.direction,
+            pressPrice: order.orderType == "MARKET" ? (livePrice ?? order.entryPrice) : order.entryPrice,
+            initialStopLoss: order.stopLoss,
+            initialTakeProfit: order.takeProfit,
+            submitTimeMs: Int64(Date().timeIntervalSince1970 * 1000))
         do {
             _ = try await coordinator.submitOrder(
                 instrument: order.instrument,
@@ -215,6 +250,7 @@ final class TradingViewModel {
                 takeProfit: order.takeProfit,
                 orderType: order.orderType,
                 entryPrice: order.orderType == "MARKET" ? nil : order.entryPrice)
+            pendingCaptures.append(capture)
             visualOrders.removeValue(forKey: instrument)
         } catch {
             orderError = error.localizedDescription
@@ -346,6 +382,7 @@ final class TradingViewModel {
                         positions = snapshot.positions
                         account = snapshot.account
                         if let s = snapshot.spreads { spreads = s }
+                        bindPendingCaptures(snapshot.positions)
                     }
                 } catch is CancellationError {
                     break
@@ -355,6 +392,40 @@ final class TradingViewModel {
                 }
             }
             isConnected = false
+        }
+    }
+
+    /// Bind submit-time captures to newly-appeared positions; seed pre-existing ones so they
+    /// never bind. Runs on every snapshot, on the main actor (no added concurrency).
+    private func bindPendingCaptures(_ positions: [Position]) {
+        // First snapshot after (re)connect: everything already open pre-dates our submits — record
+        // their ids so they never bind. They still DISPLAY any synced metadata via the id join.
+        if !didSeedKnownIds {
+            didSeedKnownIds = true
+            knownPositionIds.formUnion(positions.map(\.label))
+            return
+        }
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // Expire captures whose position never showed within a generous window.
+        pendingCaptures.removeAll { nowMs - $0.submitTimeMs > 30_000 }
+        for pos in positions where !knownPositionIds.contains(pos.label) {
+            // Newly appeared: match the OLDEST pending capture for this instrument+direction within
+            // 15s (FIFO disambiguates concurrent same-pair submits).
+            if let idx = pendingCaptures.firstIndex(where: {
+                $0.instrument == pos.instrument && $0.direction == pos.direction
+                    && nowMs - $0.submitTimeMs <= 15_000
+            }) {
+                let cap = pendingCaptures.remove(at: idx)
+                metadataStore?.upsert(
+                    PositionMetadata(
+                        positionId: pos.label, instrument: pos.instrument, direction: pos.direction,
+                        pressPrice: cap.pressPrice, initialStopLoss: cap.initialStopLoss,
+                        initialTakeProfit: cap.initialTakeProfit, fillPrice: pos.openPrice,
+                        submitTimeMs: cap.submitTimeMs, openTimeMs: nowMs),
+                    accountID: accountID)
+            }
+            // Double-bind guard: once seen, never rebind — even if no capture matched.
+            knownPositionIds.insert(pos.label)
         }
     }
 
