@@ -120,6 +120,7 @@ final class ChartViewModel {
     private var startTask: Task<Void, Never>?
     private var wsTask: Task<Void, Never>?
     private var liveWatchdogTask: Task<Void, Never>?
+    private var gapHealTask: Task<Void, Never>?
     private var reloadTask: Task<Void, Never>?
     private var reconcileTask: Task<Void, Never>?
     /// Set when a live stream drops with bars already on screen; the next bar after we
@@ -364,6 +365,7 @@ final class ChartViewModel {
         reloadTask?.cancel()
         wsTask?.cancel()
         liveWatchdogTask?.cancel()
+        gapHealTask?.cancel()
         atrTask?.cancel()
         isLoadingEarlier = false
 
@@ -385,10 +387,17 @@ final class ChartViewModel {
         reloadTask = Task {
             let cacheT0 = Date()
             let cached = await coordinator.cache.getBars(for: key)
-            if !cached.isEmpty {
+            if !cached.isEmpty, Self.intraSessionGapIndex(in: cached, period: logPeriod) == nil {
                 bars = cached
                 scrollToEnd()
                 chartLogger.info("reloadChart \(logInstrument, privacy: .public) \(logPeriod, privacy: .public) painted \(cached.count) cached bars in \(Int(Date().timeIntervalSince(cacheT0) * 1000))ms")
+            } else if !cached.isEmpty {
+                // The display cache transiently holds an intra-session hole (e.g. the aggregated
+                // cache rebuilt while the 1m source was briefly gappy). Painting it flashes a gap
+                // until the history fetch below rebuilds and heals it. Skip the stale paint and let
+                // loadHistoryWithRetry paint the healed, contiguous series instead — the loading
+                // card shows for that brief window rather than a broken chart.
+                chartLogger.warning("reloadChart \(logInstrument, privacy: .public) \(logPeriod, privacy: .public): cached series has an intra-session hole — deferring paint to the healed history fetch")
             }
             await loadHistoryWithRetry()
             // See start(): guard against a cancelled-but-still-executing outer Task
@@ -581,6 +590,7 @@ final class ChartViewModel {
     private func connectWebSocket() {
         wsTask?.cancel()
         startLiveWatchdog()
+        startGapHeal()
         let instrument = currentInstrument
         let period = currentPeriod
         let rebucketing = clientSideRebucketing
@@ -668,6 +678,32 @@ final class ChartViewModel {
         }
     }
 
+    /// First intra-session hole in the live `bars` (cheap, in-memory), or `nil` when contiguous.
+    func firstIntraSessionGapIndex() -> Int? {
+        Self.intraSessionGapIndex(in: bars, period: currentPeriod)
+    }
+
+    /// Safety net for chart-series gaps. A hole can creep into the in-memory `bars` through more
+    /// than one live path — a late subscriber replaying a forming bar that's already ahead of its
+    /// loaded tail, a brief stream skip between buckets — and the on-disk cache is the continuous
+    /// source of truth. Rather than chase every path, periodically detect a hole cheaply and
+    /// reconcile (which re-fetches the authoritative series and splices it in). This bounds any
+    /// visible gap to one tick instead of "until the user reloads / churns timeframes". A fetch
+    /// only happens when a hole actually exists, so the idle cost is a tiny in-memory scan.
+    private func startGapHeal() {
+        gapHealTask?.cancel()
+        let instrument = currentInstrument
+        gapHealTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self, !Task.isCancelled, self.currentInstrument == instrument else { return }
+                guard self.firstIntraSessionGapIndex() != nil else { continue }
+                chartLogger.warning("gap-heal \(instrument, privacy: .public) \(self.currentPeriod, privacy: .public): intra-session hole in series — reconciling from cache")
+                self.scheduleAggregatedReconcile()
+            }
+        }
+    }
+
     /// True when the current period is built client-side by bundling smaller bars (3m always;
     /// 5m/15m/30m/4H/Daily/Weekly when rebucketing is on). For these the live "forming" bar is
     /// assembled per-instance and is NOT written to the shared cache, so a just-closed bucket can
@@ -677,6 +713,40 @@ final class ChartViewModel {
             || (clientSideRebucketing && (currentPeriod == "FOUR_HOURS" || currentPeriod == "DAILY"
                 || currentPeriod == "WEEKLY" || currentPeriod == "FIVE_MINS"
                 || currentPeriod == "FIFTEEN_MINS" || currentPeriod == "THIRTY_MINS"))
+    }
+
+    /// Nominal bucket span (ms) for the uniform-grid periods. `nil` for the session-aligned
+    /// periods (4H/Daily/Weekly) where gaps across weekends/holidays are legitimate and a fixed
+    /// step doesn't apply — there a "missing" bucket isn't a defect, so we never suppress it.
+    private static func fixedGridStepMs(for period: String) -> Int64? {
+        switch period {
+        case "ONE_MIN": return 60_000
+        case "THREE_MINS": return 180_000
+        case "FIVE_MINS": return 300_000
+        case "FIFTEEN_MINS": return 900_000
+        case "THIRTY_MINS": return 1_800_000
+        case "ONE_HOUR": return 3_600_000
+        default: return nil
+        }
+    }
+    private var fixedGridStepMs: Int64? { Self.fixedGridStepMs(for: currentPeriod) }
+
+    /// Largest hole (ms) we treat as an intra-session drift to heal rather than accept. Anything
+    /// bigger is a weekend/holiday close — a legitimate non-contiguous reopen. 6h clears the
+    /// longest real gap (a stall) while staying well under a weekend.
+    private static let maxHealableGapMs: Int64 = 6 * 60 * 60 * 1000
+
+    /// Index of the first intra-session hole in `series` for `period` — a non-contiguous step on
+    /// the uniform grid too small to be a weekend/holiday — or `nil` when contiguous. Static so the
+    /// live series and the load path (vetting a cached series before painting it) share one rule.
+    /// `nil` for session-aligned periods (4H/Daily/Weekly), where a missing bucket is legitimate.
+    static func intraSessionGapIndex(in series: [CandleBar], period: String) -> Int? {
+        guard let step = fixedGridStepMs(for: period), series.count > 1 else { return nil }
+        for i in 1..<series.count {
+            let d = series[i].time - series[i - 1].time
+            if d > step && d <= maxHealableGapMs { return i }
+        }
+        return nil
     }
 
     func handleBar(_ bar: CandleBar, expectedInstrument: String, expectedPeriod: String) {
@@ -691,12 +761,27 @@ final class ChartViewModel {
             // Update the last bar if it has the same timestamp, otherwise append
             if let lastIndex = bars.indices.last, bars[lastIndex].time == bar.time {
                 bars[lastIndex] = bar
-            } else if bar.time > bars[bars.count - 1].time {
+            } else if let last = bars.last, bar.time > last.time {
                 // While catching up a stale launch cache, don't append a forming bar beyond
                 // the tail — the bars between the stale tail and this bucket haven't been
                 // filled yet, so it would render as a candle jammed against a gap. The
                 // in-flight history fetch will paint the full series (this bucket included).
                 guard !isBackfilling else { return }
+                // Same artifact, different cause: a late subscriber (e.g. an MTF cell) loads
+                // history up to its tail, then the shared multicaster replays the live forming
+                // bar — which can already be several buckets ahead. Appending it paints a lone
+                // candle floating past an empty gap ("missing data"). For the uniform grid,
+                // suppress that paint when the hole is small (an intra-session drift, NOT a
+                // weekend) and reconcile to splice the real bars from the continuous cache. The
+                // next contiguous tick then appends normally. Big (weekend/holiday) holes fall
+                // through and append — a legitimate non-contiguous reopen.
+                if let step = fixedGridStepMs,
+                   bar.time - last.time > step,
+                   bar.time - last.time <= Self.maxHealableGapMs {
+                    chartLogger.warning("gap-suppress \(self.currentInstrument, privacy: .public) \(self.currentPeriod, privacy: .public): forming bar \((bar.time - last.time) / step) buckets past tail — reconciling instead of painting a floating candle")
+                    scheduleAggregatedReconcile()
+                    return
+                }
                 bars.append(bar)
                 if autoScroll { advanceByOneCandle() }
                 // A derived bucket just rolled over: the bar that was forming is now frozen and
@@ -750,16 +835,29 @@ final class ChartViewModel {
             guard !Task.isCancelled,
                   instrument == currentInstrument, period == currentPeriod,
                   !authoritative.isEmpty else { return }
-            // Authoritative closed bars + our own live forming bar (if it's newer than the last
-            // authoritative bar). Keeps the chart live while correcting the frozen buckets.
             let livePartial = (bars.last?.partial == true) ? bars.last : nil
-            var corrected = authoritative.filter { !$0.partial }
-            if let live = livePartial, live.time > (corrected.last?.time ?? .min) {
-                corrected.append(live)
-            }
+            let corrected = Self.reconciledBars(authoritative: authoritative, liveForming: livePartial)
             guard corrected != bars else { return }
             bars = corrected
         }
+    }
+
+    /// Merge the authoritative re-aggregation with our own live forming bar. The authoritative
+    /// CLOSED bars correct any just-frozen bucket, but the live forming bar — shared across every
+    /// chart via `LiveCandleMulticaster`, so it holds the complete in-progress bucket — must always
+    /// win for its own bucket. The re-aggregation can otherwise emit the in-progress bucket as a
+    /// mis-flagged, incomplete CLOSED bar (the rebuild path bundles only the 1m bars already on
+    /// disk, missing the latest minutes that live only in the tick stream); keeping it would
+    /// overwrite the good live bar and render as a thin "missing-data" candle that differs between
+    /// two charts of the same instrument/period. So drop any authoritative bar at or after the
+    /// forming bucket and re-append the live bar.
+    static func reconciledBars(authoritative: [CandleBar], liveForming: CandleBar?) -> [CandleBar] {
+        var corrected = authoritative.filter { !$0.partial }
+        if let live = liveForming, live.partial {
+            corrected.removeAll { $0.time >= live.time }
+            corrected.append(live)
+        }
+        return corrected
     }
 
     /// Request the chart to (re)position at the live edge. The actual snap is performed by
@@ -794,6 +892,8 @@ final class ChartViewModel {
         wsTask = nil
         liveWatchdogTask?.cancel()
         liveWatchdogTask = nil
+        gapHealTask?.cancel()
+        gapHealTask = nil
         atrTask?.cancel()
         atrTask = nil
         isConnected = false

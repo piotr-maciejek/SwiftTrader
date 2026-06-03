@@ -107,6 +107,172 @@ struct ChartViewModelTests {
         #expect(mock.cachedBars.isEmpty)
     }
 
+    // MARK: - handleBar: intra-session gap suppression
+
+    @Test("Forming bar past an intra-session gap is not painted as a floating candle")
+    func gapSuppressesFloatingFormingBar() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.currentPeriod = "FIFTEEN_MINS"
+        let base: Int64 = 1_700_000_000_000
+        vm.bars = [makeBar(time: base), makeBar(time: base + 900_000)]   // tail at base+15m
+
+        // Forming bar 3 buckets ahead (base+30m and +45m are missing) — a late-subscriber drift.
+        vm.handleBar(makeBar(time: base + 900_000 * 4, partial: true),
+                     expectedInstrument: "EURUSD", expectedPeriod: "FIFTEEN_MINS")
+
+        // Not appended as a lone candle floating past the gap; reconcile fills it instead.
+        #expect(vm.bars.count == 2)
+        #expect(vm.bars.last?.time == base + 900_000)
+    }
+
+    @Test("Forming bar one contiguous bucket ahead still appends")
+    func contiguousFormingBarAppends() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.currentPeriod = "FIFTEEN_MINS"
+        let base: Int64 = 1_700_000_000_000
+        vm.bars = [makeBar(time: base)]
+
+        vm.handleBar(makeBar(time: base + 900_000, partial: true),
+                     expectedInstrument: "EURUSD", expectedPeriod: "FIFTEEN_MINS")
+
+        #expect(vm.bars.count == 2)
+        #expect(vm.bars.last?.time == base + 900_000)
+    }
+
+    @Test("Forming bar past a weekend-sized gap still appends (legitimate reopen)")
+    func weekendGapStillAppends() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.currentPeriod = "FIFTEEN_MINS"
+        let base: Int64 = 1_700_000_000_000
+        vm.bars = [makeBar(time: base)]
+
+        // ~50h later (a weekend) — beyond the heal window, so it appends as a legitimate reopen.
+        vm.handleBar(makeBar(time: base + 50 * 3_600_000, partial: true),
+                     expectedInstrument: "EURUSD", expectedPeriod: "FIFTEEN_MINS")
+
+        #expect(vm.bars.count == 2)
+    }
+
+    // MARK: - firstIntraSessionGapIndex: periodic self-heal detector
+
+    @Test("Detects an intra-session hole in the series")
+    func detectsIntraSessionGap() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.currentPeriod = "FIVE_MINS"
+        let base: Int64 = 1_700_000_000_000
+        // base, +5m, then jump to +20m (missing +10m and +15m)
+        vm.bars = [makeBar(time: base), makeBar(time: base + 300_000), makeBar(time: base + 1_200_000)]
+
+        #expect(vm.firstIntraSessionGapIndex() == 2)
+    }
+
+    @Test("Contiguous series has no gap")
+    func contiguousSeriesNoGap() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.currentPeriod = "FIVE_MINS"
+        let base: Int64 = 1_700_000_000_000
+        vm.bars = [makeBar(time: base), makeBar(time: base + 300_000), makeBar(time: base + 600_000)]
+
+        #expect(vm.firstIntraSessionGapIndex() == nil)
+    }
+
+    @Test("Weekend-sized hole is not flagged as an intra-session gap")
+    func weekendHoleNotFlagged() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.currentPeriod = "FIVE_MINS"
+        let base: Int64 = 1_700_000_000_000
+        vm.bars = [makeBar(time: base), makeBar(time: base + 50 * 3_600_000)]   // ~weekend
+
+        #expect(vm.firstIntraSessionGapIndex() == nil)
+    }
+
+    @Test("Session-aligned periods are never gap-flagged")
+    func sessionAlignedNeverFlagged() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.currentPeriod = "DAILY"
+        let base: Int64 = 1_700_000_000_000
+        vm.bars = [makeBar(time: base), makeBar(time: base + 5 * 86_400_000)]
+
+        #expect(vm.firstIntraSessionGapIndex() == nil)
+    }
+
+    // MARK: - intraSessionGapIndex: shared load-path / live-path gap rule
+
+    @Test("Static gap index flags a hole in a cached series before painting")
+    func staticGapIndexFlagsHole() {
+        let base: Int64 = 1_700_000_000_000
+        let gapped = [makeBar(time: base), makeBar(time: base + 180_000), makeBar(time: base + 720_000)]
+        #expect(ChartViewModel.intraSessionGapIndex(in: gapped, period: "THREE_MINS") == 2)
+    }
+
+    @Test("Static gap index passes a contiguous cached series")
+    func staticGapIndexPassesContiguous() {
+        let base: Int64 = 1_700_000_000_000
+        let ok = [makeBar(time: base), makeBar(time: base + 180_000), makeBar(time: base + 360_000)]
+        #expect(ChartViewModel.intraSessionGapIndex(in: ok, period: "THREE_MINS") == nil)
+    }
+
+    @Test("Static gap index ignores weekend-sized holes and session-aligned periods")
+    func staticGapIndexIgnoresWeekendAndDaily() {
+        let base: Int64 = 1_700_000_000_000
+        let weekend = [makeBar(time: base), makeBar(time: base + 50 * 3_600_000)]
+        #expect(ChartViewModel.intraSessionGapIndex(in: weekend, period: "THREE_MINS") == nil)
+        let daily = [makeBar(time: base), makeBar(time: base + 5 * 86_400_000)]
+        #expect(ChartViewModel.intraSessionGapIndex(in: daily, period: "DAILY") == nil)
+    }
+
+    // MARK: - reconciledBars: live forming bar always wins for its bucket
+
+    @Test("Reconcile keeps the complete live forming bar over an incomplete same-bucket authoritative bar")
+    func reconcileLiveBarWinsSameBucket() {
+        // The rebuild path can emit the in-progress bucket as a mis-flagged CLOSED bar built from
+        // only the 1m bars already on disk — thin/incomplete. Our live forming bar holds the full
+        // bucket and must win, or the chart paints a "missing-data" candle that drifts from peers.
+        let live = makeBar(time: 900_000, high: 1.5, low: 0.5, close: 1.4, partial: true)
+        let authoritative = [
+            makeBar(time: 0),
+            makeBar(time: 900_000, high: 1.05, low: 0.99, close: 1.0, partial: false),
+        ]
+
+        let result = ChartViewModel.reconciledBars(authoritative: authoritative, liveForming: live)
+
+        #expect(result.count == 2)
+        #expect(result.last?.time == 900_000)
+        #expect(result.last?.partial == true)
+        #expect(result.last?.high == 1.5)   // the live bar, not the incomplete 1.05
+    }
+
+    @Test("Reconcile appends the live forming bar after the last closed authoritative bar")
+    func reconcileAppendsLiveBeyondClosed() {
+        let live = makeBar(time: 1_800_000, partial: true)
+        let authoritative = [makeBar(time: 0), makeBar(time: 900_000)]
+
+        let result = ChartViewModel.reconciledBars(authoritative: authoritative, liveForming: live)
+
+        #expect(result.map(\.time) == [0, 900_000, 1_800_000])
+        #expect(result.last?.partial == true)
+    }
+
+    @Test("Reconcile drops authoritative partials and needs no live bar")
+    func reconcileFiltersAuthoritativePartials() {
+        let authoritative = [makeBar(time: 0), makeBar(time: 900_000, partial: true)]
+
+        let result = ChartViewModel.reconciledBars(authoritative: authoritative, liveForming: nil)
+
+        #expect(result.count == 1)
+        #expect(result.last?.time == 0)
+    }
+
+    @Test("Reconcile ignores a non-partial live bar")
+    func reconcileIgnoresNonPartialLive() {
+        let authoritative = [makeBar(time: 0), makeBar(time: 900_000)]
+
+        let result = ChartViewModel.reconciledBars(
+            authoritative: authoritative, liveForming: makeBar(time: 1_800_000, partial: false))
+
+        #expect(result.map(\.time) == [0, 900_000])
+    }
+
     // MARK: - handleBar: stale connection guard
 
     @Test("Bar ignored when expected instrument doesn't match")
