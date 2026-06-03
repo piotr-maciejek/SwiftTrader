@@ -83,6 +83,7 @@ struct TradeHistoryView: View {
 
     private var summaryBar: some View {
         let total = vm.totalNetProfit
+        let totalR = PositionMetadata.totalRealizedR(trades: vm.trades, metadata: metadata)
         return HStack(spacing: 16) {
             summaryCell(label: "Trades", value: "\(vm.trades.count)")
             summaryCell(label: "Wins",   value: "\(vm.winCount)")
@@ -92,6 +93,9 @@ struct TradeHistoryView: View {
             summaryCell(label: "Net P&L",
                         value: String(format: "%.2f", total),
                         color: total >= 0 ? .green : .red)
+            summaryCell(label: "Total R",
+                        value: totalR.map { String(format: "%+.2fR", $0) } ?? "—",
+                        color: totalR == nil ? .secondary : (totalR! >= 0 ? .green : .red))
             Spacer()
         }
         .padding(.horizontal, 12)
