@@ -76,6 +76,39 @@ struct PositionMetadataTests {
         #expect(approx(m.currentR(fromPositionPips: pips), m.currentR(markPrice: mark) ?? -99))
     }
 
+    // MARK: - Portfolio totals
+
+    private func pos(_ label: String, pips: Double, sl: Double = 1.0990) -> Position {
+        Position(label: label, instrument: "EURUSD", direction: "BUY", amount: 0.1,
+                 openPrice: 1.1000, stopLoss: sl, takeProfit: 1.1030,
+                 profitLoss: 0, profitLossPips: pips, state: "FILLED")
+    }
+
+    @Test("totalOpenR sums current R across positions that have metadata")
+    func totalOpenRSums() {
+        // A: +20 pips / 10 risk = +2R; B: -10 / 10 = -1R; C: no metadata (ignored). Total = +1R.
+        let md = ["A": meta(id: "A", fillPrice: 1.1000, initialSL: 1.0990),
+                  "B": meta(id: "B", fillPrice: 1.1000, initialSL: 1.0990)]
+        let total = PositionMetadata.totalOpenR(
+            positions: [pos("A", pips: 20), pos("B", pips: -10), pos("C", pips: 5)], metadata: md)
+        #expect(approx(total, 1.0))
+    }
+
+    @Test("totalOpenR is nil when no position has metadata")
+    func totalOpenRNil() {
+        #expect(PositionMetadata.totalOpenR(positions: [pos("X", pips: 10)], metadata: [:]) == nil)
+    }
+
+    @Test("totalRealizedR sums realized R across closed trades with metadata")
+    func totalRealizedRSums() {
+        let t = TradeRecord(positionId: "A", instrument: "EURUSD", direction: "BUY", amount: 0.1,
+                            openPrice: 1.1000, closePrice: 1.1020, profitLoss: 0, grossProfitLoss: 0,
+                            swaps: 0, commission: 0, openTime: 1, closeTime: 2, positionType: "REGULAR")
+        let md = ["A": meta(id: "A", fillPrice: 1.1000, initialSL: 1.0990)]   // risk 10, +20 pips = +2R
+        #expect(approx(PositionMetadata.totalRealizedR(trades: [t], metadata: md), 2.0))
+        #expect(PositionMetadata.totalRealizedR(trades: [t], metadata: [:]) == nil)
+    }
+
     // MARK: - Store: pruning
 
     @Test("prune keeps the newest records by open time")

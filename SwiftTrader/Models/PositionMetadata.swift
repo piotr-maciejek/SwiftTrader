@@ -63,4 +63,17 @@ extension PositionMetadata {
     func currentR(fromPositionPips pips: Double) -> Double? {
         riskPips.map { pips / $0 }
     }
+
+    /// Portfolio total of current R across OPEN positions that have metadata (joined by label).
+    /// `nil` when none do — so the UI shows "—" rather than a misleading 0.00R.
+    static func totalOpenR(positions: [Position], metadata: [String: PositionMetadata]) -> Double? {
+        let rs = positions.compactMap { metadata[$0.label]?.currentR(fromPositionPips: $0.profitLossPips) }
+        return rs.isEmpty ? nil : rs.reduce(0, +)
+    }
+
+    /// Total realized R across CLOSED trades that have metadata (joined by positionId). `nil` when none.
+    static func totalRealizedR(trades: [TradeRecord], metadata: [String: PositionMetadata]) -> Double? {
+        let rs = trades.compactMap { metadata[$0.positionId]?.realizedR(closePrice: $0.closePrice) }
+        return rs.isEmpty ? nil : rs.reduce(0, +)
+    }
 }

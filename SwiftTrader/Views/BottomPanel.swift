@@ -83,6 +83,8 @@ struct BottomPanel: View {
 
     private var positionsList: some View {
         VStack(spacing: 0) {
+            positionsSummaryBar
+            Divider()
             // Header row
             HStack(spacing: 0) {
                 headerCell("Instrument", width: 90)
@@ -338,6 +340,40 @@ struct BottomPanel: View {
             Task { await trading.modifyPosition(label: latest.label, stopLoss: latest.stopLoss, takeProfit: val) }
         }
         cancelEdit()
+    }
+
+    /// Open-positions summary: total R (always shown — pips/ratio, not money) and total P&L
+    /// (hidden in incognito). Mirrors the History tab's summary so the positions tab has the same
+    /// at-a-glance totals.
+    private var positionsSummaryBar: some View {
+        let totalPnL = trading.positions.reduce(0) { $0 + $1.profitLoss }
+        let totalR = PositionMetadata.totalOpenR(positions: trading.positions, metadata: metadata)
+        return HStack(spacing: 16) {
+            summaryCell(label: "Open", value: "\(trading.positions.count)")
+            summaryCell(label: "Total R",
+                        value: totalR.map { String(format: "%+.2fR", $0) } ?? "—",
+                        color: totalR == nil ? .secondary : (totalR! >= 0 ? .green : .red))
+            if !settings.incognitoMode {
+                summaryCell(label: "Total P&L",
+                            value: String(format: "%.2f", totalPnL),
+                            color: totalPnL >= 0 ? .green : .red)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(Color.secondary.opacity(0.05))
+    }
+
+    private func summaryCell(label: String, value: String, color: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color)
+        }
     }
 
     private func headerCell(_ text: String, width: CGFloat) -> some View {
