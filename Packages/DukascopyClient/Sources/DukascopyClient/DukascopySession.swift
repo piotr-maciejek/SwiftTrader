@@ -113,6 +113,18 @@ public actor DukascopySession {
     /// simultaneously must collapse to a single rebuild cycle, not stack on each other.
     private var reconnectInProgress = false
 
+    /// Watchdog-reconnect storm guards. A degraded DDS history endpoint can stay dead across
+    /// rebuilds (every fetchHistory hangs), so rebuilding then re-firing the same fetches loops —
+    /// and the rebuild's own version handshake can fail over the bad link, killing the session and
+    /// forcing a manual relaunch. `triggerWatchdogReconnect` throttles rebuilds with an exponential
+    /// cooldown keyed on consecutive rebuilds that didn't restore history, and retries a transient
+    /// connect failure instead of one-shotting. The counter resets the instant a history chunk
+    /// arrives (`handleHistoryGroup`), so it self-recovers when the channel comes back.
+    private var lastWatchdogReconnectAt: Date?
+    private var consecutiveWatchdogReconnects = 0
+    private let watchdogBaseCooldown: TimeInterval = 30
+    private let watchdogMaxCooldown: TimeInterval = 300
+
     /// A transport read failure (e.g. a sleep/network blip — `POSIXErrorCode 60`) is usually
     /// transient, not a dead account, so we try a bounded number of in-place reconnects before
     /// surfacing a terminal failure (which sends the user back to the login gate). The budget
@@ -556,6 +568,10 @@ public actor DukascopySession {
 
     private func handleHistoryGroup(_ g: CandleHistoryGroup) {
         guard let reqId = g.requestId, pendingHistory[reqId] != nil else { return }
+        // A history chunk arrived — the DDS channel is healthy again, so clear the watchdog
+        // throttle: the next dead-channel event rebuilds promptly (no lingering cooldown).
+        consecutiveWatchdogReconnects = 0
+        lastWatchdogReconnectAt = nil
         pendingHistory[reqId]?.lastActivity = Date()
         if let order = g.messageOrder {
             pendingHistory[reqId]?.groups[order] = g
@@ -617,16 +633,45 @@ public actor DukascopySession {
         log.error("fetchHistory req=\(reqId, privacy: .public) idle-timed-out — DDS channel likely dead, triggering watchdog reconnect")
         pendingHistory[reqId] = nil
         cont.resume(throwing: SessionError.timedOut("history request (no data received)"))
-        // The DDS chart-data channel doesn't self-recover from this state: every
-        // subsequent fetchHistory hangs identically until the socket is rebuilt. Fire a
-        // reconnect now; the debounce flag inside `reconnect()` collapses simultaneous
-        // timeouts to one cycle. Caller's catch sees the .timedOut error and can retry —
-        // by the time it does, the rebuilt session is up and the retry succeeds.
+        // The DDS chart-data channel doesn't self-recover from this state: every subsequent
+        // fetchHistory hangs identically until the socket is rebuilt. Trigger a throttled,
+        // self-recovering watchdog reconnect (see `triggerWatchdogReconnect`).
+        triggerWatchdogReconnect()
+    }
+
+    /// Single coordinated entry for watchdog rebuilds, hardened against the reconnect storm seen
+    /// when the DDS history endpoint is degraded (every fetchHistory hangs ~30–85s, each timeout
+    /// firing a rebuild, the rebuild re-firing the same fetches, and the rebuild's handshake
+    /// eventually failing → session death needing a manual relaunch). Two guards:
+    ///
+    /// - **Exponential cooldown** keyed on `consecutiveWatchdogReconnects`: collapses the burst of
+    ///   simultaneous timeouts into one cycle and backs successive rebuilds further apart
+    ///   (30s → 60 → 120 → … capped at 300s) so a persistently-dead channel can't storm. It never
+    ///   gives up permanently — the counter resets the instant a history chunk arrives, so it
+    ///   self-recovers the moment the channel comes back.
+    /// - **Transient-failure retry**: the rebuild itself retries a transient connect failure (e.g. a
+    ///   garbled version handshake over the bad link) up to 3× with backoff, instead of one-shotting
+    ///   to a dead session.
+    private func triggerWatchdogReconnect() {
+        let cooldown = min(
+            watchdogMaxCooldown,
+            watchdogBaseCooldown * pow(2, Double(max(0, consecutiveWatchdogReconnects - 1))))
+        if let last = lastWatchdogReconnectAt, Date().timeIntervalSince(last) < cooldown {
+            log.info("watchdog reconnect suppressed — within \(Int(cooldown), privacy: .public)s cooldown (consecutive=\(self.consecutiveWatchdogReconnects, privacy: .public))")
+            return
+        }
+        lastWatchdogReconnectAt = Date()
+        consecutiveWatchdogReconnects += 1
         Task { [weak self] in
-            do {
-                try await self?.reconnect()
-            } catch {
-                log.error("watchdog reconnect failed: \(error.localizedDescription, privacy: .public)")
+            guard let self else { return }
+            for attempt in 1...3 {
+                do {
+                    try await self.reconnect()
+                    return
+                } catch {
+                    log.error("watchdog reconnect attempt \(attempt, privacy: .public)/3 failed: \(error.localizedDescription, privacy: .public)")
+                    if attempt < 3 { try? await Task.sleep(for: .seconds(TimeInterval(min(15, 3 * attempt)))) }
+                }
             }
         }
     }
