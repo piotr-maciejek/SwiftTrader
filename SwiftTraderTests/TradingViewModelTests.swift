@@ -32,6 +32,8 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
 
     /// Captured on the first call to streamPendingOrders so tests can push snapshots.
     var pendingOrdersContinuation: AsyncThrowingStream<PendingOrdersSnapshot, Error>.Continuation?
+    /// Captured on the first call to streamSnapshots so tests can push trading snapshots.
+    var snapshotContinuation: AsyncThrowingStream<TradingSnapshot, Error>.Continuation?
 
     func submitOrder(instrument: String, direction: String, amount: Double,
                      stopLoss: Double, takeProfit: Double,
@@ -54,7 +56,10 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
     }
 
     func streamSnapshots() -> AsyncThrowingStream<TradingSnapshot, Error> {
-        AsyncThrowingStream { continuation in continuation.onTermination = { _ in } }
+        AsyncThrowingStream { continuation in
+            self.snapshotContinuation = continuation
+            continuation.onTermination = { _ in }
+        }
     }
 
     func streamPendingOrders() -> AsyncThrowingStream<PendingOrdersSnapshot, Error> {

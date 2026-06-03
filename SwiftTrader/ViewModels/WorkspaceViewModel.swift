@@ -33,6 +33,11 @@ final class WorkspaceViewModel {
     let settings = AppSettings.shared
     let trading: TradingViewModel
     let tradeHistory: TradeHistoryViewModel
+    /// R-multiple / slippage metadata, keyed by position id, synced via iCloud. The store persists;
+    /// this observable mirror drives the UI (open-positions + History). Updated from the store's
+    /// `onChange` (local binds + external iCloud syncs).
+    let metadataStore = PositionMetadataStore()
+    var positionMetadata: [String: PositionMetadata] = [:]
     var newsItems: [NewsItem] = []
     /// Non-nil while the news/calendar feed is failing (e.g. a subscribe error). Drives a
     /// "news unavailable" badge in the right panel so a failed feed reads differently from
@@ -96,6 +101,14 @@ final class WorkspaceViewModel {
             tradeHistory = TradeHistoryViewModel(service: NativeTradeHistoryService(session: nil))
         }
         newsCoordinator = NewsCoordinator(port: settings.port)
+        // R-multiple / slippage metadata: the store persists + syncs; mirror its changes into the
+        // observable `positionMetadata`, and let `trading` capture into it. `attachNativeSession`
+        // re-points both at the confirmed account on connect / account switch. (Set after all stored
+        // properties are initialized, since the `[weak self]` capture needs a fully-initialized self.)
+        metadataStore.onChange = { [weak self] dict in self?.positionMetadata = dict }
+        trading.metadataStore = metadataStore
+        trading.accountID = AccountStore.shared.selectedAccountID
+        positionMetadata = metadataStore.reload(accountID: AccountStore.shared.selectedAccountID)
         // NOTE: Do NOT start tasks here. SwiftUI re-evaluates @State initializers
         // on every body evaluation, creating (and discarding) many WorkspaceViewModels.
         // Only the first instance is kept; the rest are garbage-collected — but any
@@ -336,6 +349,11 @@ final class WorkspaceViewModel {
         // Route trading natively through this session: positions / account / spreads now
         // stream from the session, and orders place directly (no jforex-server).
         trading.reconnect(coordinator: NativeTradingCoordinator(session: session))
+        // Re-point R-multiple/slippage metadata at the now-confirmed account and reload its dict
+        // (cross-machine: shows trades opened on another Mac once iCloud has synced them).
+        let acct = AccountStore.shared.selectedAccountID
+        trading.accountID = acct
+        positionMetadata = metadataStore.reload(accountID: acct)
         // Closed-trade history (History tab) now reads from this session too.
         tradeHistory.setService(NativeTradeHistoryService(session: session))
         // News/calendar also comes from this session in native mode (Dukascopy's own feed),
