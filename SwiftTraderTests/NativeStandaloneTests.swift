@@ -404,3 +404,31 @@ struct AggregatedGapTests {
         #expect(NativeMarketDataCoordinator.hasSpuriousGap([bar(fri), bar(sun)], periodSeconds: 900) == false)
     }
 }
+
+@Suite("Raw live-bar seed bucket guard")
+struct InProgressSeedTests {
+    private func bar(_ t: Int64, high: Double) -> SwiftTrader.CandleBar {
+        SwiftTrader.CandleBar(time: t, open: 1, high: high, low: 1, close: 1, volume: 0, partial: true)
+    }
+
+    @Test("seeds from an in-progress partial that matches the current bucket")
+    func matchingBucketSeeds() {
+        let bucket: Int64 = 11 * 3_600_000
+        let seed = NativeMarketDataCoordinator.inProgressSeed(bar(bucket, high: 0.717), bucketMs: bucket)
+        #expect(seed?.time == bucket)
+        #expect(seed?.high == 0.717)
+    }
+
+    @Test("rejects a partial from the PREVIOUS bucket (the AUDUSD 1h stale-high bug)")
+    func staleBucketRejected() {
+        let prev: Int64 = 10 * 3_600_000     // 10:00 in-progress bar lingering at rollover
+        let current: Int64 = 11 * 3_600_000  // the 11:00 bucket we're seeding
+        // The stale 10:00 partial carries the prior hour's high — must NOT graft onto 11:00.
+        #expect(NativeMarketDataCoordinator.inProgressSeed(bar(prev, high: 0.71659), bucketMs: current) == nil)
+    }
+
+    @Test("nil partial yields no seed")
+    func nilPartial() {
+        #expect(NativeMarketDataCoordinator.inProgressSeed(nil, bucketMs: 3_600_000) == nil)
+    }
+}

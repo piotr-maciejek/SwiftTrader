@@ -302,9 +302,13 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         }
         switch period {
         case "ONE_HOUR":
-            return extend(snap?.oneHour)
+            let seed = Self.inProgressSeed(snap?.oneHour, bucketMs: bucketMs)
+            if seed == nil, let h = snap?.oneHour {
+                nativeLog.notice("live 1H seed mismatch \(instrument, privacy: .public): in-progress partial bucket \(h.time) != \(bucketMs); opening fresh to avoid inheriting a stale high")
+            }
+            return extend(seed)
         case "ONE_MIN":
-            return extend(snap?.oneMin)
+            return extend(Self.inProgressSeed(snap?.oneMin, bucketMs: bucketMs))
         case "DAILY", "FOUR_HOURS":
             // Only the trailing window of the source can affect the currently-forming
             // bucket — mirrors server mode's `aggregatedStream` tail cap (Daily=30,
@@ -811,6 +815,18 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// closure — i.e. a spurious gap in a derived series that should be healed by re-aggregating
     /// from the (gap-free) source. Weekend/holiday closures are expected and ignored (via
     /// `NYTradingCalendar.isClosedThroughout`, which early-exits on the first trading slot).
+    /// A raw 1H/1m live bar may only inherit OHLC from an in-progress partial that belongs to the
+    /// SAME bucket. The cached in-progress snapshot can lag by a bucket at a rollover (30s TTL, and
+    /// `seedLiveBucket` runs only once per bucket), so an unchecked seed grafts the PREVIOUS bucket's
+    /// OHLC — e.g. a 1H bar inheriting the prior hour's high, which then sticks for the whole hour
+    /// because nothing re-seeds it. Returns the partial only when its `time` matches `bucketMs`;
+    /// otherwise the caller opens the live bar fresh at the tick. (The derived periods already guard
+    /// this via their `last.time == bucketMs` / `sp.time == bucketMs` checks.)
+    static func inProgressSeed(_ partial: SwiftTrader.CandleBar?, bucketMs: Int64) -> SwiftTrader.CandleBar? {
+        guard let p = partial, p.time == bucketMs else { return nil }
+        return p
+    }
+
     static func hasSpuriousGap(_ bars: [SwiftTrader.CandleBar], periodSeconds: Int64) -> Bool {
         guard bars.count >= 2, periodSeconds > 0 else { return false }
         let cadenceMs = periodSeconds * 1000
