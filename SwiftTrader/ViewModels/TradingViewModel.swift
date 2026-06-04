@@ -111,7 +111,7 @@ final class TradingViewModel {
         var marginCapped = false
         if let equity = account?.equity, let freeMargin = account?.freeMargin {
             let sizing = PositionSizing.calculate(
-                equity: equity, freeMargin: freeMargin, riskFraction: 0.02,
+                equity: equity, freeMargin: freeMargin, riskFraction: 0.005,
                 entryPrice: currentPrice, stopLoss: sl,
                 leverage: account?.leverage ?? 30,
                 spread: spreads[instrument] ?? 0)
@@ -182,7 +182,7 @@ final class TradingViewModel {
            let freeMargin = account?.freeMargin {
             let result = PositionSizing.calculate(
                 equity: equity, freeMargin: freeMargin,
-                riskFraction: 0.02,
+                riskFraction: 0.005,
                 entryPrice: order.entryPrice, stopLoss: order.stopLoss,
                 leverage: account?.leverage ?? 30,
                 spread: spreads[instrument] ?? 0)
@@ -218,7 +218,7 @@ final class TradingViewModel {
             order.entryPrice = live
             let result = PositionSizing.calculate(
                 equity: equity, freeMargin: freeMargin,
-                riskFraction: 0.02,
+                riskFraction: 0.005,
                 entryPrice: live, stopLoss: order.stopLoss,
                 leverage: account?.leverage ?? 30,
                 spread: spreads[instrument] ?? 0)
@@ -363,7 +363,7 @@ final class TradingViewModel {
               let freeMargin = account?.freeMargin else { return }
         let result = PositionSizing.calculate(
             equity: equity, freeMargin: freeMargin,
-            riskFraction: 0.02,
+            riskFraction: 0.005,
             entryPrice: order.entryPrice, stopLoss: order.stopLoss,
             leverage: account?.leverage ?? 30,
             spread: spreads[instrument] ?? 0)

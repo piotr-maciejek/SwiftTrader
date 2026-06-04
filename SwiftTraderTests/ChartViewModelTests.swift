@@ -651,6 +651,52 @@ struct ChartViewModelTests {
         #expect(off == 0)
     }
 
+    // MARK: - xOffsetCenteringTime: viewport anchoring (TF switch + reconcile drift guard)
+
+    /// 1-minute spaced bar times, count `n`.
+    private func minuteTimes(_ n: Int) -> [Int64] {
+        (0..<n).map { Int64($0) * 60_000 }
+    }
+
+    @Test("xOffsetCenteringTime puts the targeted bar-time at the viewport center")
+    func centeringTimePlacesBarAtCenter() {
+        let times = minuteTimes(100)            // 100 bars × 10px = 1000 content
+        let off = DrawingMath.xOffsetCenteringTime(times[50], barTimes: times, slotWidth: 10, chartWidth: 200)
+        // Bar 50's screen x must equal chartWidth/2 (not clamped: raw 405 ∈ [0, 820]).
+        let x = DrawingMath.xForBar(index: 50, xOffset: off, slotWidth: 10)
+        #expect(x == 100)
+        // Round-trips through the inverse map.
+        #expect(DrawingMath.timeMsForX(100, barTimes: times, xOffset: off, slotWidth: 10) == times[50])
+    }
+
+    @Test("xOffsetCenteringTime centers a near-live time (keeping future room), clamps only at the left edge")
+    func centeringTimeKeepsFutureRoom() {
+        let times = minuteTimes(100)
+        // The newest bar CAN be centered — leaving empty future room on the right (no live-edge snap).
+        let last = DrawingMath.xOffsetCenteringTime(times[99], barTimes: times, slotWidth: 10, chartWidth: 200)
+        #expect(DrawingMath.xForBar(index: 99, xOffset: last, slotWidth: 10) == 100)   // bar 99 at center
+        #expect(last > ChartView.liveEdgeOffset(barCount: 100, slotWidth: 10, chartWidth: 200))  // past the live edge
+        // The oldest bar can't be centered — offset clamps at 0 (left-anchored).
+        let first = DrawingMath.xOffsetCenteringTime(times[0], barTimes: times, slotWidth: 10, chartWidth: 200)
+        #expect(first == 0)
+    }
+
+    @Test("reconcile drift guard: re-centering after a front-advance keeps the same time fixed")
+    func centeringTimeSurvivesFrontAdvance() {
+        // Parked centered on t=3_000_000 (bar 50 of the old window).
+        let oldTimes = minuteTimes(100)
+        let centerMs = oldTimes[50]
+        let oldOffset = DrawingMath.xOffsetCenteringTime(centerMs, barTimes: oldTimes, slotWidth: 10, chartWidth: 200)
+
+        // Reconcile swaps in a fresh window: drop 5 off the front, add 5 at the end.
+        let newTimes = (5..<105).map { Int64($0) * 60_000 }
+        let newOffset = DrawingMath.xOffsetCenteringTime(centerMs, barTimes: newTimes, slotWidth: 10, chartWidth: 200)
+
+        // The offset shifts by exactly the dropped-bar count × slot — so the same moment stays put.
+        #expect(newOffset == oldOffset - 5 * 10)
+        #expect(DrawingMath.timeMsForX(100, barTimes: newTimes, xOffset: newOffset, slotWidth: 10) == centerMs)
+    }
+
     @Test("scrollToEnd clears the one-shot guard so the view re-positions for a fresh dataset")
     func scrollToEndClearsGuard() {
         let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
@@ -661,22 +707,28 @@ struct ChartViewModelTests {
         vm.stop()
     }
 
-    @Test("a width change while autoscrolling re-requests a snap; a manual scroll-back is left alone")
-    func widthChangeReSnapsOnlyWhileAutoscrolling() {
+    @Test("a width change snaps to the live edge while following, and re-centers the anchor while parked")
+    func widthChangeRepositionsViewport() {
         let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
-        vm.bars = bars(100)
+        vm.bars = bars(100)   // times 1000…100000, slot 10 at xScale 1
 
-        // Autoscrolling: a new width clears the guard so the view snaps to the new margin.
+        // Following the edge: a new width clears the guard so the view re-snaps to the new margin.
         vm.transform.hasAutoScrolledToEnd = true
         vm.autoScroll = true
+        vm.viewportAnchorTimeMs = nil
         vm.chartWidth = 600
         #expect(vm.transform.hasAutoScrolledToEnd == false)
 
-        // Scrolled back: a width change must NOT re-request a snap.
+        // Parked on an anchored time: a width change re-centers that time (no live-edge snap; guard
+        // stays set so the view's one-shot snap doesn't fight it).
         vm.transform.hasAutoScrolledToEnd = true
         vm.autoScroll = false
+        vm.viewportAnchorTimeMs = 50_000   // bar index 49
         vm.chartWidth = 800
         #expect(vm.transform.hasAutoScrolledToEnd == true)
+        let expected = DrawingMath.xOffsetCenteringTime(
+            50_000, barTimes: vm.bars.map(\.time), slotWidth: vm.transform.candleSlotWidth, chartWidth: 800)
+        #expect(vm.transform.xOffset == expected)
         vm.stop()
     }
 

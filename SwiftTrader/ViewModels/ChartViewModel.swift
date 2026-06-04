@@ -111,8 +111,10 @@ final class ChartViewModel {
     /// re-requests a snap so the margin tracks the new width.
     var chartWidth: CGFloat = 0 {
         didSet {
-            guard chartWidth != oldValue, chartWidth > 0, autoScroll else { return }
-            scrollToEnd()
+            guard chartWidth != oldValue, chartWidth > 0 else { return }
+            // Following the edge → re-snap so the margin tracks the new width; parked → re-center the
+            // anchored time so a width change (e.g. opening the order box) doesn't shift the view.
+            repositionViewport()
         }
     }
 
@@ -149,11 +151,15 @@ final class ChartViewModel {
     /// Adopt a fresh coordinator (port change). The workspace builds one new
     /// coordinator and broadcasts it so every tab swaps atomically.
     func reconnect(coordinator: any MarketDataProviding) {
+        // Keep the zoom across a connection blip; the position is restored from the persistent
+        // viewport anchor (and autoScroll) once start() repaints — see repositionViewport.
+        let keptScale = transform.xScale
         stop()
         self.coordinator = coordinator
         hasStarted = false
         bars = []
         transform = ChartTransform()
+        transform.xScale = keptScale
         startAsync()
     }
 
@@ -177,7 +183,7 @@ final class ChartViewModel {
         let cached = await coordinator.cache.getBars(for: displayKey)
         if !cached.isEmpty {
             bars = cached
-            scrollToEnd()
+            repositionViewport()
             // ContentView hides ChartLoadingCard when bars are non-empty, so no
             // overlay is shown over the cached bars while we refresh in the background.
         } else {
@@ -241,13 +247,73 @@ final class ChartViewModel {
         selectedDrawingID = nil
         drawingTool = nil
         currentInstrument = instrument
+        // A different instrument opens at the live edge (the old time anchor is meaningless here).
+        viewportAnchorTimeMs = nil
+        autoScroll = true
         reloadChart()
+    }
+
+    /// The bar-time to keep horizontally centered while the user is scrolled back (NOT following the
+    /// live edge). Set whenever the user pans/zooms away from the edge (`onUserScroll`) and persists
+    /// across reloads, reconnects, reconcile swaps and timeframe switches — so none of those paths
+    /// yank a parked chart to the live edge. `nil` ⇒ follow the live edge. The companion flag is
+    /// `autoScroll` (true ⇒ following). The two are kept in lock-step by `onUserScroll`.
+    var viewportAnchorTimeMs: Int64?
+
+    /// "Is the chart pinned at the live-edge resting position?" — i.e. genuinely following live ticks,
+    /// not merely showing the newest bar. Tested as `xOffset ≈ liveEdgeOffset` (within 2 slots), in
+    /// BOTH directions: scrolling back into history OR pulling the newest bar inward to leave empty
+    /// "future" room on the right both count as parked, so neither gets yanked to the edge on a
+    /// reload/reconnect/timeframe switch. Empty/unmeasured ⇒ following (the default).
+    var isViewAtLiveEdge: Bool {
+        guard chartWidth > 0, !bars.isEmpty else { return true }
+        let liveEdge = ChartView.liveEdgeOffset(
+            barCount: bars.count, slotWidth: transform.candleSlotWidth, chartWidth: chartWidth)
+        return abs(transform.xOffset - liveEdge) <= transform.candleSlotWidth * 2
+    }
+
+    /// The bar-time at the horizontal center of the viewport, or nil if we can't map it yet.
+    private func currentViewportCenterTimeMs() -> Int64? {
+        guard chartWidth > 0, !bars.isEmpty else { return nil }
+        return DrawingMath.timeMsForX(chartWidth / 2,
+                                      barTimes: bars.map(\.time),
+                                      xOffset: transform.xOffset,
+                                      slotWidth: transform.candleSlotWidth)
+    }
+
+    /// Re-anchor the viewport so `ms` sits at the horizontal center (clamped). Pure offset math.
+    private func setViewportCenter(toTimeMs ms: Int64) {
+        guard chartWidth > 0, !bars.isEmpty else { return }
+        transform.xOffset = DrawingMath.xOffsetCenteringTime(
+            ms, barTimes: bars.map(\.time),
+            slotWidth: transform.candleSlotWidth, chartWidth: chartWidth)
+    }
+
+    /// THE single entry point that positions the chart horizontally after ANY bars mutation —
+    /// initial load, reload, reconnect, history backfill, reconcile swap, width change. Following the
+    /// live edge ⇒ snap to it; scrolled back ⇒ re-pin the anchored center time so nothing drifts to
+    /// the edge. Because the anchor is an absolute TIME (not a pixel offset or index), it survives
+    /// timeframe switches and fixed-window swaps. Setting `hasAutoScrolledToEnd` suppresses the
+    /// view's one-shot live-edge snap while parked so it doesn't fight the restored center.
+    func repositionViewport() {
+        let willCenter = viewportAnchorTimeMs != nil && !autoScroll && chartWidth > 0 && !bars.isEmpty
+        let mode = willCenter ? "CENTER" : "EDGE"
+        chartLogger.notice("VPORT reposition \(self.currentInstrument, privacy: .public) \(self.currentPeriod, privacy: .public) \(mode, privacy: .public) autoScroll=\(self.autoScroll, privacy: .public) anchor=\(self.viewportAnchorTimeMs ?? -1, privacy: .public) atEdge=\(self.isViewAtLiveEdge, privacy: .public) xOff=\(Int(self.transform.xOffset), privacy: .public) w=\(Int(self.chartWidth), privacy: .public) bars=\(self.bars.count, privacy: .public)")
+        if willCenter, let ms = viewportAnchorTimeMs {
+            setViewportCenter(toTimeMs: ms)
+            transform.hasAutoScrolledToEnd = true
+        } else {
+            scrollToEnd()
+        }
     }
 
     func switchPeriod(_ period: String) {
         guard period != currentPeriod else { return }
+        // The viewport anchor (an absolute time) and `autoScroll` persist across the reload, so the
+        // new timeframe re-centers on the same moment (or stays at the live edge). Keep the zoom too.
+        chartLogger.notice("VPORT switchPeriod \(self.currentPeriod, privacy: .public)->\(period, privacy: .public): autoScroll=\(self.autoScroll, privacy: .public) anchor=\(self.viewportAnchorTimeMs ?? -1, privacy: .public) atEdge=\(self.isViewAtLiveEdge, privacy: .public) xOff=\(Int(self.transform.xOffset), privacy: .public)")
         currentPeriod = period
-        reloadChart()
+        reloadChart(keepZoom: true)
     }
 
     func reloadCurrentChart() {
@@ -360,7 +426,7 @@ final class ChartViewModel {
         }
     }
 
-    private func reloadChart() {
+    private func reloadChart(keepZoom: Bool = false) {
         startTask?.cancel()
         reloadTask?.cancel()
         wsTask?.cancel()
@@ -371,8 +437,12 @@ final class ChartViewModel {
 
         // Reset synchronously so the Canvas never sees a stale xOffset
         // paired with fewer bars from the new instrument/period.
+        let keptScale = transform.xScale
         bars = []
         transform = ChartTransform()
+        // Keep the pre-switch zoom across a timeframe switch; the position is restored from the
+        // persistent viewport anchor once bars paint (see repositionViewport).
+        if keepZoom { transform.xScale = keptScale }
         error = nil
 
         let key = CandleCache.CacheKey.forDisplay(
@@ -389,7 +459,7 @@ final class ChartViewModel {
             let cached = await coordinator.cache.getBars(for: key)
             if !cached.isEmpty, Self.intraSessionGapIndex(in: cached, period: logPeriod) == nil {
                 bars = cached
-                scrollToEnd()
+                repositionViewport()
                 chartLogger.info("reloadChart \(logInstrument, privacy: .public) \(logPeriod, privacy: .public) painted \(cached.count) cached bars in \(Int(Date().timeIntervalSince(cacheT0) * 1000))ms")
             } else if !cached.isEmpty {
                 // The display cache transiently holds an intra-session hole (e.g. the aggregated
@@ -452,7 +522,7 @@ final class ChartViewModel {
                     bars = history
                     error = nil
                     loadingStatus = nil
-                    scrollToEnd()
+                    repositionViewport()
                     chartLogger.info("loadHistoryWithRetry \(instrument, privacy: .public) \(period, privacy: .public) painted \(history.count) bars in \(Int(Date().timeIntervalSince(t0) * 1000))ms (attempt \(attempt), coldCache=\(coldCache))")
                     return
                 }
@@ -507,7 +577,7 @@ final class ChartViewModel {
             guard instrument == currentInstrument, period == currentPeriod else { return }
             bars = history
             error = nil
-            scrollToEnd()
+            repositionViewport()
         } catch {
             if bars.isEmpty {
                 self.error = "Failed to load history: \(error.localizedDescription)"
@@ -888,12 +958,13 @@ final class ChartViewModel {
             let livePartial = (bars.last?.partial == true) ? bars.last : nil
             let corrected = Self.reconciledBars(authoritative: authoritative, current: bars, liveForming: livePartial)
             guard corrected != bars else { return }
+            // A reconcile REPLACES the series with a fresh fixed-count window ending at now, so its
+            // FRONT advances as time passes. `xOffset` is a pixel offset measured in bars, so without
+            // re-anchoring a scrolled-back view silently drifts toward the live edge every reconcile
+            // (and a count change opens a right-margin gap at the live edge). repositionViewport
+            // re-pins the anchored center time (or snaps to the live edge when following).
             bars = corrected
-            // A reconcile can change the bar COUNT (backfilling a stalled chart, swapping closed
-            // bars). `xOffset` is a pixel offset measured in bars, so a count change drifts the live
-            // edge and opens an empty right-margin "gap". Re-anchor when tracking the live edge; a
-            // manual scroll-back (autoScroll == false) is left untouched.
-            if autoScroll { scrollToEnd() }
+            repositionViewport()
         }
     }
 
@@ -983,10 +1054,16 @@ final class ChartViewModel {
     /// if the user scrolled away from the right edge, and triggers loading
     /// earlier bars when scrolling near the left edge.
     func onUserScroll() {
-        let totalWidth = CGFloat(bars.count) * transform.candleSlotWidth
-        let rightEdge = transform.xOffset + chartWidth
-        let atEnd = rightEdge >= totalWidth - transform.candleSlotWidth * 2
+        let atEnd = isViewAtLiveEdge
+        // Record the anchor in lock-step: pinned at the live-edge resting spot ⇒ follow it (nil);
+        // otherwise (scrolled back OR future-room) ⇒ remember the centered time so
+        // reloads/reconnects/reconcile swaps/timeframe switches keep this position.
+        let newAnchor = atEnd ? nil : currentViewportCenterTimeMs()
+        if atEnd != autoScroll {
+            chartLogger.notice("VPORT user-scroll \(self.currentInstrument, privacy: .public) \(self.currentPeriod, privacy: .public): following=\(atEnd, privacy: .public) anchor=\(newAnchor ?? -1, privacy: .public) xOff=\(Int(self.transform.xOffset), privacy: .public)")
+        }
         autoScroll = atEnd
+        viewportAnchorTimeMs = newAnchor
 
         // Scroll-back: load earlier bars when near the left edge
         let startIndex = Int(floor(transform.xOffset / transform.candleSlotWidth))
