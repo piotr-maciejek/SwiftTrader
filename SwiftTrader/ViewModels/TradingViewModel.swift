@@ -1,8 +1,5 @@
 import Foundation
 import SwiftUI
-import os
-
-private let orderMetaLog = Logger(subsystem: "com.swifttrader", category: "ordermeta")
 
 @Observable
 @MainActor
@@ -261,7 +258,6 @@ final class TradingViewModel {
                 orderType: order.orderType,
                 entryPrice: order.orderType == "MARKET" ? nil : order.entryPrice)
             pendingCaptures.append(capture)
-            orderMetaLog.notice("CAPTURE \(order.instrument, privacy: .public) \(order.direction, privacy: .public) \(order.orderType, privacy: .public) live=\(livePrice ?? -1) quote=\(quote.map { "\($0.bid)/\($0.ask)" } ?? "nil", privacy: .public) entry=\(order.entryPrice) press=\(capture.pressPrice) SL=\(order.stopLoss) TP=\(order.takeProfit) pending=\(self.pendingCaptures.count)")
             visualOrders.removeValue(forKey: instrument)
         } catch {
             orderError = error.localizedDescription
@@ -432,15 +428,13 @@ final class TradingViewModel {
                     && nowMs - $0.submitTimeMs <= 15_000
             }) {
                 let cap = pendingCaptures.remove(at: idx)
-                let meta = PositionMetadata(
-                    positionId: pos.label, instrument: pos.instrument, direction: pos.direction,
-                    pressPrice: cap.pressPrice, initialStopLoss: cap.initialStopLoss,
-                    initialTakeProfit: cap.initialTakeProfit, fillPrice: pos.openPrice,
-                    submitTimeMs: cap.submitTimeMs, openTimeMs: nowMs)
-                orderMetaLog.notice("BIND \(pos.label, privacy: .public) \(pos.instrument, privacy: .public) \(pos.direction, privacy: .public) fill=\(pos.openPrice) press=\(cap.pressPrice) SL=\(cap.initialStopLoss) ageMs=\(nowMs - cap.submitTimeMs) -> slip=\(meta.slippagePips ?? -99999) risk=\(meta.riskPips ?? -1)")
-                metadataStore?.upsert(meta, accountID: accountID)
-            } else {
-                orderMetaLog.notice("NO-MATCH new position \(pos.label, privacy: .public) \(pos.instrument, privacy: .public) \(pos.direction, privacy: .public) fill=\(pos.openPrice) pendingCaptures=\(self.pendingCaptures.count)")
+                metadataStore?.upsert(
+                    PositionMetadata(
+                        positionId: pos.label, instrument: pos.instrument, direction: pos.direction,
+                        pressPrice: cap.pressPrice, initialStopLoss: cap.initialStopLoss,
+                        initialTakeProfit: cap.initialTakeProfit, fillPrice: pos.openPrice,
+                        submitTimeMs: cap.submitTimeMs, openTimeMs: nowMs),
+                    accountID: accountID)
             }
             // Double-bind guard: once seen, never rebind — even if no capture matched.
             knownPositionIds.insert(pos.label)

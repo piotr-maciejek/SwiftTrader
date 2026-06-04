@@ -297,8 +297,6 @@ final class ChartViewModel {
     /// view's one-shot live-edge snap while parked so it doesn't fight the restored center.
     func repositionViewport() {
         let willCenter = viewportAnchorTimeMs != nil && !autoScroll && chartWidth > 0 && !bars.isEmpty
-        let mode = willCenter ? "CENTER" : "EDGE"
-        chartLogger.notice("VPORT reposition \(self.currentInstrument, privacy: .public) \(self.currentPeriod, privacy: .public) \(mode, privacy: .public) autoScroll=\(self.autoScroll, privacy: .public) anchor=\(self.viewportAnchorTimeMs ?? -1, privacy: .public) atEdge=\(self.isViewAtLiveEdge, privacy: .public) xOff=\(Int(self.transform.xOffset), privacy: .public) w=\(Int(self.chartWidth), privacy: .public) bars=\(self.bars.count, privacy: .public)")
         if willCenter, let ms = viewportAnchorTimeMs {
             setViewportCenter(toTimeMs: ms)
             transform.hasAutoScrolledToEnd = true
@@ -311,7 +309,6 @@ final class ChartViewModel {
         guard period != currentPeriod else { return }
         // The viewport anchor (an absolute time) and `autoScroll` persist across the reload, so the
         // new timeframe re-centers on the same moment (or stays at the live edge). Keep the zoom too.
-        chartLogger.notice("VPORT switchPeriod \(self.currentPeriod, privacy: .public)->\(period, privacy: .public): autoScroll=\(self.autoScroll, privacy: .public) anchor=\(self.viewportAnchorTimeMs ?? -1, privacy: .public) atEdge=\(self.isViewAtLiveEdge, privacy: .public) xOff=\(Int(self.transform.xOffset), privacy: .public)")
         currentPeriod = period
         reloadChart(keepZoom: true)
     }
@@ -1058,12 +1055,8 @@ final class ChartViewModel {
         // Record the anchor in lock-step: pinned at the live-edge resting spot ⇒ follow it (nil);
         // otherwise (scrolled back OR future-room) ⇒ remember the centered time so
         // reloads/reconnects/reconcile swaps/timeframe switches keep this position.
-        let newAnchor = atEnd ? nil : currentViewportCenterTimeMs()
-        if atEnd != autoScroll {
-            chartLogger.notice("VPORT user-scroll \(self.currentInstrument, privacy: .public) \(self.currentPeriod, privacy: .public): following=\(atEnd, privacy: .public) anchor=\(newAnchor ?? -1, privacy: .public) xOff=\(Int(self.transform.xOffset), privacy: .public)")
-        }
         autoScroll = atEnd
-        viewportAnchorTimeMs = newAnchor
+        viewportAnchorTimeMs = atEnd ? nil : currentViewportCenterTimeMs()
 
         // Scroll-back: load earlier bars when near the left edge
         let startIndex = Int(floor(transform.xOffset / transform.candleSlotWidth))
