@@ -66,6 +66,9 @@
 		A1000038 /* TradeRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003A /* TradeRecord.swift */; };
 		A1000090 /* PositionMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000090 /* PositionMetadata.swift */; };
 		A1000091 /* PositionMetadataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000091 /* PositionMetadataStore.swift */; };
+		A1000100 /* CustomCorrelation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000100 /* CustomCorrelation.swift */; };
+		A1000101 /* CustomCorrelationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000101 /* CustomCorrelationStore.swift */; };
+		A1000102 /* CustomCorrelationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000102 /* CustomCorrelationSheet.swift */; };
 		A1000039 /* DateRangePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003B /* DateRangePreset.swift */; };
 		A100003A /* TradeHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003C /* TradeHistoryService.swift */; };
 		A100003B /* TradeHistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003D /* TradeHistoryViewModel.swift */; };
@@ -94,6 +97,7 @@
 		B1000004 /* MockMarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000004 /* MockMarketDataCoordinator.swift */; };
 		B1000005 /* ChartViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000005 /* ChartViewModelTests.swift */; };
 		B1000090 /* PositionMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000090 /* PositionMetadataTests.swift */; };
+		B1000100 /* CustomCorrelationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000100 /* CustomCorrelationTests.swift */; };
 		AA000072 /* LiveCandleMulticasterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000073 /* LiveCandleMulticasterTests.swift */; };
 		B1000006 /* OneClickOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000006 /* OneClickOrderTests.swift */; };
 		B1000007 /* TradingDayATRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000007 /* TradingDayATRTests.swift */; };
@@ -166,6 +170,9 @@
 		A2000024 /* TabState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabState.swift; sourceTree = "<group>"; };
 		A2000025 /* WorkspaceStateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStateService.swift; sourceTree = "<group>"; };
 		A2000091 /* PositionMetadataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionMetadataStore.swift; sourceTree = "<group>"; };
+		A2000100 /* CustomCorrelation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomCorrelation.swift; sourceTree = "<group>"; };
+		A2000101 /* CustomCorrelationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomCorrelationStore.swift; sourceTree = "<group>"; };
+		A2000102 /* CustomCorrelationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomCorrelationSheet.swift; sourceTree = "<group>"; };
 		A2000027 /* MarketDataProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketDataProviding.swift; sourceTree = "<group>"; };
 		A2000028 /* TradingDayATR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingDayATR.swift; sourceTree = "<group>"; };
 		A2000029 /* ATRPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ATRPopover.swift; sourceTree = "<group>"; };
@@ -215,6 +222,7 @@
 		B2000004 /* MockMarketDataCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockMarketDataCoordinator.swift; sourceTree = "<group>"; };
 		B2000005 /* ChartViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartViewModelTests.swift; sourceTree = "<group>"; };
 		B2000090 /* PositionMetadataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionMetadataTests.swift; sourceTree = "<group>"; };
+		B2000100 /* CustomCorrelationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomCorrelationTests.swift; sourceTree = "<group>"; };
 		AA000073 /* LiveCandleMulticasterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCandleMulticasterTests.swift; sourceTree = "<group>"; };
 		B2000006 /* OneClickOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneClickOrderTests.swift; sourceTree = "<group>"; };
 		B2000007 /* TradingDayATRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingDayATRTests.swift; sourceTree = "<group>"; };
@@ -296,6 +304,7 @@
 				A2000038 /* PendingOrder.swift */,
 				A200003A /* TradeRecord.swift */,
 				A2000090 /* PositionMetadata.swift */,
+				A2000100 /* CustomCorrelation.swift */,
 				A200003B /* DateRangePreset.swift */,
 				A2000023 /* Account.swift */,
 				A2000019 /* CurrencyCorrelation.swift */,
@@ -337,6 +346,7 @@
 				A2000020 /* AuthService.swift */,
 				A2000025 /* WorkspaceStateService.swift */,
 				A2000091 /* PositionMetadataStore.swift */,
+				A2000101 /* CustomCorrelationStore.swift */,
 				A2000027 /* MarketDataProviding.swift */,
 				A200002D /* NewsCoordinator.swift */,
 				A2000032 /* WebSocketStreamDriver.swift */,
@@ -394,6 +404,7 @@
 				A2000037 /* ChartLoadingCard.swift */,
 				A200003E /* TradeHistoryView.swift */,
 				A2000040 /* LeftSidebar.swift */,
+				A2000102 /* CustomCorrelationSheet.swift */,
 				A2000042 /* MultiTimeframeView.swift */,
 			);
 			path = Views;
@@ -410,6 +421,7 @@
 				B2000004 /* MockMarketDataCoordinator.swift */,
 				B2000005 /* ChartViewModelTests.swift */,
 				B2000090 /* PositionMetadataTests.swift */,
+				B2000100 /* CustomCorrelationTests.swift */,
 				AA000073 /* LiveCandleMulticasterTests.swift */,
 				B2000006 /* OneClickOrderTests.swift */,
 				B2000007 /* TradingDayATRTests.swift */,
@@ -562,6 +574,9 @@
 				A1000038 /* TradeRecord.swift in Sources */,
 				A1000090 /* PositionMetadata.swift in Sources */,
 				A1000091 /* PositionMetadataStore.swift in Sources */,
+				A1000100 /* CustomCorrelation.swift in Sources */,
+				A1000101 /* CustomCorrelationStore.swift in Sources */,
+				A1000102 /* CustomCorrelationSheet.swift in Sources */,
 				A1000039 /* DateRangePreset.swift in Sources */,
 				A100003A /* TradeHistoryService.swift in Sources */,
 				A100003B /* TradeHistoryViewModel.swift in Sources */,
@@ -598,6 +613,7 @@
 				B1000004 /* MockMarketDataCoordinator.swift in Sources */,
 				B1000005 /* ChartViewModelTests.swift in Sources */,
 				B1000090 /* PositionMetadataTests.swift in Sources */,
+				B1000100 /* CustomCorrelationTests.swift in Sources */,
 				AA000072 /* LiveCandleMulticasterTests.swift in Sources */,
 				B1000006 /* OneClickOrderTests.swift in Sources */,
 				B1000007 /* TradingDayATRTests.swift in Sources */,
