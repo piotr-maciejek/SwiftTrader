@@ -697,6 +697,26 @@ struct ChartViewModelTests {
         #expect(DrawingMath.timeMsForX(100, barTimes: newTimes, xOffset: newOffset, slotWidth: 10) == centerMs)
     }
 
+    // MARK: - quoteReadout: live Bid / Ask / Spread overlay text
+
+    @Test("quoteReadout: non-JPY shows 5 decimals, ask = bid + spread, spread in pips")
+    func quoteReadoutNonJPY() {
+        let s = ChartView.quoteReadout(bid: 0.99082, spread: 0.00013, instrument: "EURUSD")
+        #expect(s == "Bid 0.99082   Ask 0.99095   Spr 1.3p")
+    }
+
+    @Test("quoteReadout: JPY pair uses 3 decimals and the 100x pip factor")
+    func quoteReadoutJPY() {
+        let s = ChartView.quoteReadout(bid: 150.123, spread: 0.012, instrument: "USDJPY")
+        #expect(s == "Bid 150.123   Ask 150.135   Spr 1.2p")
+    }
+
+    @Test("quoteReadout: no live spread → '—' and ask == bid")
+    func quoteReadoutNoSpread() {
+        let s = ChartView.quoteReadout(bid: 1.10000, spread: 0, instrument: "EURUSD")
+        #expect(s == "Bid 1.10000   Ask 1.10000   Spr —")
+    }
+
     @Test("scrollToEnd clears the one-shot guard so the view re-positions for a fresh dataset")
     func scrollToEndClearsGuard() {
         let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())

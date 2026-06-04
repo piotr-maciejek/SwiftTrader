@@ -640,6 +640,7 @@ struct ContentView: View {
             },
             accountEquity: workspace.trading.account?.equity,
             visualOrderSpread: workspace.trading.spreads[vm.currentInstrument] ?? 0,
+            showQuote: true,
             isSubmittingOrder: workspace.trading.isSubmitting,
             drawings: vm.drawings,
             drawingTool: vm.drawingTool,
