@@ -332,6 +332,19 @@ struct ChartInteractionView: NSViewRepresentable {
                 return
             }
 
+            // Horizontal scroll — the Logitech MX Master thumb wheel, or a trackpad two-finger swipe —
+            // pans the chart left/right. Pick the dominant axis so the MAIN wheel still zooms (deltaY)
+            // and the THUMB wheel pans (deltaX). Sign mirrors the drag handler; the delta already
+            // honors the system's natural-scroll setting.
+            if abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
+                let sensitivity: CGFloat = 3.0
+                coord.transform.wrappedValue.xOffset = coord.clampOffset(
+                    coord.transform.wrappedValue.xOffset - event.scrollingDeltaX * sensitivity
+                )
+                coord.onUserDrag?()
+                return
+            }
+
             let zoomDelta = event.scrollingDeltaY * 0.02
             let oldScale = coord.transform.wrappedValue.xScale
             let newScale = max(0.3, min(5.0, oldScale + zoomDelta))
