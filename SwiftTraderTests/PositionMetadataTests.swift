@@ -53,7 +53,18 @@ struct PositionMetadataTests {
     func slippageSign() {
         #expect(approx(meta(id: "b", direction: "BUY", pressPrice: 1.1000, fillPrice: 1.1002).slippagePips, 2))
         #expect(approx(meta(id: "s", direction: "SELL", pressPrice: 1.1000, fillPrice: 1.0998).slippagePips, 2))
-        #expect(meta(id: "g", direction: "BUY", pressPrice: 1.1000, fillPrice: 1.0999).slippagePips < 0)
+        #expect((meta(id: "g", direction: "BUY", pressPrice: 1.1000, fillPrice: 1.0999).slippagePips ?? 0) < 0)
+    }
+
+    @Test("Slippage is nil (→ '—') when there is no valid press price")
+    func slippageMissingPressPrice() {
+        #expect(meta(id: "z", direction: "SELL", pressPrice: 0, fillPrice: 1.62674).slippagePips == nil)
+    }
+
+    @Test("Slippage is nil (→ '—') when the press price is implausibly far from the fill (poisoned capture)")
+    func slippageAbsurdPressPrice() {
+        // bid≈0 feed glitch → press ≈ 2× the price; must not render a wild number.
+        #expect(meta(id: "p", direction: "BUY", pressPrice: 1.98528, fillPrice: 0.99264).slippagePips == nil)
     }
 
     @Test("riskPips undefined → R helpers return nil")
@@ -241,6 +252,51 @@ struct PositionMetadataTests {
         fake.snapshotContinuation?.yield(TradingSnapshot(positions: [old, filled], account: acct(), spreads: nil))
         await settle()
         #expect(store.all(accountID: acctID).count == 1)
+
+        vm.stop()
+    }
+
+    @Test("Binding waits for a non-zero fill price (a just-appeared position can report openPrice 0)")
+    func bindDefersUntilFillPriced() async {
+        let fake = FakeTradingCoordinator()
+        let suite = "pmtest-fill0-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PositionMetadataStore(defaults: defaults, cloudEnabled: false)
+        let acctID = UUID()
+
+        let vm = TradingViewModel(coordinator: fake)
+        vm.metadataStore = store
+        vm.accountID = acctID
+        vm.start()
+        for _ in 0..<100 {
+            if fake.snapshotContinuation != nil { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(fake.snapshotContinuation != nil)
+
+        // Empty connect snapshot (seeds nothing).
+        fake.snapshotContinuation?.yield(TradingSnapshot(positions: [], account: acct(), spreads: nil))
+        await settle()
+
+        vm.visualOrders["EURUSD"] = marketOrder()
+        await vm.confirmVisualOrder(instrument: "EURUSD", livePrice: 1.1000)
+
+        // Position first appears with openPrice 0 → must NOT bind (would record fillPrice 0).
+        let zero = Position(label: "ST_EURUSD_9", instrument: "EURUSD", direction: "BUY", amount: 0.1,
+                            openPrice: 0, stopLoss: 1.0990, takeProfit: 1.1030,
+                            profitLoss: 0, profitLossPips: 0, state: "FILLED")
+        fake.snapshotContinuation?.yield(TradingSnapshot(positions: [zero], account: acct(), spreads: nil))
+        await settle()
+        #expect(store.all(accountID: acctID).isEmpty)
+
+        // Next snapshot carries the real fill → binds with the real fillPrice.
+        let filled = Position(label: "ST_EURUSD_9", instrument: "EURUSD", direction: "BUY", amount: 0.1,
+                              openPrice: 1.1002, stopLoss: 1.0990, takeProfit: 1.1030,
+                              profitLoss: 0, profitLossPips: 0, state: "FILLED")
+        fake.snapshotContinuation?.yield(TradingSnapshot(positions: [filled], account: acct(), spreads: nil))
+        await settle()
+        #expect(store.all(accountID: acctID)["ST_EURUSD_9"]?.fillPrice == 1.1002)
 
         vm.stop()
     }

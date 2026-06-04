@@ -10,9 +10,15 @@ protocol TradingCoordinating: Sendable {
     func modifyOrder(label: String, stopLoss: Double, takeProfit: Double) async throws -> Position
     func streamSnapshots() -> AsyncThrowingStream<TradingSnapshot, Error>
     func streamPendingOrders() -> AsyncThrowingStream<PendingOrdersSnapshot, Error>
+    /// Latest live (bid, ask) for an instrument from the trading feed, or nil if unavailable. Used to
+    /// capture the real press-time, fill-side price for slippage (not the lagging chart bar close).
+    func currentQuote(instrument: String) async -> (bid: Double, ask: Double)?
 }
 
 extension TradingCoordinating {
+    /// Default: no live quote (server mode / test fakes) → callers fall back to the chart price.
+    func currentQuote(instrument: String) async -> (bid: Double, ask: Double)? { nil }
+
     /// Back-compat for market-order callers (tests, existing code).
     func submitOrder(instrument: String, direction: String, amount: Double,
                      stopLoss: Double, takeProfit: Double) async throws -> Position {

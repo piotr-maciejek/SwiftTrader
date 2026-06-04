@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+import os
+
+private let orderMetaLog = Logger(subsystem: "com.swifttrader", category: "ordermeta")
 
 @Observable
 @MainActor
@@ -230,14 +233,21 @@ final class TradingViewModel {
         isSubmitting = true
         defer { isSubmitting = false }
         orderError = nil
-        // Snapshot the press-time market price + initial SL/TP for R-multiple & slippage. For a
-        // MARKET order the press price is the live tick; for a pending order it's the intended
-        // entry. Buffered now, bound to the resulting position's id when it appears (see
-        // bindPendingCaptures), and only on a SUCCESSFUL submit (appended inside the `do`).
+        // Snapshot the press-time market price + initial SL/TP for R-multiple & slippage. The press
+        // price must be the REAL live tick on the SAME side as the fill, so slippage measures
+        // execution drift and not the bid-ask spread: a BUY fills at the ASK, a SELL at the BID. Pull
+        // the freshest (bid, ask) straight from the trading feed at press; fall back to the chart's
+        // live bid (candle close) + spread only if the feed has no quote. Pending orders use the
+        // intended entry. Buffered now, bound to the resulting position's id when it appears (see
+        // bindPendingCaptures), only on a SUCCESSFUL submit (inside the `do`).
+        let quote = await coordinator.currentQuote(instrument: instrument)
+        let bidAtPress = quote?.bid ?? livePrice ?? order.entryPrice
+        let askAtPress = quote?.ask ?? (bidAtPress + (spreads[instrument] ?? 0))
+        let marketPress = order.direction == "BUY" ? askAtPress : bidAtPress
         let capture = PendingCapture(
             instrument: order.instrument,
             direction: order.direction,
-            pressPrice: order.orderType == "MARKET" ? (livePrice ?? order.entryPrice) : order.entryPrice,
+            pressPrice: order.orderType == "MARKET" ? marketPress : order.entryPrice,
             initialStopLoss: order.stopLoss,
             initialTakeProfit: order.takeProfit,
             submitTimeMs: Int64(Date().timeIntervalSince1970 * 1000))
@@ -251,6 +261,7 @@ final class TradingViewModel {
                 orderType: order.orderType,
                 entryPrice: order.orderType == "MARKET" ? nil : order.entryPrice)
             pendingCaptures.append(capture)
+            orderMetaLog.notice("CAPTURE \(order.instrument, privacy: .public) \(order.direction, privacy: .public) \(order.orderType, privacy: .public) live=\(livePrice ?? -1) quote=\(quote.map { "\($0.bid)/\($0.ask)" } ?? "nil", privacy: .public) entry=\(order.entryPrice) press=\(capture.pressPrice) SL=\(order.stopLoss) TP=\(order.takeProfit) pending=\(self.pendingCaptures.count)")
             visualOrders.removeValue(forKey: instrument)
         } catch {
             orderError = error.localizedDescription
@@ -409,6 +420,11 @@ final class TradingViewModel {
         // Expire captures whose position never showed within a generous window.
         pendingCaptures.removeAll { nowMs - $0.submitTimeMs > 30_000 }
         for pos in positions where !knownPositionIds.contains(pos.label) {
+            // Defer until the fill price is populated. A just-appeared position can report
+            // openPrice == 0 for a snapshot or two before the fill propagates; binding then records
+            // fillPrice 0, which poisons R (risk = |0 − SL|, huge → ~0R) and slippage (→ "—"). Don't
+            // mark it known yet, so it binds on the snapshot where the real fill arrives.
+            guard pos.openPrice > 0 else { continue }
             // Newly appeared: match the OLDEST pending capture for this instrument+direction within
             // 15s (FIFO disambiguates concurrent same-pair submits).
             if let idx = pendingCaptures.firstIndex(where: {
@@ -416,13 +432,15 @@ final class TradingViewModel {
                     && nowMs - $0.submitTimeMs <= 15_000
             }) {
                 let cap = pendingCaptures.remove(at: idx)
-                metadataStore?.upsert(
-                    PositionMetadata(
-                        positionId: pos.label, instrument: pos.instrument, direction: pos.direction,
-                        pressPrice: cap.pressPrice, initialStopLoss: cap.initialStopLoss,
-                        initialTakeProfit: cap.initialTakeProfit, fillPrice: pos.openPrice,
-                        submitTimeMs: cap.submitTimeMs, openTimeMs: nowMs),
-                    accountID: accountID)
+                let meta = PositionMetadata(
+                    positionId: pos.label, instrument: pos.instrument, direction: pos.direction,
+                    pressPrice: cap.pressPrice, initialStopLoss: cap.initialStopLoss,
+                    initialTakeProfit: cap.initialTakeProfit, fillPrice: pos.openPrice,
+                    submitTimeMs: cap.submitTimeMs, openTimeMs: nowMs)
+                orderMetaLog.notice("BIND \(pos.label, privacy: .public) \(pos.instrument, privacy: .public) \(pos.direction, privacy: .public) fill=\(pos.openPrice) press=\(cap.pressPrice) SL=\(cap.initialStopLoss) ageMs=\(nowMs - cap.submitTimeMs) -> slip=\(meta.slippagePips ?? -99999) risk=\(meta.riskPips ?? -1)")
+                metadataStore?.upsert(meta, accountID: accountID)
+            } else {
+                orderMetaLog.notice("NO-MATCH new position \(pos.label, privacy: .public) \(pos.instrument, privacy: .public) \(pos.direction, privacy: .public) fill=\(pos.openPrice) pendingCaptures=\(self.pendingCaptures.count)")
             }
             // Double-bind guard: once seen, never rebind — even if no capture matched.
             knownPositionIds.insert(pos.label)
