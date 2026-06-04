@@ -37,10 +37,19 @@ extension PositionMetadata {
         return r > 0 ? r : nil
     }
 
-    /// Execution slippage in pips: how far the fill landed from the price when the button was
-    /// pressed, signed so POSITIVE = a worse fill (bought higher / sold lower than intended).
-    var slippagePips: Double {
-        (fillPrice - pressPrice) * dir * pipFactor
+    /// Execution slippage in pips: how far the fill landed from the SAME-SIDE price when the button
+    /// was pressed. The capture stores the ask-at-press for a BUY and the bid-at-press for a SELL
+    /// (a BUY fills at the ask, a SELL at the bid — see `TradingViewModel.confirmVisualOrder`), so
+    /// this is true execution drift, not the bid-ask spread. Signed so POSITIVE = a worse fill
+    /// (bought higher / sold lower than intended). `nil` (→ "—") when there's no valid press price
+    /// (e.g. an older/synced record captured without one), mirroring `riskPips`' missing-data guard.
+    var slippagePips: Double? {
+        // Reject a missing or implausible press price: real slippage is a small fraction of price, so
+        // a press more than 10% off the fill is a poisoned capture (e.g. a bid≈0 feed glitch made the
+        // press ≈ 2× the price) — show "—" rather than a wild number.
+        guard pressPrice > 0, fillPrice > 0,
+              abs(fillPrice - pressPrice) <= fillPrice * 0.1 else { return nil }
+        return (fillPrice - pressPrice) * dir * pipFactor
     }
 
     /// Direction-aware pips from the fill to an arbitrary price (mark for open, close for closed).

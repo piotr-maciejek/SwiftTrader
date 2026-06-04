@@ -78,6 +78,22 @@ enum DrawingMath {
         return Int64(interpolated.rounded())
     }
 
+    /// The `xOffset` that horizontally centers bar-time `ms` in a viewport of width `chartWidth`.
+    /// `xForTimeMs` is linear in `-xOffset` (the time→pixel position is offset-independent), so
+    /// centering reduces to `pixelPos(ms, xOffset: 0) - chartWidth/2`. Clamped to `[0, maxOffset]`,
+    /// where `maxOffset` lets the newest bar sit anywhere up to the left edge — deliberately NOT the
+    /// live-edge resting offset, so a near-live anchor keeps its empty right-hand "future" room
+    /// instead of snapping back to the live edge. Pure, so it's unit-testable.
+    static func xOffsetCenteringTime(_ ms: Int64,
+                                     barTimes: [Int64],
+                                     slotWidth: CGFloat,
+                                     chartWidth: CGFloat) -> CGFloat {
+        guard !barTimes.isEmpty, slotWidth > 0, chartWidth > 0 else { return 0 }
+        let raw = xForTimeMs(ms, barTimes: barTimes, xOffset: 0, slotWidth: slotWidth) - chartWidth / 2
+        let maxOffset = max(0, CGFloat(barTimes.count) * slotWidth - slotWidth)   // last bar at left edge
+        return min(max(0, raw), maxOffset)
+    }
+
     /// Shortest distance from `p` to the line segment `a`–`b`, in pixel space.
     /// Clamped so points past either endpoint return the endpoint distance.
     static func distanceFromSegment(point p: CGPoint, a: CGPoint, b: CGPoint) -> CGFloat {

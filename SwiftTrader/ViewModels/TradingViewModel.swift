@@ -111,7 +111,7 @@ final class TradingViewModel {
         var marginCapped = false
         if let equity = account?.equity, let freeMargin = account?.freeMargin {
             let sizing = PositionSizing.calculate(
-                equity: equity, freeMargin: freeMargin, riskFraction: 0.02,
+                equity: equity, freeMargin: freeMargin, riskFraction: 0.005,
                 entryPrice: currentPrice, stopLoss: sl,
                 leverage: account?.leverage ?? 30,
                 spread: spreads[instrument] ?? 0)
@@ -182,7 +182,7 @@ final class TradingViewModel {
            let freeMargin = account?.freeMargin {
             let result = PositionSizing.calculate(
                 equity: equity, freeMargin: freeMargin,
-                riskFraction: 0.02,
+                riskFraction: 0.005,
                 entryPrice: order.entryPrice, stopLoss: order.stopLoss,
                 leverage: account?.leverage ?? 30,
                 spread: spreads[instrument] ?? 0)
@@ -218,7 +218,7 @@ final class TradingViewModel {
             order.entryPrice = live
             let result = PositionSizing.calculate(
                 equity: equity, freeMargin: freeMargin,
-                riskFraction: 0.02,
+                riskFraction: 0.005,
                 entryPrice: live, stopLoss: order.stopLoss,
                 leverage: account?.leverage ?? 30,
                 spread: spreads[instrument] ?? 0)
@@ -230,14 +230,21 @@ final class TradingViewModel {
         isSubmitting = true
         defer { isSubmitting = false }
         orderError = nil
-        // Snapshot the press-time market price + initial SL/TP for R-multiple & slippage. For a
-        // MARKET order the press price is the live tick; for a pending order it's the intended
-        // entry. Buffered now, bound to the resulting position's id when it appears (see
-        // bindPendingCaptures), and only on a SUCCESSFUL submit (appended inside the `do`).
+        // Snapshot the press-time market price + initial SL/TP for R-multiple & slippage. The press
+        // price must be the REAL live tick on the SAME side as the fill, so slippage measures
+        // execution drift and not the bid-ask spread: a BUY fills at the ASK, a SELL at the BID. Pull
+        // the freshest (bid, ask) straight from the trading feed at press; fall back to the chart's
+        // live bid (candle close) + spread only if the feed has no quote. Pending orders use the
+        // intended entry. Buffered now, bound to the resulting position's id when it appears (see
+        // bindPendingCaptures), only on a SUCCESSFUL submit (inside the `do`).
+        let quote = await coordinator.currentQuote(instrument: instrument)
+        let bidAtPress = quote?.bid ?? livePrice ?? order.entryPrice
+        let askAtPress = quote?.ask ?? (bidAtPress + (spreads[instrument] ?? 0))
+        let marketPress = order.direction == "BUY" ? askAtPress : bidAtPress
         let capture = PendingCapture(
             instrument: order.instrument,
             direction: order.direction,
-            pressPrice: order.orderType == "MARKET" ? (livePrice ?? order.entryPrice) : order.entryPrice,
+            pressPrice: order.orderType == "MARKET" ? marketPress : order.entryPrice,
             initialStopLoss: order.stopLoss,
             initialTakeProfit: order.takeProfit,
             submitTimeMs: Int64(Date().timeIntervalSince1970 * 1000))
@@ -363,7 +370,7 @@ final class TradingViewModel {
               let freeMargin = account?.freeMargin else { return }
         let result = PositionSizing.calculate(
             equity: equity, freeMargin: freeMargin,
-            riskFraction: 0.02,
+            riskFraction: 0.005,
             entryPrice: order.entryPrice, stopLoss: order.stopLoss,
             leverage: account?.leverage ?? 30,
             spread: spreads[instrument] ?? 0)
@@ -409,6 +416,11 @@ final class TradingViewModel {
         // Expire captures whose position never showed within a generous window.
         pendingCaptures.removeAll { nowMs - $0.submitTimeMs > 30_000 }
         for pos in positions where !knownPositionIds.contains(pos.label) {
+            // Defer until the fill price is populated. A just-appeared position can report
+            // openPrice == 0 for a snapshot or two before the fill propagates; binding then records
+            // fillPrice 0, which poisons R (risk = |0 − SL|, huge → ~0R) and slippage (→ "—"). Don't
+            // mark it known yet, so it binds on the snapshot where the real fill arrives.
+            guard pos.openPrice > 0 else { continue }
             // Newly appeared: match the OLDEST pending capture for this instrument+direction within
             // 15s (FIFO disambiguates concurrent same-pair submits).
             if let idx = pendingCaptures.firstIndex(where: {

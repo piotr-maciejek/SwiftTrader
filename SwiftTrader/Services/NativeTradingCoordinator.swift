@@ -252,6 +252,25 @@ actor NativeTradingCoordinator: TradingCoordinating {
             guard let self, let session = await self.session else { return }
             for await state in await session.stateStream() { await self.onSessionState(state) }
         }
+        // Account refresh. Otherwise `account` is fetched only at connect + on order events, so a
+        // snapshot that hadn't arrived yet at connect leaves equity stuck at 0 (needing an account
+        // switch to recover), and equity/free-margin go stale between trades. `accountSnapshot()`
+        // returns the latest immediately once it's arrived, so poll: the first call self-heals a
+        // missed connect snapshot, later ones keep equity live.
+        Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, let session = await self.session else { return }
+                if let acct = try? await session.accountSnapshot(timeout: 15) {
+                    await self.updateAccount(acct)
+                }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
+    private func updateAccount(_ acct: DukascopyClient.AccountInfo) {
+        account = acct
+        emitSnapshot()
     }
 
     private func onSessionState(_ state: DukascopySession.State) {
@@ -267,10 +286,24 @@ actor NativeTradingCoordinator: TradingCoordinating {
         emitPending()
     }
 
+    /// Latest live (bid, ask) reconstructed from the per-tick mid + spread (mid = (bid+ask)/2,
+    /// spread = ask−bid, so bid = mid − spread/2, ask = mid + spread/2). Updated on EVERY tick
+    /// (unlike the throttled snapshot), so it's the freshest price at the moment of an order press.
+    func currentQuote(instrument: String) async -> (bid: Double, ask: Double)? {
+        let key = instrument.replacingOccurrences(of: "/", with: "")
+        guard let mid = rates[key], let spread = spreads[key] else { return nil }
+        return (bid: mid - spread / 2, ask: mid + spread / 2)
+    }
+
     private func onTick(_ tick: CurrencyMarket) {
         lastTickAt = Date()
         let key = tick.instrument.replacingOccurrences(of: "/", with: "")
-        if let bid = tick.bestBid?.doubleValue, let ask = tick.bestAsk?.doubleValue {
+        // Only accept a sane two-sided quote. A degenerate tick (bid ≤ 0, missing side, or crossed)
+        // — which the feed can emit briefly right after connect — would otherwise poison rates/spreads
+        // (spread ≈ the whole price when bid ≈ 0), inflating the bid/ask readout, the order-box risk,
+        // position sizing AND the captured slippage press price. Drop it; keep the last good values.
+        if let bid = tick.bestBid?.doubleValue, let ask = tick.bestAsk?.doubleValue,
+           bid > 0, ask > 0, ask >= bid {
             rates[key] = (bid + ask) / 2
             spreads[key] = ask - bid
         }

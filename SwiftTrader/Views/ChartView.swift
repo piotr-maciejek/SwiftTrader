@@ -36,6 +36,9 @@ struct ChartView: View {
     /// Live bid-ask spread (price units) for the visual order's instrument. Padded into
     /// the displayed risk so the % matches the realized loss after the broker takes spread.
     var visualOrderSpread: Double = 0
+    /// Show the live Bid / Ask / Spread readout under the ATR overlay. On for the main chart;
+    /// off for the dense correlation / multi-timeframe grid cells.
+    var showQuote: Bool = false
     /// True while a submit is in flight — disables visual-order interactions and dims the box.
     var isSubmittingOrder: Bool = false
     /// Externally-driven cursor time (UTC ms). When set and there's no local
@@ -260,6 +263,9 @@ struct ChartView: View {
                     if showATR, let pips = atrPips, let percent = todayATRPercent {
                         atrOverlay(atrPeriod: atrPeriod, atrPips: pips, todayPercent: percent)
                     }
+                    if showQuote, let bid = bars.last?.close, bid > 0 {
+                        quoteOverlay(bid: bid, spread: visualOrderSpread, instrument: currentInstrument)
+                    }
                     if let ch = crosshair,
                        ch.barIndex >= 0, ch.barIndex < bars.count {
                         ohlcOverlay(bar: bars[ch.barIndex])
@@ -305,6 +311,30 @@ struct ChartView: View {
     @ViewBuilder
     private func atrOverlay(atrPeriod: Int, atrPips: Double, todayPercent: Double) -> some View {
         Text(String(format: "ATR(%d): %.1f pips  |  Today: %.0f%%", atrPeriod, atrPips, todayPercent))
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.black.opacity(0.55))
+            .cornerRadius(4)
+    }
+
+    /// Formats the live quote line shown under the ATR overlay. Pure → unit-testable.
+    /// Candles are BID, so `bid` is the live bar close; ask = bid + spread; spread is shown in pips
+    /// (`—` when there's no live spread yet, e.g. market closed / pre-first-tick). JPY pairs use 3
+    /// decimals, others 5 (matching the visual-order box).
+    static func quoteReadout(bid: Double, spread: Double, instrument: String) -> String {
+        let dec = instrument.contains("JPY") ? 3 : 5
+        let ask = bid + max(0, spread)
+        let spr = spread > 0
+            ? String(format: "%.1fp", spread * PnLConverter.pipFactor(for: instrument))
+            : "—"
+        return String(format: "Bid %.\(dec)f   Ask %.\(dec)f   Spr %@", bid, ask, spr)
+    }
+
+    @ViewBuilder
+    private func quoteOverlay(bid: Double, spread: Double, instrument: String) -> some View {
+        Text(Self.quoteReadout(bid: bid, spread: spread, instrument: instrument))
             .font(.system(size: 11, weight: .medium, design: .monospaced))
             .foregroundColor(.secondary)
             .padding(.horizontal, 8)
