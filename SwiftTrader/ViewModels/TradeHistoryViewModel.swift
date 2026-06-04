@@ -64,7 +64,12 @@ final class TradeHistoryViewModel {
         error = nil
         defer { isLoading = false }
         do {
-            trades = try await service.fetchClosedTrades(from: range.lowerBound, to: range.upperBound)
+            let fetched = try await service.fetchClosedTrades(from: range.lowerBound, to: range.upperBound)
+            // Clamp to the exact requested window by CLOSE time. The native wire fetches closed
+            // positions at day granularity (and the server can be loose at the boundary), so without
+            // this a preset like "Today" leaks an adjacent day's trades and skews the
+            // Trades/Wins/Losses/Net counts.
+            trades = fetched.filter { range.contains($0.closeDate) }
         } catch {
             self.error = error.localizedDescription
             trades = []

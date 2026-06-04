@@ -104,6 +104,9 @@ final class FakeTradeHistoryService: TradeHistoryFetching, @unchecked Sendable {
 @MainActor
 struct TradeHistoryViewModelTests {
 
+    /// Close time within the default `.thisWeek` window so the range clamp keeps the trade.
+    private var nowMs: Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
+
     @Test("reload populates trades and computes summary")
     func reloadPopulates() async {
         let fake = FakeTradeHistoryService()
@@ -111,11 +114,11 @@ struct TradeHistoryViewModelTests {
             TradeRecord(positionId: "A", instrument: "EURUSD", direction: "BUY", amount: 0.01,
                         openPrice: 1.10, closePrice: 1.11,
                         profitLoss: 100, grossProfitLoss: 100, swaps: 0, commission: 0,
-                        openTime: 0, closeTime: 1, positionType: "REGULAR"),
+                        openTime: 0, closeTime: nowMs, positionType: "REGULAR"),
             TradeRecord(positionId: "B", instrument: "USDJPY", direction: "SELL", amount: 0.01,
                         openPrice: 150, closePrice: 151,
                         profitLoss: -50, grossProfitLoss: -50, swaps: 0, commission: 0,
-                        openTime: 0, closeTime: 2, positionType: "REGULAR"),
+                        openTime: 0, closeTime: nowMs, positionType: "REGULAR"),
         ])
         let vm = TradeHistoryViewModel(service: fake)
         await vm.reload()
@@ -124,6 +127,28 @@ struct TradeHistoryViewModelTests {
         #expect(vm.lossCount == 1)
         #expect(abs(vm.totalNetProfit - 50) < 1e-9)
         #expect(vm.error == nil)
+    }
+
+    @Test("reload clamps to the selected window — an adjacent day's trade is dropped")
+    func reloadClampsToRange() async {
+        let cal = Calendar.current
+        let todayNoon = cal.date(byAdding: .hour, value: 12, to: cal.startOfDay(for: .now))!
+        let yesterdayNoon = cal.date(byAdding: .day, value: -1, to: todayNoon)!
+        func ms(_ d: Date) -> Int64 { Int64(d.timeIntervalSince1970 * 1000) }
+
+        let fake = FakeTradeHistoryService()
+        fake.result = .success([
+            TradeRecord(positionId: "TODAY", instrument: "EURUSD", direction: "BUY", amount: 0.01,
+                        openPrice: 1, closePrice: 1.1, profitLoss: 1, grossProfitLoss: 1, swaps: 0,
+                        commission: 0, openTime: ms(todayNoon), closeTime: ms(todayNoon), positionType: "REGULAR"),
+            TradeRecord(positionId: "YESTERDAY", instrument: "EURUSD", direction: "BUY", amount: 0.01,
+                        openPrice: 1, closePrice: 1.1, profitLoss: 1, grossProfitLoss: 1, swaps: 0,
+                        commission: 0, openTime: ms(yesterdayNoon), closeTime: ms(yesterdayNoon), positionType: "REGULAR"),
+        ])
+        let vm = TradeHistoryViewModel(service: fake)
+        vm.preset = .today
+        await vm.reload()
+        #expect(vm.trades.map(\.id) == ["TODAY"])
     }
 
     @Test("reload surfaces errors and clears trades")
@@ -164,7 +189,7 @@ struct TradeHistoryViewModelTests {
         first.result = .success([
             TradeRecord(positionId: "OLD", instrument: "EURUSD", direction: "BUY", amount: 0.01,
                         openPrice: 1.0, closePrice: 1.0, profitLoss: 1, grossProfitLoss: 1,
-                        swaps: 0, commission: 0, openTime: 0, closeTime: 0, positionType: "REGULAR"),
+                        swaps: 0, commission: 0, openTime: 0, closeTime: nowMs, positionType: "REGULAR"),
         ])
         let vm = TradeHistoryViewModel(service: first)
         await vm.reload()
@@ -174,10 +199,10 @@ struct TradeHistoryViewModelTests {
         second.result = .success([
             TradeRecord(positionId: "NEW1", instrument: "GBPUSD", direction: "SELL", amount: 0.02,
                         openPrice: 1.3, closePrice: 1.29, profitLoss: 9, grossProfitLoss: 9,
-                        swaps: 0, commission: 0, openTime: 0, closeTime: 0, positionType: "REGULAR"),
+                        swaps: 0, commission: 0, openTime: 0, closeTime: nowMs, positionType: "REGULAR"),
             TradeRecord(positionId: "NEW2", instrument: "GBPUSD", direction: "BUY", amount: 0.02,
                         openPrice: 1.3, closePrice: 1.31, profitLoss: 9, grossProfitLoss: 9,
-                        swaps: 0, commission: 0, openTime: 0, closeTime: 0, positionType: "REGULAR"),
+                        swaps: 0, commission: 0, openTime: 0, closeTime: nowMs, positionType: "REGULAR"),
         ])
         vm.setService(second)
         #expect(vm.trades.isEmpty)   // stale trades dropped immediately on swap

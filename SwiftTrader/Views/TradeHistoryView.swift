@@ -45,6 +45,18 @@ struct TradeHistoryView: View {
                 Task { await vm.reload() }
             }
 
+            if vm.isLoading {
+                ProgressView().controlSize(.small)
+            } else {
+                Button {
+                    Task { await vm.reload() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh")
+            }
+
             if vm.preset == .custom {
                 DatePicker("", selection: $vm.customFrom, displayedComponents: .date)
                     .labelsHidden()
@@ -57,18 +69,6 @@ struct TradeHistoryView: View {
             }
 
             Spacer()
-
-            if vm.isLoading {
-                ProgressView().controlSize(.small)
-            } else {
-                Button {
-                    Task { await vm.reload() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .help("Refresh")
-            }
 
             if let err = vm.error {
                 Text(err)
