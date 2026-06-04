@@ -61,6 +61,7 @@ struct ChartTabState: Codable, Equatable {
 }
 
 struct CorrelationTabState: Codable, Equatable {
+    /// Base currency for a currency grid; "" for a custom grid (see `pairs`).
     var currency: String
     var period: String
     var showSessions: Bool
@@ -71,15 +72,21 @@ struct CorrelationTabState: Codable, Equatable {
     var atrPeriod: Int
     /// Per-cell drawings, ordered to match the correlation grid.
     var drawings: [[Drawing]]
+    /// Custom (user-picked) grid fields. `pairs != nil` ⇒ this is a custom correlation; restore via
+    /// `CorrelationViewModel(custom:…)`. Absent on currency grids and on every pre-feature save.
+    var customID: UUID?
+    var name: String?
+    var pairs: [String]?
 
     init(currency: String, period: String, showSessions: Bool, showVolume: Bool,
          showEMA: Bool, emaConfigs: [EMALineState], showATR: Bool = true, atrPeriod: Int = 14,
-         drawings: [[Drawing]] = []) {
+         drawings: [[Drawing]] = [], customID: UUID? = nil, name: String? = nil, pairs: [String]? = nil) {
         self.currency = currency; self.period = period
         self.showSessions = showSessions; self.showVolume = showVolume
         self.showEMA = showEMA; self.emaConfigs = emaConfigs
         self.showATR = showATR; self.atrPeriod = atrPeriod
         self.drawings = drawings
+        self.customID = customID; self.name = name; self.pairs = pairs
     }
 
     init(from decoder: Decoder) throws {
@@ -93,6 +100,9 @@ struct CorrelationTabState: Codable, Equatable {
         showATR = try c.decodeIfPresent(Bool.self, forKey: .showATR) ?? true
         atrPeriod = try c.decodeIfPresent(Int.self, forKey: .atrPeriod) ?? 14
         drawings = try c.decodeIfPresent([[Drawing]].self, forKey: .drawings) ?? []
+        customID = try c.decodeIfPresent(UUID.self, forKey: .customID)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        pairs = try c.decodeIfPresent([String].self, forKey: .pairs)
     }
 }
 

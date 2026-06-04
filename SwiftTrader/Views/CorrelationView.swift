@@ -6,9 +6,22 @@ struct CorrelationView: View {
     var onInstrumentTap: ((String) -> Void)?
     var onMultiTimeframeTap: ((String) -> Void)?
 
-    private let rows = 2
+    private var count: Int { viewModel.chartViewModels.count }
+
+    /// Column count for the grid. Currency grids keep their original layout (6–7 pairs); custom grids
+    /// fit 2–6 pairs (2→2, 3→3, 4→2, 5→3, 6→3). Pure → unit-testable.
+    static func gridColumns(count: Int, isCurrency: Bool) -> Int {
+        if isCurrency { return count <= 6 ? 3 : 4 }
+        return count <= 3 ? max(count, 1) : (count == 4 ? 2 : 3)
+    }
+
     private var columns: Int {
-        viewModel.chartViewModels.count <= 6 ? 3 : 4
+        Self.gridColumns(count: count, isCurrency: viewModel.baseCurrency != nil)
+    }
+
+    private var rows: Int {
+        if viewModel.baseCurrency != nil { return 2 }
+        return max(1, Int(ceil(Double(count) / Double(columns))))
     }
 
     var body: some View {
@@ -21,13 +34,12 @@ struct CorrelationView: View {
                             correlationCell(
                                 vm: viewModel.chartViewModels[index],
                                 instrument: viewModel.instruments[index],
-                                inverse: CurrencyCorrelation.isInverse(
-                                    currency: viewModel.currency,
-                                    instrument: viewModel.instruments[index]
-                                )
+                                inverse: viewModel.baseCurrency.map {
+                                    CurrencyCorrelation.isInverse(currency: $0, instrument: viewModel.instruments[index])
+                                } ?? false
                             )
-                        } else if index == columns * rows - 1 {
-                            currencyLabelCell()
+                        } else if index == columns * rows - 1, let base = viewModel.baseCurrency {
+                            currencyLabelCell(base)
                         }
                     }
                 }
@@ -36,8 +48,8 @@ struct CorrelationView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private func currencyLabelCell() -> some View {
-        Text(viewModel.currency)
+    private func currencyLabelCell(_ base: String) -> some View {
+        Text(base)
             .font(.system(size: 48, weight: .bold, design: .rounded))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

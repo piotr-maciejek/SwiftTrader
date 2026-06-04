@@ -4,17 +4,22 @@ struct LeftSidebar: View {
     @Bindable var workspace: WorkspaceViewModel
     @Bindable var settings: AppSettings
     @State private var hoveredKey: String?
+    @State private var showCreateCorrelation = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 pairsSection
+                customCorrelationsSection
                 correlationsSection
             }
             .padding(.vertical, 4)
         }
         .frame(width: 220)
         .background(.bar)
+        .sheet(isPresented: $showCreateCorrelation) {
+            CustomCorrelationSheet(workspace: workspace)
+        }
     }
 
     // MARK: - Pairs
@@ -250,6 +255,95 @@ struct LeftSidebar: View {
         if anyConnected { return .green }
         if anyBars { return .yellow }
         return .secondary.opacity(0.35)
+    }
+
+    // MARK: - Custom correlations
+
+    private var customCorrelationsSection: some View {
+        Group {
+            HStack(spacing: 6) {
+                Text("Custom Correlations")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+                Button(action: { showCreateCorrelation = true }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("New custom correlation")
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+
+            ForEach(workspace.customCorrelations) { correlation in
+                customCorrelationRow(correlation)
+            }
+        }
+    }
+
+    private func customCorrelationRow(_ correlation: CustomCorrelation) -> some View {
+        let tab = workspace.tabs.first {
+            if case .correlation(let vm) = $0.content { return vm.id == correlation.id }
+            return false
+        }
+        let key = "custom:\(correlation.id.uuidString)"
+        let isHovered = hoveredKey == key
+        let isSelected = tab?.id == workspace.selectedTabID
+        let info = correlationRowInfo(tab: tab)
+
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(info.dotColor)
+                .frame(width: 6, height: 6)
+
+            Text(correlation.name)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .opacity(tab == nil ? 0.55 : 1.0)
+
+            Spacer()
+
+            if isHovered {
+                Button(role: .destructive) {
+                    workspace.deleteCustomCorrelation(id: correlation.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help("Delete \(correlation.name)")
+            } else if !info.periodLabel.isEmpty {
+                Text(info.periodLabel)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isSelected
+                      ? Color.accentColor.opacity(0.18)
+                      : (isHovered ? Color.primary.opacity(0.06) : Color.clear))
+                .padding(.horizontal, 4)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            workspace.addCustomCorrelationTab(correlation)
+        }
+        .onHover { hovering in
+            hoveredKey = hovering ? key : (hoveredKey == key ? nil : hoveredKey)
+        }
     }
 
     // MARK: - Correlations

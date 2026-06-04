@@ -38,6 +38,11 @@ final class WorkspaceViewModel {
     /// `onChange` (local binds + external iCloud syncs).
     let metadataStore = PositionMetadataStore()
     var positionMetadata: [String: PositionMetadata] = [:]
+    /// Saved custom-correlation definitions, synced via iCloud. The store persists; this observable
+    /// mirror drives the sidebar's "Custom Correlations" section. Updated from the store's `onChange`
+    /// (local create/delete + external iCloud syncs from another Mac).
+    let customCorrelationStore = CustomCorrelationStore()
+    var customCorrelations: [CustomCorrelation] = []
     var newsItems: [NewsItem] = []
     /// Non-nil while the news/calendar feed is failing (e.g. a subscribe error). Drives a
     /// "news unavailable" badge in the right panel so a failed feed reads differently from
@@ -109,6 +114,10 @@ final class WorkspaceViewModel {
         trading.metadataStore = metadataStore
         trading.accountID = AccountStore.shared.selectedAccountID
         positionMetadata = metadataStore.reload(accountID: AccountStore.shared.selectedAccountID)
+        // Saved custom correlations: load now + mirror future changes (local + cross-machine) so the
+        // sidebar stays in sync.
+        customCorrelationStore.onChange = { [weak self] list in self?.customCorrelations = list }
+        customCorrelations = customCorrelationStore.all()
         // NOTE: Do NOT start tasks here. SwiftUI re-evaluates @State initializers
         // on every body evaluation, creating (and discarding) many WorkspaceViewModels.
         // Only the first instance is kept; the rest are garbage-collected — but any
@@ -298,6 +307,59 @@ final class WorkspaceViewModel {
         selectedTabID = tab.id
         Task { await vm.startAll() }
         scheduleSave()
+    }
+
+    /// Save a new custom correlation (synced) and open it as a tab. No-op if invalid (the create
+    /// sheet already disables Create unless valid; this is a belt-and-braces guard).
+    func createCustomCorrelation(name: String, pairs: [String]) {
+        let definition = CustomCorrelation(name: name.trimmingCharacters(in: .whitespacesAndNewlines), pairs: pairs)
+        guard definition.isValid else { return }
+        customCorrelationStore.add(definition)   // persists + syncs; onChange refreshes customCorrelations
+        addCustomCorrelationTab(definition)
+    }
+
+    /// Open (or switch to) the tab for a saved custom correlation.
+    func addCustomCorrelationTab(_ definition: CustomCorrelation) {
+        if let existing = tabs.first(where: {
+            if case .correlation(let vm) = $0.content { return vm.id == definition.id }
+            return false
+        }) {
+            selectTab(existing.id)
+            return
+        }
+
+        let period: String
+        if let current = selectedTab {
+            switch current.content {
+            case .chart(let vm): period = vm.currentPeriod
+            case .correlation(let vm): period = vm.currentPeriod
+            case .multiTimeframe: period = "FIFTEEN_MINS"
+            }
+        } else {
+            period = "ONE_MIN"
+        }
+
+        let vm = CorrelationViewModel(
+            custom: definition.id, name: definition.name, pairs: definition.pairs,
+            period: period, coordinator: marketData
+        )
+        wireStateChanged(vm)
+        let tab = Tab(content: .correlation(vm))
+        tabs.append(tab)
+        selectedTabID = tab.id
+        Task { await vm.startAll() }
+        scheduleSave()
+    }
+
+    /// Delete a saved custom correlation (synced) and close its open tab, if any.
+    func deleteCustomCorrelation(id: UUID) {
+        customCorrelationStore.delete(id: id)   // persists + syncs; onChange refreshes customCorrelations
+        if let existing = tabs.first(where: {
+            if case .correlation(let vm) = $0.content { return vm.id == id }
+            return false
+        }) {
+            closeTab(existing.id)
+        }
     }
 
     func selectOrCreateMultiTimeframeTab(instrument: String) {
@@ -503,6 +565,7 @@ final class WorkspaceViewModel {
                     drawings: vm.drawings
                 )))
             case .correlation(let vm):
+                let isCustom = vm.baseCurrency == nil
                 return TabState(id: tab.id, content: .correlation(CorrelationTabState(
                     currency: vm.currency,
                     period: vm.currentPeriod,
@@ -512,7 +575,10 @@ final class WorkspaceViewModel {
                     emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) },
                     showATR: vm.showATR,
                     atrPeriod: vm.atrPeriod,
-                    drawings: vm.chartViewModels.map(\.drawings)
+                    drawings: vm.chartViewModels.map(\.drawings),
+                    customID: isCustom ? vm.id : nil,
+                    name: isCustom ? vm.title : nil,
+                    pairs: isCustom ? vm.instruments : nil
                 )))
             case .multiTimeframe(let vm):
                 return TabState(id: tab.id, content: .multiTimeframe(MultiTimeframeTabState(
@@ -562,11 +628,23 @@ final class WorkspaceViewModel {
                 if startTasks { vm.startAsync() }
 
             case .correlation(let corrState):
-                let vm = CorrelationViewModel(
-                    currency: corrState.currency,
-                    period: corrState.period,
-                    coordinator: marketData
-                )
+                let vm: CorrelationViewModel
+                if let pairs = corrState.pairs {
+                    // Custom (user-picked) correlation.
+                    vm = CorrelationViewModel(
+                        custom: corrState.customID ?? UUID(),
+                        name: corrState.name ?? "Custom",
+                        pairs: pairs,
+                        period: corrState.period,
+                        coordinator: marketData
+                    )
+                } else {
+                    vm = CorrelationViewModel(
+                        currency: corrState.currency,
+                        period: corrState.period,
+                        coordinator: marketData
+                    )
+                }
                 vm.showSessions = corrState.showSessions
                 vm.showVolume = corrState.showVolume
                 vm.showEMA = corrState.showEMA
