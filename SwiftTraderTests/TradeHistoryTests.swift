@@ -129,6 +129,21 @@ struct TradeHistoryViewModelTests {
         #expect(vm.error == nil)
     }
 
+    @Test("onTradesLoaded fires after reload with the clamped trades")
+    func onTradesLoadedFires() async {
+        let fake = FakeTradeHistoryService()
+        fake.result = .success([
+            TradeRecord(positionId: "A", instrument: "EURUSD", direction: "BUY", amount: 0.01,
+                        openPrice: 1.10, closePrice: 1.11, profitLoss: 100, grossProfitLoss: 100,
+                        swaps: 0, commission: 0, openTime: 0, closeTime: nowMs, positionType: "REGULAR"),
+        ])
+        let vm = TradeHistoryViewModel(service: fake)
+        var delivered: [TradeRecord]?
+        vm.onTradesLoaded = { delivered = $0 }
+        await vm.reload()
+        #expect(delivered?.map(\.positionId) == ["A"])
+    }
+
     @Test("reload clamps to the selected window — an adjacent day's trade is dropped")
     func reloadClampsToRange() async {
         let cal = Calendar.current

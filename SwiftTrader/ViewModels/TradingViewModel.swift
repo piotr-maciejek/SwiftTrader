@@ -257,7 +257,11 @@ final class TradingViewModel {
                 takeProfit: order.takeProfit,
                 orderType: order.orderType,
                 entryPrice: order.orderType == "MARKET" ? nil : order.entryPrice)
-            pendingCaptures.append(capture)
+            // Only MARKET fills bind via this in-memory FIFO capture. A limit/stop order fills
+            // arbitrarily later (minutes/hours, or after a restart), so its metadata is instead
+            // written as a persisted provisional record off the pending-orders stream and completed
+            // by id on fill (see syncProvisionalMetadata / bindPendingCaptures).
+            if order.orderType == "MARKET" { pendingCaptures.append(capture) }
             visualOrders.removeValue(forKey: instrument)
         } catch {
             orderError = error.localizedDescription
@@ -405,14 +409,17 @@ final class TradingViewModel {
     /// Bind submit-time captures to newly-appeared positions; seed pre-existing ones so they
     /// never bind. Runs on every snapshot, on the main actor (no added concurrency).
     private func bindPendingCaptures(_ positions: [Position]) {
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         // First snapshot after (re)connect: everything already open pre-dates our submits — record
         // their ids so they never bind. They still DISPLAY any synced metadata via the id join.
+        // A limit/stop that FILLED while we were offline appears here as "pre-existing": complete its
+        // provisional record (by id) so reconnect heals its R/slippage.
         if !didSeedKnownIds {
             didSeedKnownIds = true
+            for pos in positions where pos.openPrice > 0 { completeProvisional(for: pos, nowMs: nowMs) }
             knownPositionIds.formUnion(positions.map(\.label))
             return
         }
-        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         // Expire captures whose position never showed within a generous window.
         pendingCaptures.removeAll { nowMs - $0.submitTimeMs > 30_000 }
         for pos in positions where !knownPositionIds.contains(pos.label) {
@@ -421,8 +428,14 @@ final class TradingViewModel {
             // fillPrice 0, which poisons R (risk = |0 − SL|, huge → ~0R) and slippage (→ "—"). Don't
             // mark it known yet, so it binds on the snapshot where the real fill arrives.
             guard pos.openPrice > 0 else { continue }
-            // Newly appeared: match the OLDEST pending capture for this instrument+direction within
-            // 15s (FIFO disambiguates concurrent same-pair submits).
+            // A filled limit/stop order has a persisted provisional record keyed by this id —
+            // complete it deterministically (no FIFO) and we're done with this position.
+            if completeProvisional(for: pos, nowMs: nowMs) {
+                knownPositionIds.insert(pos.label)
+                continue
+            }
+            // Newly appeared MARKET fill: match the OLDEST pending capture for this
+            // instrument+direction within 15s (FIFO disambiguates concurrent same-pair submits).
             if let idx = pendingCaptures.firstIndex(where: {
                 $0.instrument == pos.instrument && $0.direction == pos.direction
                     && nowMs - $0.submitTimeMs <= 15_000
@@ -447,6 +460,7 @@ final class TradingViewModel {
             while !Task.isCancelled {
                 do {
                     for try await snapshot in coordinator.streamPendingOrders() {
+                        syncProvisionalMetadata(snapshot.pendingOrders)
                         pendingOrders = snapshot.pendingOrders
                     }
                 } catch is CancellationError {
@@ -456,5 +470,41 @@ final class TradingViewModel {
                 }
             }
         }
+    }
+
+    /// Persist a provisional metadata record for each resting pending order, keyed by its
+    /// `groupId` (= the eventual `Position.label`). Holds the limit/stop price (slippage reference)
+    /// and the initial SL/TP (R reference) so a fill that lands minutes/hours later — even after a
+    /// restart or on another Mac — can be completed by id (`bindPendingCaptures`). All pending
+    /// orders are captured, not just visual-tool ones: the server `orderGroupId` makes that free and
+    /// covers pre-existing / cross-machine orders. Re-streamed snapshots preserve the original
+    /// `submitTimeMs` but refresh the SL/TP, so the stop in force at the moment of fill is captured.
+    private func syncProvisionalMetadata(_ orders: [PendingOrder]) {
+        guard let store = metadataStore else { return }
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        for order in orders where !order.groupId.isEmpty {
+            let existing = store.record(for: order.groupId, accountID: accountID)
+            // Don't touch a record that's already been completed by a fill.
+            if let existing, !existing.isProvisional { continue }
+            store.upsert(
+                PositionMetadata(
+                    positionId: order.groupId, instrument: order.instrument, direction: order.direction,
+                    pressPrice: order.openPrice, initialStopLoss: order.stopLoss,
+                    initialTakeProfit: order.takeProfit, fillPrice: 0,
+                    submitTimeMs: existing?.submitTimeMs ?? nowMs, openTimeMs: 0),
+                accountID: accountID)
+        }
+    }
+
+    /// Complete a provisional pending-order record (`fillPrice == 0`) for a just-appeared position,
+    /// recording the real fill. Returns true if it handled the position (so the caller skips the
+    /// market FIFO path). Used from both the live and reconnect-seed branches of `bindPendingCaptures`.
+    @discardableResult
+    private func completeProvisional(for pos: Position, nowMs: Int64) -> Bool {
+        guard let store = metadataStore,
+              let rec = store.record(for: pos.label, accountID: accountID), rec.isProvisional
+        else { return false }
+        store.upsert(rec.completed(fillPrice: pos.openPrice, openTimeMs: nowMs), accountID: accountID)
+        return true
     }
 }

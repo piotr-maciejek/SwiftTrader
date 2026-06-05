@@ -388,7 +388,8 @@ actor NativeTradingCoordinator: TradingCoordinating {
             label: orderId, instrument: slashless, direction: side,
             amount: amountUnits / 1_000_000, openPrice: trigger,
             stopLoss: sl, takeProfit: tp, state: "PENDING",
-            orderType: orderType(side: side, stopDirection: opening.stopDirection))
+            orderType: orderType(side: side, stopDirection: opening.stopDirection),
+            groupId: g.orderGroupId ?? "")
     }
 
     /// SL/TP prices from the group's protective CLOSE orders, distinguished by

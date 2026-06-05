@@ -20,6 +20,20 @@ struct PositionMetadata: Codable, Equatable, Identifiable {
     let openTimeMs: Int64          // fill time (pruning); 0 until known
 
     var id: String { positionId }
+
+    /// True for a placeholder written from a still-unfilled pending order: the limit/stop price and
+    /// initial SL/TP are known, but the real fill isn't yet (`fillPrice == 0`). Completed by id when
+    /// the fill arrives (see `PositionMetadata.completed`). R / slippage stay "—" until then.
+    var isProvisional: Bool { fillPrice <= 0 }
+
+    /// Returns a copy with the real fill recorded — turning a provisional pending-order record into a
+    /// complete one once the position appears (live, on reconnect, or from closed-trade history).
+    func completed(fillPrice: Double, openTimeMs: Int64) -> PositionMetadata {
+        PositionMetadata(
+            positionId: positionId, instrument: instrument, direction: direction,
+            pressPrice: pressPrice, initialStopLoss: initialStopLoss, initialTakeProfit: initialTakeProfit,
+            fillPrice: fillPrice, submitTimeMs: submitTimeMs, openTimeMs: openTimeMs)
+    }
 }
 
 extension PositionMetadata {
@@ -29,10 +43,11 @@ extension PositionMetadata {
     private var pipFactor: Double { PnLConverter.pipFactor(for: instrument) }
 
     /// 1R, in pips: the distance from the actual fill to the initial stop. `nil` (→ "—") when
-    /// there was no stop or the stop sat on the fill — both make R undefined (this is the
-    /// riskPips > 0 guard the R helpers rely on).
+    /// there was no stop, the stop sat on the fill, or the fill isn't known yet (a provisional
+    /// pending-order record) — all make R undefined (this is the riskPips > 0 guard the R helpers
+    /// rely on).
     var riskPips: Double? {
-        guard initialStopLoss != 0 else { return nil }
+        guard fillPrice > 0, initialStopLoss != 0 else { return nil }
         let r = abs(fillPrice - initialStopLoss) * pipFactor
         return r > 0 ? r : nil
     }
