@@ -542,6 +542,21 @@ final class WorkspaceViewModel {
         }
     }
 
+    /// Scroll the selected tab's chart(s) to the live edge (⌘E / the chart's bottom-right button).
+    /// A chart tab moves its one chart; a correlation / multi-timeframe grid jumps every cell, since
+    /// each cell owns an independent transform.
+    func scrollSelectedTabToLiveEdge() {
+        guard let tab = selectedTab else { return }
+        switch tab.content {
+        case .chart(let vm):
+            vm.jumpToLiveEdge()
+        case .correlation(let vm):
+            vm.chartViewModels.forEach { $0.jumpToLiveEdge() }
+        case .multiTimeframe(let vm):
+            vm.chartViewModels.forEach { $0.jumpToLiveEdge() }
+        }
+    }
+
     private func cyclePeriod(current: String, offset: Int, apply: (String) -> Void) {
         let periods = ChartViewModel.availablePeriods.map(\.value)
         guard let from = periods.firstIndex(of: current) else { return }

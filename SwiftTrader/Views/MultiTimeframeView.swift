@@ -98,6 +98,7 @@ struct MultiTimeframeView: View {
                 ),
                 onChartWidthChanged: { vm.chartWidth = $0 },
                 onUserDrag: { vm.onUserScroll() },
+                onScrollToLiveEdge: { vm.jumpToLiveEdge() },
                 showSessions: vm.showSessions,
                 currentPeriod: vm.currentPeriod,
                 showVolume: vm.showVolume,

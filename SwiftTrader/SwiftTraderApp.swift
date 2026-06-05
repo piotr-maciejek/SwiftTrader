@@ -38,6 +38,11 @@ struct SwiftTraderApp: App {
                     workspace?.cycleSelectedTabPeriod(offset: -1)
                 }
                 .keyboardShortcut(.downArrow, modifiers: [.command, .control])
+
+                Button("Scroll to Latest") {
+                    workspace?.scrollSelectedTabToLiveEdge()
+                }
+                .keyboardShortcut("e", modifiers: .command)
             }
 
             CommandMenu("Panels") {

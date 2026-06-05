@@ -9,6 +9,9 @@ struct ChartView: View {
     @Binding var transform: ChartTransform
     var onChartWidthChanged: ((CGFloat) -> Void)?
     var onUserDrag: (() -> Void)?
+    /// Tapped by the bottom-right "scroll to latest" button to jump back to the live edge. Nil hides
+    /// the button. Present in every context (main + grid cells) since each owns its own transform.
+    var onScrollToLiveEdge: (() -> Void)?
     var showSessions: Bool = true
     var currentPeriod: String = "FIFTEEN_MINS"
     var showVolume: Bool = true
@@ -273,6 +276,26 @@ struct ChartView: View {
                 }
                 .padding(.leading, 8)
                 .padding(.top, 6)
+
+                // "Scroll to latest" — last child so it's topmost and hit-testable above the Canvas
+                // gestures. Inset clear of the price axis (right) and time axis (bottom); the same
+                // inset scales cleanly to small grid cells.
+                if let onScrollToLiveEdge {
+                    Button(action: onScrollToLiveEdge) {
+                        Image(systemName: "arrow.right.to.line")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 5)
+                            .background(Color.black.opacity(0.55))
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Scroll to latest")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, priceAxisWidth + 8)
+                    .padding(.bottom, timeAxisHeight + 8)
+                }
             }
         }
     }

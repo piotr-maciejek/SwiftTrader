@@ -1024,6 +1024,18 @@ final class ChartViewModel {
         }
     }
 
+    /// Jump back to the live edge and resume following it (the chart's "scroll to live edge" button).
+    /// Clears any parked anchor, re-enables autoscroll, and reuses `scrollToEnd()`: that resets the
+    /// view's one-shot snap guard, so `ChartView` re-snaps to the live edge using its own reliably-
+    /// correct geometry width (the same path a fresh load takes). Works identically for the main chart
+    /// and grid cells. Setting `autoScroll` / `viewportAnchorTimeMs` in lock-step (as `onUserScroll`
+    /// does) keeps the chart following live afterwards instead of re-parking on the next reconcile.
+    func jumpToLiveEdge() {
+        autoScroll = true
+        viewportAnchorTimeMs = nil
+        scrollToEnd()
+    }
+
     /// Shift the view by one candle slot so the new bar appears where the old last bar was.
     private func advanceByOneCandle() {
         transform.xOffset += transform.candleSlotWidth
