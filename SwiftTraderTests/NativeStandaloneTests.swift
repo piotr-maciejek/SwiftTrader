@@ -24,7 +24,7 @@ struct NativeMarketDataCoordinatorRoutingTests {
         bars: @escaping @Sendable (_ period: String) -> [SwiftTrader.CandleBar]
     ) -> (NativeMarketDataCoordinator, Spy) {
         let spy = Spy()
-        let coord = NativeMarketDataCoordinator(cache: cache, rawFetch: { instrument, period, count, before in
+        let coord = NativeMarketDataCoordinator(cache: cache, rawFetch: { instrument, period, count, before, _ in
             await spy.record(.init(instrument: instrument, period: period, count: count, before: before))
             return bars(period)
         })

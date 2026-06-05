@@ -35,15 +35,18 @@ struct ChartTabState: Codable, Equatable {
     var showATR: Bool
     var atrPeriod: Int
     var drawings: [Drawing]
+    var side: ChartSide
+    var showBidAsk: Bool
 
     init(instrument: String, period: String, showSessions: Bool, showVolume: Bool,
          showEMA: Bool, emaConfigs: [EMALineState], showATR: Bool = true, atrPeriod: Int = 14,
-         drawings: [Drawing] = []) {
+         drawings: [Drawing] = [], side: ChartSide = .bid, showBidAsk: Bool = false) {
         self.instrument = instrument; self.period = period
         self.showSessions = showSessions; self.showVolume = showVolume
         self.showEMA = showEMA; self.emaConfigs = emaConfigs
         self.showATR = showATR; self.atrPeriod = atrPeriod
         self.drawings = drawings
+        self.side = side; self.showBidAsk = showBidAsk
     }
 
     init(from decoder: Decoder) throws {
@@ -57,6 +60,8 @@ struct ChartTabState: Codable, Equatable {
         showATR = try c.decodeIfPresent(Bool.self, forKey: .showATR) ?? true
         atrPeriod = try c.decodeIfPresent(Int.self, forKey: .atrPeriod) ?? 14
         drawings = try c.decodeIfPresent([Drawing].self, forKey: .drawings) ?? []
+        side = try c.decodeIfPresent(ChartSide.self, forKey: .side) ?? .bid
+        showBidAsk = try c.decodeIfPresent(Bool.self, forKey: .showBidAsk) ?? false
     }
 }
 
@@ -77,16 +82,20 @@ struct CorrelationTabState: Codable, Equatable {
     var customID: UUID?
     var name: String?
     var pairs: [String]?
+    var side: ChartSide
+    var showBidAsk: Bool
 
     init(currency: String, period: String, showSessions: Bool, showVolume: Bool,
          showEMA: Bool, emaConfigs: [EMALineState], showATR: Bool = true, atrPeriod: Int = 14,
-         drawings: [[Drawing]] = [], customID: UUID? = nil, name: String? = nil, pairs: [String]? = nil) {
+         drawings: [[Drawing]] = [], customID: UUID? = nil, name: String? = nil, pairs: [String]? = nil,
+         side: ChartSide = .bid, showBidAsk: Bool = false) {
         self.currency = currency; self.period = period
         self.showSessions = showSessions; self.showVolume = showVolume
         self.showEMA = showEMA; self.emaConfigs = emaConfigs
         self.showATR = showATR; self.atrPeriod = atrPeriod
         self.drawings = drawings
         self.customID = customID; self.name = name; self.pairs = pairs
+        self.side = side; self.showBidAsk = showBidAsk
     }
 
     init(from decoder: Decoder) throws {
@@ -103,6 +112,8 @@ struct CorrelationTabState: Codable, Equatable {
         customID = try c.decodeIfPresent(UUID.self, forKey: .customID)
         name = try c.decodeIfPresent(String.self, forKey: .name)
         pairs = try c.decodeIfPresent([String].self, forKey: .pairs)
+        side = try c.decodeIfPresent(ChartSide.self, forKey: .side) ?? .bid
+        showBidAsk = try c.decodeIfPresent(Bool.self, forKey: .showBidAsk) ?? false
     }
 }
 
@@ -130,11 +141,13 @@ struct MultiTimeframeTabState: Codable, Equatable {
     var atrPeriod: Int
     /// Per-cell drawings, ordered to match `zoom.periods`.
     var drawings: [[Drawing]]
+    var side: ChartSide
+    var showBidAsk: Bool
 
     init(instrument: String, zoom: TFZoom = .standard, showSessions: Bool = true,
          showVolume: Bool = true, showEMA: Bool = true,
          emaConfigs: [EMALineState] = [], showATR: Bool = true, atrPeriod: Int = 14,
-         drawings: [[Drawing]] = []) {
+         drawings: [[Drawing]] = [], side: ChartSide = .bid, showBidAsk: Bool = false) {
         self.instrument = instrument
         self.zoom = zoom
         self.showSessions = showSessions
@@ -144,6 +157,7 @@ struct MultiTimeframeTabState: Codable, Equatable {
         self.showATR = showATR
         self.atrPeriod = atrPeriod
         self.drawings = drawings
+        self.side = side; self.showBidAsk = showBidAsk
     }
 
     init(from decoder: Decoder) throws {
@@ -157,6 +171,8 @@ struct MultiTimeframeTabState: Codable, Equatable {
         showATR = try c.decodeIfPresent(Bool.self, forKey: .showATR) ?? true
         atrPeriod = try c.decodeIfPresent(Int.self, forKey: .atrPeriod) ?? 14
         drawings = try c.decodeIfPresent([[Drawing]].self, forKey: .drawings) ?? []
+        side = try c.decodeIfPresent(ChartSide.self, forKey: .side) ?? .bid
+        showBidAsk = try c.decodeIfPresent(Bool.self, forKey: .showBidAsk) ?? false
     }
 }
 

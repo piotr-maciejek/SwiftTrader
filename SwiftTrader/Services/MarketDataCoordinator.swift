@@ -30,7 +30,8 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
         instrument: String = "EURUSD",
         period: String = "ONE_MIN",
         count: Int = 200,
-        rebucketing: Bool = false
+        rebucketing: Bool = false,
+        side: ChartSide = .bid   // server mode (jforex-server) is bid-only; side ignored
     ) async throws -> [CandleBar] {
         if let target = AggregatedPeriod(period), rebucketing || target.alwaysAggregated {
             return try await fetchAggregated(instrument: instrument, target: target, count: count)
@@ -111,7 +112,8 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
         instrument: String,
         period: String,
         count: Int = 1000,
-        rebucketing: Bool = false
+        rebucketing: Bool = false,
+        side: ChartSide = .bid
     ) async throws -> [CandleBar] {
         if let target = AggregatedPeriod(period), rebucketing || target.alwaysAggregated {
             return try await fetchEarlierAggregated(
@@ -134,7 +136,7 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
     /// 4H/Daily, `ONE_MIN` for 3m) — derived bars are rebuilt on the fly and
     /// cached separately in `streamCandles`.
     func cacheBar(
-        _ bar: CandleBar, instrument: String, period: String, rebucketing: Bool = false
+        _ bar: CandleBar, instrument: String, period: String, rebucketing: Bool = false, side: ChartSide = .bid
     ) async {
         let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server)
         await cache.appendBar(bar, for: key)
@@ -143,7 +145,8 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
     func streamCandles(
         instrument: String = "EURUSD",
         period: String = "ONE_MIN",
-        rebucketing: Bool = false
+        rebucketing: Bool = false,
+        side: ChartSide = .bid
     ) -> AsyncThrowingStream<CandleBar, Error> {
         if let target = AggregatedPeriod(period), rebucketing || target.alwaysAggregated {
             return aggregatedStream(instrument: instrument, target: target)

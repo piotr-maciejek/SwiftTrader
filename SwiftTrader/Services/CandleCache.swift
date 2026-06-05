@@ -11,11 +11,13 @@ actor CandleCache {
         let instrument: String
         let period: String  // timeframe, e.g. "ONE_MIN", "FOUR_HOURS"
         let source: BarSource
+        let side: ChartSide  // bid vs ask candles — distinct cache entries so they never collide
 
-        init(instrument: String, period: String, source: BarSource = .server) {
+        init(instrument: String, period: String, source: BarSource = .server, side: ChartSide = .bid) {
             self.instrument = instrument
             self.period = period
             self.source = source
+            self.side = side
         }
 
         /// Resolve the source for the currently-displayed chart given the rebucketing toggle.
@@ -24,13 +26,13 @@ actor CandleCache {
         /// WEEKLY is client-derived in native mode (Dukascopy serves no weekly history),
         /// built by grouping DAILY candles — so it tracks the toggle like 4H/Daily.
         static func forDisplay(
-            instrument: String, period: String, clientSideRebucketing: Bool
+            instrument: String, period: String, clientSideRebucketing: Bool, side: ChartSide = .bid
         ) -> CacheKey {
             let togglesWithRebucketing = period == "FOUR_HOURS" || period == "DAILY" || period == "WEEKLY"
                 || period == "FIVE_MINS" || period == "FIFTEEN_MINS" || period == "THIRTY_MINS"
             let isAggregated = period == "THREE_MINS" || (togglesWithRebucketing && clientSideRebucketing)
             let source: BarSource = isAggregated ? .aggregated : .server
-            return CacheKey(instrument: instrument, period: period, source: source)
+            return CacheKey(instrument: instrument, period: period, source: source, side: side)
         }
     }
 
@@ -73,7 +75,7 @@ actor CandleCache {
         guard let diskCache, store[key] == nil, !diskLoaded.contains(key) else { return }
         // Mark before the await so concurrent callers for the same key don't double-load.
         diskLoaded.insert(key)
-        let diskKey = DiskCacheKey(instrument: key.instrument, period: key.period, source: key.source)
+        let diskKey = DiskCacheKey(instrument: key.instrument, period: key.period, source: key.source, side: key.side)
         let bars = await diskCache.load(diskKey)
         let valid = bars.filter { $0.low > 0 && $0.high > 0 && $0.open > 0 && $0.close > 0 }
         // A merge may have populated the key while we were awaiting — don't clobber it.
@@ -274,7 +276,7 @@ actor CandleCache {
 
     private func scheduleDiskWrite(key: CacheKey, bars: [CandleBar]) {
         guard let diskCache else { return }
-        let diskKey = DiskCacheKey(instrument: key.instrument, period: key.period, source: key.source)
+        let diskKey = DiskCacheKey(instrument: key.instrument, period: key.period, source: key.source, side: key.side)
         Task { await diskCache.scheduleSave(bars, for: diskKey) }
     }
 }

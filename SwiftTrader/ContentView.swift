@@ -428,6 +428,24 @@ struct ContentView: View {
 
             Divider().frame(height: 16)
 
+            // Candle side (bid/ask) + show-both-lines toggles (chart tabs only).
+            Button(action: { vm.switchSide(vm.currentSide.toggled) }) {
+                Text(vm.currentSide.label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(vm.currentSide == .ask ? Color.orange : Color.secondary)
+                    .frame(minWidth: 26)
+            }
+            .buttonStyle(.borderless)
+            .help("Candle side — Bid/Ask (toggle)")
+
+            Button(action: { vm.showBidAsk.toggle() }) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showBidAsk ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Show live bid & ask lines")
+
             Button(action: {
                 workspace.selectOrCreateMultiTimeframeTab(instrument: vm.currentInstrument)
             }) {
@@ -645,6 +663,8 @@ struct ContentView: View {
             accountEquity: workspace.trading.account?.equity,
             visualOrderSpread: workspace.trading.spreads[vm.currentInstrument] ?? 0,
             showQuote: true,
+            chartSide: vm.currentSide,
+            showBidAskLines: vm.showBidAsk,
             isSubmittingOrder: workspace.trading.isSubmitting,
             drawings: vm.drawings,
             drawingTool: vm.drawingTool,
@@ -725,6 +745,26 @@ struct ContentView: View {
             }
             .buttonStyle(.borderless)
             .help("Longer Timeframe (⌘⌃↑)")
+
+            Divider().frame(height: 16)
+
+            // Candle side (bid/ask) + show-both-lines toggles (apply to every cell).
+            Button(action: { vm.switchSide(vm.currentSide.toggled) }) {
+                Text(vm.currentSide.label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(vm.currentSide == .ask ? Color.orange : Color.secondary)
+                    .frame(minWidth: 26)
+            }
+            .buttonStyle(.borderless)
+            .help("Candle side — Bid/Ask (toggle)")
+
+            Button(action: { vm.showBidAsk.toggle() }) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showBidAsk ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Show live bid & ask lines")
 
             Button(action: { vm.showSessions.toggle() }) {
                 Image(systemName: "clock.arrow.2.circlepath")
@@ -817,6 +857,24 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .fixedSize()
             .help("Timeframe zoom")
+
+            // Candle side (bid/ask) + show-both-lines toggles (apply to every cell).
+            Button(action: { vm.switchSide(vm.currentSide.toggled) }) {
+                Text(vm.currentSide.label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(vm.currentSide == .ask ? Color.orange : Color.secondary)
+                    .frame(minWidth: 26)
+            }
+            .buttonStyle(.borderless)
+            .help("Candle side — Bid/Ask (toggle)")
+
+            Button(action: { vm.showBidAsk.toggle() }) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 11))
+                    .foregroundStyle(vm.showBidAsk ? .primary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .help("Show live bid & ask lines")
 
             Divider().frame(height: 16)
 

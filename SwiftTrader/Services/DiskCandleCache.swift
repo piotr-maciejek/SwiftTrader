@@ -9,6 +9,7 @@ struct DiskCacheKey: Hashable, Sendable {
     let instrument: String
     let period: String
     let source: BarSource
+    var side: ChartSide = .bid
 }
 
 /// On-disk layer for completed candle bars — one **packed-binary** file per
@@ -128,7 +129,10 @@ actor DiskCandleCache {
     /// File URL used for a key; exposed for testing. The `.plist` extension is historical
     /// — existing on-disk caches use it, and the contents are the packed SCB1 binary format.
     nonisolated func fileURL(for key: DiskCacheKey) -> URL {
-        let name = "\(Self.sanitize(key.instrument))-\(key.period).\(key.source.rawValue).plist"
+        // BID keeps the historical name so existing on-disk caches still load; ASK gets a distinct
+        // suffix so the two sides never share a file.
+        let sideSuffix = key.side == .bid ? "" : ".\(key.side.rawValue)"
+        let name = "\(Self.sanitize(key.instrument))-\(key.period).\(key.source.rawValue)\(sideSuffix).plist"
         return directory.appendingPathComponent(name)
     }
 
@@ -137,13 +141,14 @@ actor DiskCandleCache {
     }
 
     static func parseStem(_ stem: String) -> DiskCacheKey? {
-        // Shape: "<instrumentSan>-<period>.<source>"
-        let dotParts = stem.split(separator: ".", maxSplits: 1).map(String.init)
-        guard dotParts.count == 2, let source = BarSource(rawValue: dotParts[1]) else { return nil }
-        let instrumentPeriod = dotParts[0]
-        let dashParts = instrumentPeriod.split(separator: "-", maxSplits: 1).map(String.init)
+        // Shape: "<instrumentSan>-<period>.<source>[.<SIDE>]" (no SIDE suffix ⇒ BID, legacy files).
+        let dotParts = stem.split(separator: ".").map(String.init)
+        guard dotParts.count == 2 || dotParts.count == 3 else { return nil }
+        guard let source = BarSource(rawValue: dotParts[1]) else { return nil }
+        let side: ChartSide = dotParts.count == 3 ? (ChartSide(rawValue: dotParts[2]) ?? .bid) : .bid
+        let dashParts = dotParts[0].split(separator: "-", maxSplits: 1).map(String.init)
         guard dashParts.count == 2 else { return nil }
-        return DiskCacheKey(instrument: dashParts[0], period: dashParts[1], source: source)
+        return DiskCacheKey(instrument: dashParts[0], period: dashParts[1], source: source, side: side)
     }
 
     // MARK: - Packed binary codec (no Codable/reflection)

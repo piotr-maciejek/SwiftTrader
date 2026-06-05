@@ -699,22 +699,36 @@ struct ChartViewModelTests {
 
     // MARK: - quoteReadout: live Bid / Ask / Spread overlay text
 
-    @Test("quoteReadout: non-JPY shows 5 decimals, ask = bid + spread, spread in pips")
+    @Test("quoteReadout: BID mode — close is the bid, ask = close + spread, spread in pips")
     func quoteReadoutNonJPY() {
-        let s = ChartView.quoteReadout(bid: 0.99082, spread: 0.00013, instrument: "EURUSD")
+        let s = ChartView.quoteReadout(close: 0.99082, spread: 0.00013, side: .bid, instrument: "EURUSD")
         #expect(s == "Bid 0.99082   Ask 0.99095   Spr 1.3p")
     }
 
     @Test("quoteReadout: JPY pair uses 3 decimals and the 100x pip factor")
     func quoteReadoutJPY() {
-        let s = ChartView.quoteReadout(bid: 150.123, spread: 0.012, instrument: "USDJPY")
+        let s = ChartView.quoteReadout(close: 150.123, spread: 0.012, side: .bid, instrument: "USDJPY")
         #expect(s == "Bid 150.123   Ask 150.135   Spr 1.2p")
     }
 
     @Test("quoteReadout: no live spread → '—' and ask == bid")
     func quoteReadoutNoSpread() {
-        let s = ChartView.quoteReadout(bid: 1.10000, spread: 0, instrument: "EURUSD")
+        let s = ChartView.quoteReadout(close: 1.10000, spread: 0, side: .bid, instrument: "EURUSD")
         #expect(s == "Bid 1.10000   Ask 1.10000   Spr —")
+    }
+
+    @Test("quoteReadout: ASK mode — close is the ask, bid = close − spread")
+    func quoteReadoutAskMode() {
+        let s = ChartView.quoteReadout(close: 0.99095, spread: 0.00013, side: .ask, instrument: "EURUSD")
+        #expect(s == "Bid 0.99082   Ask 0.99095   Spr 1.3p")
+    }
+
+    @Test("bidAsk: bid-mode puts close at bid, ask-mode puts close at ask")
+    func bidAskHelper() {
+        let b = ChartView.bidAsk(close: 1.2000, spread: 0.0002, side: .bid)
+        #expect(abs(b.bid - 1.2000) < 1e-9 && abs(b.ask - 1.2002) < 1e-9)
+        let a = ChartView.bidAsk(close: 1.2002, spread: 0.0002, side: .ask)
+        #expect(abs(a.bid - 1.2000) < 1e-9 && abs(a.ask - 1.2002) < 1e-9)
     }
 
     @Test("scrollToEnd clears the one-shot guard so the view re-positions for a fresh dataset")

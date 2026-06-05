@@ -43,6 +43,10 @@ struct ChartView: View {
     /// Show the live Bid / Ask / Spread readout under the ATR overlay. On for the main chart;
     /// off for the dense correlation / multi-timeframe grid cells.
     var showQuote: Bool = false
+    /// Which side the candles represent — so the quote readout + bid/ask lines compute the opposite side.
+    var chartSide: ChartSide = .bid
+    /// When true, draw both the live bid and ask as moving lines (instead of the single current-price line).
+    var showBidAskLines: Bool = false
     /// True while a submit is in flight — disables visual-order interactions and dims the box.
     var isSubmittingOrder: Bool = false
     /// Externally-driven cursor time (UTC ms). When set and there's no local
@@ -274,8 +278,8 @@ struct ChartView: View {
                     if showATR, let pips = atrPips, let percent = todayATRPercent {
                         atrOverlay(atrPeriod: atrPeriod, atrPips: pips, todayPercent: percent)
                     }
-                    if showQuote, let bid = bars.last?.close, bid > 0 {
-                        quoteOverlay(bid: bid, spread: visualOrderSpread, instrument: currentInstrument)
+                    if showQuote, let close = bars.last?.close, close > 0 {
+                        quoteOverlay(close: close, spread: visualOrderSpread, instrument: currentInstrument)
                     }
                     if let ch = crosshair,
                        ch.barIndex >= 0, ch.barIndex < bars.count {
@@ -350,22 +354,29 @@ struct ChartView: View {
             .cornerRadius(4)
     }
 
-    /// Formats the live quote line shown under the ATR overlay. Pure → unit-testable.
-    /// Candles are BID, so `bid` is the live bar close; ask = bid + spread; spread is shown in pips
-    /// (`—` when there's no live spread yet, e.g. market closed / pre-first-tick). JPY pairs use 3
-    /// decimals, others 5 (matching the visual-order box).
-    static func quoteReadout(bid: Double, spread: Double, instrument: String) -> String {
+    /// Live bid & ask from the candle `close` + live `spread`, given which side the candles are.
+    /// In BID mode the close IS the bid (ask = close + spread); in ASK mode the close IS the ask
+    /// (bid = close − spread). Pure → the single source of truth for the readout + the chart lines.
+    static func bidAsk(close: Double, spread: Double, side: ChartSide) -> (bid: Double, ask: Double) {
+        let s = max(0, spread)
+        return side == .bid ? (bid: close, ask: close + s) : (bid: close - s, ask: close)
+    }
+
+    /// Formats the live quote line shown under the ATR overlay. Pure → unit-testable. `close` is the
+    /// live bar close (bid or ask depending on `side`); spread is shown in pips (`—` when there's no
+    /// live spread yet, e.g. market closed / pre-first-tick). JPY pairs use 3 decimals, others 5.
+    static func quoteReadout(close: Double, spread: Double, side: ChartSide, instrument: String) -> String {
         let dec = instrument.contains("JPY") ? 3 : 5
-        let ask = bid + max(0, spread)
+        let q = bidAsk(close: close, spread: spread, side: side)
         let spr = spread > 0
             ? String(format: "%.1fp", spread * PnLConverter.pipFactor(for: instrument))
             : "—"
-        return String(format: "Bid %.\(dec)f   Ask %.\(dec)f   Spr %@", bid, ask, spr)
+        return String(format: "Bid %.\(dec)f   Ask %.\(dec)f   Spr %@", q.bid, q.ask, spr)
     }
 
     @ViewBuilder
-    private func quoteOverlay(bid: Double, spread: Double, instrument: String) -> some View {
-        Text(Self.quoteReadout(bid: bid, spread: spread, instrument: instrument))
+    private func quoteOverlay(close: Double, spread: Double, instrument: String) -> some View {
+        Text(Self.quoteReadout(close: close, spread: spread, side: chartSide, instrument: instrument))
             .font(.system(size: 11, weight: .medium, design: .monospaced))
             .foregroundColor(.secondary)
             .padding(.horizontal, 8)
@@ -511,44 +522,60 @@ struct ChartView: View {
         }
     }
 
-    private func drawCurrentPriceLine(context: inout GraphicsContext, chartWidth: CGFloat, chartHeight: CGFloat, priceRange: (min: Double, max: Double)) {
-        guard let lastBar = bars.last else { return }
-        let y = yForPrice(lastBar.close, chartHeight: chartHeight, priceRange: priceRange)
-        guard y >= 0 && y <= chartHeight else { return }
+    /// Distinct color for the ask line/pill when both bid & ask are shown (bid keeps `currentPriceColor`).
+    private let askLineColor = Color(red: 0.95, green: 0.55, blue: 0.25) // orange
 
+    private func drawCurrentPriceLine(context: inout GraphicsContext, chartWidth: CGFloat, chartHeight: CGFloat, priceRange: (min: Double, max: Double)) {
+        guard let close = bars.last?.close, close > 0 else { return }
+        if showBidAskLines {
+            let q = Self.bidAsk(close: close, spread: visualOrderSpread, side: chartSide)
+            drawPriceLine(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, price: q.bid, color: currentPriceColor)
+            drawPriceLine(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, price: q.ask, color: askLineColor)
+        } else {
+            drawPriceLine(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, price: close, color: currentPriceColor)
+        }
+    }
+
+    private func drawPriceLine(context: inout GraphicsContext, chartWidth: CGFloat, chartHeight: CGFloat, priceRange: (min: Double, max: Double), price: Double, color: Color) {
+        guard price > 0 else { return }
+        let y = yForPrice(price, chartHeight: chartHeight, priceRange: priceRange)
+        guard y >= 0 && y <= chartHeight else { return }
         var path = Path()
         path.move(to: CGPoint(x: 0, y: y))
         path.addLine(to: CGPoint(x: chartWidth, y: y))
-        context.stroke(
-            path,
-            with: .color(currentPriceColor),
-            style: StrokeStyle(lineWidth: 1, dash: [4, 3])
-        )
+        context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
     }
 
-    /// Draws the current price label in the price axis area (called unclipped).
+    /// Draws the current-price label(s) in the price axis area (called unclipped). One pill normally,
+    /// a bid + ask pill when `showBidAskLines`.
     private func drawCurrentPriceLabel(context: inout GraphicsContext, chartWidth: CGFloat, chartHeight: CGFloat, priceRange: (min: Double, max: Double)) {
-        guard let lastBar = bars.last else { return }
-        let price = lastBar.close
+        guard let close = bars.last?.close, close > 0 else { return }
+        if showBidAskLines {
+            let q = Self.bidAsk(close: close, spread: visualOrderSpread, side: chartSide)
+            drawPriceLabel(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, price: q.bid, color: currentPriceColor)
+            drawPriceLabel(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, price: q.ask, color: askLineColor)
+        } else {
+            drawPriceLabel(context: &context, chartWidth: chartWidth, chartHeight: chartHeight, priceRange: priceRange, price: close, color: currentPriceColor)
+        }
+    }
+
+    private func drawPriceLabel(context: inout GraphicsContext, chartWidth: CGFloat, chartHeight: CGFloat, priceRange: (min: Double, max: Double), price: Double, color: Color) {
+        guard price > 0 else { return }
         let y = yForPrice(price, chartHeight: chartHeight, priceRange: priceRange)
         guard y >= 0 && y <= chartHeight else { return }
-
-        let label = Text(String(format: "%.5f", price))
+        let dec = currentInstrument.contains("JPY") ? 3 : 5
+        let label = Text(String(format: "%.\(dec)f", price))
             .font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundColor(.white)
         let resolved = context.resolve(label)
         let labelSize = resolved.measure(in: CGSize(width: 200, height: 20))
-
         let pillRect = CGRect(
             x: chartWidth + 2,
             y: y - labelSize.height / 2 - 2,
             width: labelSize.width + 8,
             height: labelSize.height + 4
         )
-        context.fill(
-            Path(roundedRect: pillRect, cornerRadius: 3),
-            with: .color(currentPriceColor)
-        )
+        context.fill(Path(roundedRect: pillRect, cornerRadius: 3), with: .color(color))
         context.draw(resolved, at: CGPoint(x: chartWidth + 6, y: y), anchor: .leading)
     }
 

@@ -21,7 +21,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// optionally ending before a millisecond timestamp. Injectable so the routing /
     /// aggregation logic above it is testable without a live session.
     typealias RawFetch = @Sendable (
-        _ instrument: String, _ period: String, _ count: Int, _ before: Int64?
+        _ instrument: String, _ period: String, _ count: Int, _ before: Int64?, _ side: ChartSide
     ) async throws -> [SwiftTrader.CandleBar]
 
     let cache: CandleCache
@@ -68,14 +68,14 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             self.rawFetch = rawFetch
             self.canFetch = true
         } else if let session {
-            self.rawFetch = { instrument, period, count, before in
+            self.rawFetch = { instrument, period, count, before, side in
                 try await Self.fetchViaSession(
-                    session, instrument: instrument, period: period, count: count, before: before
+                    session, instrument: instrument, period: period, count: count, before: before, side: side
                 )
             }
             self.canFetch = true
         } else {
-            self.rawFetch = { _, _, _, _ in throw NativeProviderError.missingCredentials }
+            self.rawFetch = { _, _, _, _, _ in throw NativeProviderError.missingCredentials }
             self.canFetch = false
         }
 
@@ -91,10 +91,11 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                 cache: cache,
                 awaitIdle: { await coalescer.awaitForegroundIdle() },
                 fetchPage: { instrument, period, before, count in
+                    // The background prefetcher warms the BID series only; ask is fetched on demand.
                     let key = "\(instrument)|\(period)|\(before ?? -1)|\(count)"
                     let bars = (try? await coalescer.run(key: key, foreground: false) {
                         NativeMarketDataCoordinator.stripWeekendFillers(
-                            try await rawFetch(instrument, period, count, before)
+                            try await rawFetch(instrument, period, count, before, .bid)
                         )
                     }) ?? []
                     if !bars.isEmpty {
@@ -123,7 +124,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     }
 
     func fetchCandles(
-        instrument: String, period: String, count: Int, rebucketing: Bool
+        instrument: String, period: String, count: Int, rebucketing: Bool, side: ChartSide
     ) async throws -> [SwiftTrader.CandleBar] {
         // Once the first visible chart starts loading, kick off the background prefetcher
         // (idempotent). It waits for foreground idle before each request, so it never
@@ -137,15 +138,15 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         // aggregated targets (4H/Daily/3m/5m/15m/30m) we fill the SOURCE (1H or 1m) so
         // the re-aggregation below builds on fresh data.
         let sourcePeriod = Self.aggSpec(for: period)?.sourcePeriod ?? period
-        await forwardGapFillIfNeeded(instrument: instrument, period: sourcePeriod)
+        await forwardGapFillIfNeeded(instrument: instrument, period: sourcePeriod, side: side)
         // Native mode aggregates everything except the two periods the datafeed actually
         // stores (1H, 1m): 4H/Daily from 1H; 3m/5m/15m/30m from 1m. The datafeed has no
         // 5m/15m/30m candle files, so they MUST be built from 1m (exactly as JForex does).
         // The only thing native caches as `.server` is raw 1H/1m. `rebucketing` is ignored.
         if let spec = Self.aggSpec(for: period) {
-            return try await fetchAggregated(instrument: instrument, spec: spec, count: count)
+            return try await fetchAggregated(instrument: instrument, spec: spec, count: count, side: side)
         }
-        let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server)
+        let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server, side: side)
         // Cache-first, but only when the cache is BOTH fresh and deep enough for `count` —
         // a shallow cache (e.g. a 1H chart's recent window) must not satisfy a deeper
         // request, and a stale one triggers a refetch. Otherwise the live tail catches up
@@ -156,49 +157,49 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
            await cacheCoversWindow(key: key, periodSeconds: periodSeconds, count: count) {
             return await cache.getBars(for: key)
         }
-        let fetched = try await fetchRawCandles(instrument: instrument, period: period, count: count)
+        let fetched = try await fetchRawCandles(instrument: instrument, period: period, count: count, side: side)
         let cached = await cache.merge(fetched, for: key)
         if let last = fetched.last, last.partial { return cached + [last] }
         return cached
     }
 
     func fetchEarlierCandles(
-        instrument: String, period: String, count: Int, rebucketing: Bool
+        instrument: String, period: String, count: Int, rebucketing: Bool, side: ChartSide
     ) async throws -> [SwiftTrader.CandleBar] {
         if let spec = Self.aggSpec(for: period) {
-            return try await fetchEarlierAggregated(instrument: instrument, spec: spec, count: count)
+            return try await fetchEarlierAggregated(instrument: instrument, spec: spec, count: count, side: side)
         }
-        let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server)
+        let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server, side: side)
         guard let before = await cache.earliestTime(for: key) else {
             return await cache.getBars(for: key)
         }
         let fetched = try await fetchRawCandles(
-            instrument: instrument, period: period, count: count, before: before
+            instrument: instrument, period: period, count: count, before: before, side: side
         )
         return await cache.merge(fetched, for: key)
     }
 
     func cacheBar(
-        _ bar: SwiftTrader.CandleBar, instrument: String, period: String, rebucketing: Bool
+        _ bar: SwiftTrader.CandleBar, instrument: String, period: String, rebucketing: Bool, side: ChartSide
     ) async {
-        let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server)
+        let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server, side: side)
         await cache.appendBar(bar, for: key)
     }
 
     func streamCandles(
-        instrument: String, period: String, rebucketing: Bool
+        instrument: String, period: String, rebucketing: Bool, side: ChartSide
     ) -> AsyncThrowingStream<SwiftTrader.CandleBar, Error> {
         guard session != nil else {
             return AsyncThrowingStream { $0.finish(throwing: NativeProviderError.missingCredentials) }
         }
-        // One shared aggregation per (instrument, period): all charts of the same pair+timeframe
-        // (main chart, MTF panel, correlation cell) attach to the SAME live bar instead of each
-        // building its own from the shared tick feed (which diverged). A freshly-attaching chart
-        // replays the current forming bar immediately, so it matches the others on the spot.
-        let key = LiveCandleMulticaster.Key(instrument: instrument, period: period)
+        // One shared aggregation per (instrument, period, side): all charts of the same
+        // pair+timeframe+side attach to the SAME live bar instead of each building its own from the
+        // shared tick feed (which diverged). A freshly-attaching chart replays the current forming
+        // bar immediately, so it matches the others on the spot.
+        let key = LiveCandleMulticaster.Key(instrument: instrument, period: period, side: side)
         return multicaster.subscribe(key: key) { [weak self] in
             guard let self else { return AsyncThrowingStream { $0.finish() } }
-            return self.rawCandleStream(instrument: instrument, period: period, rebucketing: rebucketing)
+            return self.rawCandleStream(instrument: instrument, period: period, rebucketing: rebucketing, side: side)
         }
     }
 
@@ -207,7 +208,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// within a bucket). Run ONCE per key by `LiveCandleMulticaster` and fanned out to every
     /// chart — never per chart. (Body unchanged from the previous per-call `streamCandles`.)
     private func rawCandleStream(
-        instrument: String, period: String, rebucketing: Bool
+        instrument: String, period: String, rebucketing: Bool, side: ChartSide = .bid
     ) -> AsyncThrowingStream<SwiftTrader.CandleBar, Error> {
         guard let session else {
             return AsyncThrowingStream { $0.finish(throwing: NativeProviderError.missingCredentials) }
@@ -230,7 +231,9 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                 for await tick in await session.tickStream() {
                     if Task.isCancelled { break }
                     guard tick.instrument == wireInstrument else { continue }
-                    guard let bid = tick.bestBid?.doubleValue else { continue }
+                    // Build the forming bar from the chart's side: the candle close/high/low track
+                    // the ask in ask mode, the bid in bid mode.
+                    guard let bid = (side == .bid ? tick.bestBid : tick.bestAsk)?.doubleValue else { continue }
                     // FX is 24/5 — over Fri 17 ET → Sun 17 ET (and Dec 25 / Jan 1) any
                     // tick that arrives is a stale "last quote" replay from Dukascopy.
                     // Yielding it creates a flat partial bar (no in-progress snapshot
@@ -257,7 +260,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                         // tick. For raw 1H/1m (no in-bucket source) there's no history to
                         // seed and the live bar opens at the tick price as before.
                         current = await self.seedLiveBucket(
-                            instrument: instrument, period: period, bucketMs: bucketMs, bid: bid
+                            instrument: instrument, period: period, bucketMs: bucketMs, bid: bid, side: side
                         )
                     }
                     if let c = current { continuation.yield(c) }
@@ -281,9 +284,9 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// fixed-grid intraday periods (3m/5m/15m/30m) feed the server's 1m partial into
     /// `aggregateFixedGrid(..., openPartial:)`.
     private func seedLiveBucket(
-        instrument: String, period: String, bucketMs: Int64, bid: Double
+        instrument: String, period: String, bucketMs: Int64, bid: Double, side: ChartSide = .bid
     ) async -> SwiftTrader.CandleBar {
-        let snap = await ensureInProgress(instrument: instrument)
+        let snap = await ensureInProgress(instrument: instrument, side: side)
         func extend(_ bar: SwiftTrader.CandleBar?) -> SwiftTrader.CandleBar {
             // A non-positive seed (zero-OHLC in-progress/placeholder bar) would drag the
             // live bar's low to 0 via min(low, bid); treat it as no-seed and open at the
@@ -317,7 +320,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             let target: AggregatedPeriod = period == "DAILY" ? .daily : .fourHours
             let tail = period == "DAILY" ? 30 : 6
             let cached1H = await cache.getBars(
-                for: CandleCache.CacheKey(instrument: instrument, period: "ONE_HOUR", source: .server)
+                for: CandleCache.CacheKey(instrument: instrument, period: "ONE_HOUR", source: .server, side: side)
             )
             let inputs = Array(cached1H.suffix(tail))
             let aggregated = BarAggregator.aggregate(
@@ -356,7 +359,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                 : period == "FIVE_MINS" ? 15
                 : 10
             let cached1m = await cache.getBars(
-                for: CandleCache.CacheKey(instrument: instrument, period: "ONE_MIN", source: .server)
+                for: CandleCache.CacheKey(instrument: instrument, period: "ONE_MIN", source: .server, side: side)
             )
             let inputs = Array(cached1m.suffix(tail))
             let aggregated = BarAggregator.aggregateFixedGrid(
@@ -370,7 +373,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             // Seed the forming week from the 1H bars already in this FX week (the warm
             // shared 1H cache, same source the weekly history fetch aggregates), then
             // extend by the tick and the in-progress 1H partial.
-            let hourlyKey = CandleCache.CacheKey(instrument: instrument, period: "ONE_HOUR", source: .server)
+            let hourlyKey = CandleCache.CacheKey(instrument: instrument, period: "ONE_HOUR", source: .server, side: side)
             let weekHours = await cache.getBars(for: hourlyKey)
                 .filter { BarAggregator.weekStartMs($0.date) == bucketMs }
             let aggregated = BarAggregator.aggregateWeekly(weekHours, openPartial: snap?.oneHour)
@@ -383,21 +386,26 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// Returns the cached or freshly-fetched in-progress snapshot for `instrument`,
     /// re-fetching from the server every `inProgressTtl`. Bursty arrival is deduped
     /// by `InProgressStore.awaitOrLaunch` — concurrent callers share one fetch.
-    private func ensureInProgress(instrument: String) async -> InProgressSnapshot? {
-        if let cached = await inProgressStore.freshSnapshot(instrument, ttl: inProgressTtl) {
+    private func ensureInProgress(instrument: String, side: ChartSide = .bid) async -> InProgressSnapshot? {
+        // Key the cached snapshot per (instrument, side) so a bid chart and an ask chart of the same
+        // pair don't share one side's in-progress OHLC.
+        let storeKey = "\(instrument)|\(side.rawValue)"
+        if let cached = await inProgressStore.freshSnapshot(storeKey, ttl: inProgressTtl) {
             return cached
         }
         guard let session else { return nil }
         let wireInstrument = Self.toSlashedPair(instrument)
-        return await inProgressStore.awaitOrLaunch(instrument) {
+        return await inProgressStore.awaitOrLaunch(storeKey) {
             do {
                 let bars = try await session.fetchInProgressCandles(instrument: wireInstrument)
                 // Positional layout (confirmed against live 2026-05-29 capture, ASK/BID interleaved):
                 //   [0,1] MONTHLY  [2,3] WEEKLY  [4,5] DAILY  [6,7] 4H  [8,9] 1H
                 //   [10,11] 30m  [12,13] 15m  [14,15] 10m  [16,17] 5m  [18,19] 1m  [20,21] 10s
-                // Even indices are ASK, odd indices are BID. We use BID.
-                func bid(at idx: Int) -> SwiftTrader.CandleBar? {
-                    guard bars.count > idx else { return nil }
+                // Even indices are ASK, odd indices are BID. The `bid(at:)` argument is the BID slot;
+                // for ASK take the adjacent even slot (idx − 1).
+                func bid(at bidIdx: Int) -> SwiftTrader.CandleBar? {
+                    let idx = side == .bid ? bidIdx : bidIdx - 1
+                    guard idx >= 0, bars.count > idx else { return nil }
                     let b = bars[idx]
                     // The freshest in-progress buckets (1m/10s) come back all-zero from
                     // Dukascopy until the first tick lands in them. Used as a live-bar
@@ -533,11 +541,11 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     }
 
     private func fetchAggregated(
-        instrument: String, spec: AggSpec, count: Int
+        instrument: String, spec: AggSpec, count: Int, side: ChartSide = .bid
     ) async throws -> [SwiftTrader.CandleBar] {
         let source = spec.sourcePeriod  // ONE_HOUR (4H/Daily) or ONE_MIN (3m/5m/15m/30m)
-        let sourceKey = CandleCache.CacheKey(instrument: instrument, period: source, source: .server)
-        let aggKey = CandleCache.CacheKey(instrument: instrument, period: spec.periodCode, source: .aggregated)
+        let sourceKey = CandleCache.CacheKey(instrument: instrument, period: source, source: .server, side: side)
+        let aggKey = CandleCache.CacheKey(instrument: instrument, period: spec.periodCode, source: .aggregated, side: side)
         let neededSource = count * spec.sourceSpan
         let sourceSeconds = CandlePeriod.parse(source)?.seconds ?? (source == "ONE_HOUR" ? 3600 : 60)
         let targetSeconds = sourceSeconds * Int64(spec.sourceSpan)
@@ -592,14 +600,14 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
 
         if merged.isEmpty {
             let fetched = try await fetchRawCandles(
-                instrument: instrument, period: source, count: neededSource
+                instrument: instrument, period: source, count: neededSource, side: side
             )
             merged = await cache.merge(fetched, for: sourceKey)
             partial = fetched.last.flatMap { $0.partial ? $0 : nil }
         } else if let earliest = merged.first?.time, earliest > windowStartMs + closureSlackMs {
             let missing = Int((earliest - windowStartMs) / (sourceSeconds * 1000)) + 2
             let older = try await fetchRawCandles(
-                instrument: instrument, period: source, count: missing, before: earliest
+                instrument: instrument, period: source, count: missing, before: earliest, side: side
             )
             merged = await cache.merge(older, for: sourceKey)
             nativeLog.info("fetchAggregated \(instrument, privacy: .public) \(spec.periodCode, privacy: .public): deepened source by \(older.count) \(source, privacy: .public) bars (window needs \(neededSource))")
@@ -639,23 +647,23 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     }
 
     private func fetchEarlierAggregated(
-        instrument: String, spec: AggSpec, count: Int
+        instrument: String, spec: AggSpec, count: Int, side: ChartSide = .bid
     ) async throws -> [SwiftTrader.CandleBar] {
         let source = spec.sourcePeriod
-        let sourceKey = CandleCache.CacheKey(instrument: instrument, period: source, source: .server)
+        let sourceKey = CandleCache.CacheKey(instrument: instrument, period: source, source: .server, side: side)
         guard let before = await cache.earliestTime(for: sourceKey) else {
             let aggKey = CandleCache.CacheKey(
-                instrument: instrument, period: spec.periodCode, source: .aggregated
+                instrument: instrument, period: spec.periodCode, source: .aggregated, side: side
             )
             return await cache.getBars(for: aggKey)
         }
         let fetched = try await fetchRawCandles(
-            instrument: instrument, period: source, count: count * spec.sourceSpan, before: before
+            instrument: instrument, period: source, count: count * spec.sourceSpan, before: before, side: side
         )
         let merged = await cache.merge(fetched, for: sourceKey)
         let aggregated = spec.bucket(merged, nil)
         let aggKey = CandleCache.CacheKey(
-            instrument: instrument, period: spec.periodCode, source: .aggregated
+            instrument: instrument, period: spec.periodCode, source: .aggregated, side: side
         )
         return await cache.merge(aggregated, for: aggKey)
     }
@@ -667,7 +675,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// of every `fetchCandles` (raw periods directly; aggregated targets fill the source
     /// 1H/1m so the re-aggregation below builds on fresh data).
     private func forwardGapFillIfNeeded(
-        instrument: String, period: String
+        instrument: String, period: String, side: ChartSide = .bid
     ) async {
         // Pre-auth (no session, no injected fetch) the stub `rawFetch` always throws —
         // running it logs a misleading "missing credentials" error per call across all
@@ -677,7 +685,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         // Only the basic stored periods make sense to forward-fill — aggregated targets
         // get fixed via their source. Unknown periods fall through.
         guard let cp = CandlePeriod.parse(period) else { return }
-        let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server)
+        let key = CandleCache.CacheKey(instrument: instrument, period: period, source: .server, side: side)
         guard let latestMs = await cache.latestTime(for: key) else { return }
         let cadenceMs = cp.seconds * 1000
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -704,7 +712,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         )
         do {
             let bars = try await fetchRawCandles(
-                instrument: instrument, period: period, count: count, before: beforeMs
+                instrument: instrument, period: period, count: count, before: beforeMs, side: side
             )
             if !bars.isEmpty {
                 _ = await cache.merge(bars, for: key)
@@ -741,12 +749,13 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// before, count) share one subscribe; `foreground: false` requests (the prefetcher)
     /// don't count toward the foreground-idle signal that gates background work.
     private func fetchRawCandles(
-        instrument: String, period: String, count: Int, before: Int64? = nil, foreground: Bool = true
+        instrument: String, period: String, count: Int, before: Int64? = nil, foreground: Bool = true,
+        side: ChartSide = .bid
     ) async throws -> [SwiftTrader.CandleBar] {
-        let key = "\(instrument)|\(period)|\(before ?? -1)|\(count)"
+        let key = "\(instrument)|\(period)|\(before ?? -1)|\(count)|\(side.rawValue)"
         let rawFetch = self.rawFetch
         return try await coalescer.run(key: key, foreground: foreground) {
-            Self.stripWeekendFillers(try await rawFetch(instrument, period, count, before))
+            Self.stripWeekendFillers(try await rawFetch(instrument, period, count, before, side))
         }
     }
 
@@ -784,7 +793,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// these up via `CandleCache.findGaps` rather than the call-site retrying inline.
     private static func fetchViaSession(
         _ session: DukascopySession,
-        instrument: String, period: String, count: Int, before: Int64?
+        instrument: String, period: String, count: Int, before: Int64?, side: ChartSide = .bid
     ) async throws -> [SwiftTrader.CandleBar] {
         guard let cp = CandlePeriod.parse(period) else {
             throw NativeProviderError.notImplemented("period \(period)")
@@ -796,7 +805,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         nativeLog.debug("history \(instrument, privacy: .public) \(period, privacy: .public) count=\(count) before=\(before ?? -1)")
         do {
             let result = try await session.fetchHistoryDetailed(
-                instrument: wireInstrument, side: .bid, period: cp,
+                instrument: wireInstrument, side: side.offerSide, period: cp,
                 startSeconds: startSec, endSeconds: endSec
             )
             let ms = Int(Date().timeIntervalSince(t0) * 1000)

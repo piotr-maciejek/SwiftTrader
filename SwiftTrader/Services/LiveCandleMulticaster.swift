@@ -15,6 +15,7 @@ actor LiveCandleMulticaster {
     struct Key: Hashable, Sendable {
         let instrument: String
         let period: String
+        var side: ChartSide = .bid
     }
 
     /// Produces the single per-key aggregation stream (the coordinator's `rawCandleStream`).

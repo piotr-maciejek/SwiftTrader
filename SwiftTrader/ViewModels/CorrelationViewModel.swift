@@ -66,6 +66,14 @@ final class CorrelationViewModel {
             onStateChanged?()
         }
     }
+    /// Candle side for the whole grid (applied to every cell via `switchSide`).
+    var currentSide: ChartSide = .bid
+    var showBidAsk = false {
+        didSet {
+            for vm in chartViewModels { vm.showBidAsk = showBidAsk }
+            onStateChanged?()
+        }
+    }
 
     var onStateChanged: (() -> Void)?
 
@@ -121,6 +129,20 @@ final class CorrelationViewModel {
                 if i > 0 {
                     try? await Task.sleep(for: .milliseconds(100 * i))
                 }
+                vm.reloadCurrentChart()
+            }
+        }
+    }
+
+    /// Switch the candle side for every cell (staggered reloads, like `switchPeriod`).
+    func switchSide(_ side: ChartSide) {
+        guard side != currentSide else { return }
+        currentSide = side
+        onStateChanged?()
+        for (i, vm) in chartViewModels.enumerated() {
+            vm.currentSide = side
+            Task {
+                if i > 0 { try? await Task.sleep(for: .milliseconds(100 * i)) }
                 vm.reloadCurrentChart()
             }
         }
