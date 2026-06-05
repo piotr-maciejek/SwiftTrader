@@ -62,6 +62,7 @@
 		A1000034 /* LoadingStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000036 /* LoadingStatus.swift */; };
 		A1000035 /* ChartLoadingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000037 /* ChartLoadingCard.swift */; };
 		A1000036 /* PendingOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000038 /* PendingOrder.swift */; };
+		A1000200 /* ChartSide.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000200 /* ChartSide.swift */; };
 		A1000037 /* PendingOrdersWebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000039 /* PendingOrdersWebSocketService.swift */; };
 		A1000038 /* TradeRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200003A /* TradeRecord.swift */; };
 		A1000090 /* PositionMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000090 /* PositionMetadata.swift */; };
@@ -93,6 +94,7 @@
 		AA000020 /* NativePinSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000021 /* NativePinSheet.swift */; };
 		B1000001 /* SessionCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001 /* SessionCalculatorTests.swift */; };
 		B1000002 /* CandleCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002 /* CandleCacheTests.swift */; };
+		B1000200 /* ChartSideTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000200 /* ChartSideTests.swift */; };
 		B1000003 /* ForexAPIServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000003 /* ForexAPIServiceTests.swift */; };
 		B1000004 /* MockMarketDataCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000004 /* MockMarketDataCoordinator.swift */; };
 		B1000005 /* ChartViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000005 /* ChartViewModelTests.swift */; };
@@ -190,6 +192,7 @@
 		A2000036 /* LoadingStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingStatus.swift; sourceTree = "<group>"; };
 		A2000037 /* ChartLoadingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartLoadingCard.swift; sourceTree = "<group>"; };
 		A2000038 /* PendingOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrder.swift; sourceTree = "<group>"; };
+		A2000200 /* ChartSide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartSide.swift; sourceTree = "<group>"; };
 		A2000039 /* PendingOrdersWebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingOrdersWebSocketService.swift; sourceTree = "<group>"; };
 		A200003A /* TradeRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeRecord.swift; sourceTree = "<group>"; };
 		A2000090 /* PositionMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionMetadata.swift; sourceTree = "<group>"; };
@@ -218,6 +221,7 @@
 		AA000021 /* NativePinSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePinSheet.swift; sourceTree = "<group>"; };
 		B2000001 /* SessionCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCalculatorTests.swift; sourceTree = "<group>"; };
 		B2000002 /* CandleCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandleCacheTests.swift; sourceTree = "<group>"; };
+		B2000200 /* ChartSideTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartSideTests.swift; sourceTree = "<group>"; };
 		B2000003 /* ForexAPIServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForexAPIServiceTests.swift; sourceTree = "<group>"; };
 		B2000004 /* MockMarketDataCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockMarketDataCoordinator.swift; sourceTree = "<group>"; };
 		B2000005 /* ChartViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChartViewModelTests.swift; sourceTree = "<group>"; };
@@ -302,6 +306,7 @@
 				A2000010 /* AppSettings.swift */,
 				A2000012 /* Position.swift */,
 				A2000038 /* PendingOrder.swift */,
+				A2000200 /* ChartSide.swift */,
 				A200003A /* TradeRecord.swift */,
 				A2000090 /* PositionMetadata.swift */,
 				A2000100 /* CustomCorrelation.swift */,
@@ -415,6 +420,7 @@
 			children = (
 				B2000001 /* SessionCalculatorTests.swift */,
 				B2000002 /* CandleCacheTests.swift */,
+				B2000200 /* ChartSideTests.swift */,
 				B2000060 /* NativeStandaloneTests.swift */,
 				B2000061 /* StandaloneAuthViewModelTests.swift */,
 				B2000003 /* ForexAPIServiceTests.swift */,
@@ -570,6 +576,7 @@
 				A1000034 /* LoadingStatus.swift in Sources */,
 				A1000035 /* ChartLoadingCard.swift in Sources */,
 				A1000036 /* PendingOrder.swift in Sources */,
+				A1000200 /* ChartSide.swift in Sources */,
 				A1000037 /* PendingOrdersWebSocketService.swift in Sources */,
 				A1000038 /* TradeRecord.swift in Sources */,
 				A1000090 /* PositionMetadata.swift in Sources */,
@@ -607,6 +614,7 @@
 			files = (
 				B1000001 /* SessionCalculatorTests.swift in Sources */,
 				B1000002 /* CandleCacheTests.swift in Sources */,
+				B1000200 /* ChartSideTests.swift in Sources */,
 				B1000060 /* NativeStandaloneTests.swift in Sources */,
 				B1000061 /* StandaloneAuthViewModelTests.swift in Sources */,
 				B1000003 /* ForexAPIServiceTests.swift in Sources */,

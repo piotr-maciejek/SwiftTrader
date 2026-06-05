@@ -36,6 +36,32 @@ struct DiskCandleCacheTests {
         #expect(loaded[1].close == 1.2)
     }
 
+    @Test("Bid and ask are stored in separate files (no collision); BID keeps the legacy filename")
+    func bidAskIsolation() async throws {
+        let dir = makeTempDir()
+        defer { cleanUp(dir) }
+        let cache = DiskCandleCache(directory: dir)
+        let bidKey = DiskCacheKey(instrument: "EURUSD", period: "ONE_HOUR", source: .server, side: .bid)
+        let askKey = DiskCacheKey(instrument: "EURUSD", period: "ONE_HOUR", source: .server, side: .ask)
+
+        // Distinct files; BID unchanged from the historical name so old caches still load.
+        #expect(cache.fileURL(for: bidKey).lastPathComponent == "EURUSD-ONE_HOUR.server.plist")
+        #expect(cache.fileURL(for: askKey).lastPathComponent == "EURUSD-ONE_HOUR.server.ASK.plist")
+
+        try await cache.save([makeBar(time: 100, close: 1.1000)], for: bidKey)
+        try await cache.save([makeBar(time: 100, close: 1.1002)], for: askKey)
+        // Each side reads back its own value — no overwrite.
+        #expect(await cache.load(bidKey).first?.close == 1.1000)
+        #expect(await cache.load(askKey).first?.close == 1.1002)
+    }
+
+    @Test("parseStem round-trips the side suffix")
+    func parseStemSide() {
+        #expect(DiskCandleCache.parseStem("EURUSD-ONE_HOUR.server")?.side == .bid)
+        #expect(DiskCandleCache.parseStem("EURUSD-ONE_HOUR.server.ASK")?.side == .ask)
+        #expect(DiskCandleCache.parseStem("EURUSD-ONE_MIN.aggregated.ASK")?.source == .aggregated)
+    }
+
     @Test("Binary roundtrip preserves every OHLCV field exactly")
     func roundtripAllFields() async throws {
         let dir = makeTempDir()

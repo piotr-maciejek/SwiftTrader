@@ -594,7 +594,9 @@ final class WorkspaceViewModel {
                     emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) },
                     showATR: vm.showATR,
                     atrPeriod: vm.atrPeriod,
-                    drawings: vm.drawings
+                    drawings: vm.drawings,
+                    side: vm.currentSide,
+                    showBidAsk: vm.showBidAsk
                 )))
             case .correlation(let vm):
                 let isCustom = vm.baseCurrency == nil
@@ -610,7 +612,9 @@ final class WorkspaceViewModel {
                     drawings: vm.chartViewModels.map(\.drawings),
                     customID: isCustom ? vm.id : nil,
                     name: isCustom ? vm.title : nil,
-                    pairs: isCustom ? vm.instruments : nil
+                    pairs: isCustom ? vm.instruments : nil,
+                    side: vm.currentSide,
+                    showBidAsk: vm.showBidAsk
                 )))
             case .multiTimeframe(let vm):
                 return TabState(id: tab.id, content: .multiTimeframe(MultiTimeframeTabState(
@@ -622,7 +626,9 @@ final class WorkspaceViewModel {
                     emaConfigs: vm.emaConfigs.map { EMALineState(from: $0) },
                     showATR: vm.showATR,
                     atrPeriod: vm.atrPeriod,
-                    drawings: vm.chartViewModels.map(\.drawings)
+                    drawings: vm.chartViewModels.map(\.drawings),
+                    side: vm.currentSide,
+                    showBidAsk: vm.showBidAsk
                 )))
             }
         }
@@ -654,6 +660,8 @@ final class WorkspaceViewModel {
                 vm.showATR = chartState.showATR
                 vm.atrPeriod = chartState.atrPeriod
                 vm.drawings = chartState.drawings
+                vm.currentSide = chartState.side
+                vm.showBidAsk = chartState.showBidAsk
                 wireStateChanged(vm)
                 let tab = Tab(content: .chart(vm))
                 tabs.append(tab)
@@ -683,6 +691,9 @@ final class WorkspaceViewModel {
                 vm.emaConfigs = corrState.emaConfigs.map { $0.toEMALine() }
                 vm.showATR = corrState.showATR
                 vm.atrPeriod = corrState.atrPeriod
+                vm.currentSide = corrState.side
+                for cell in vm.chartViewModels { cell.currentSide = corrState.side }
+                vm.showBidAsk = corrState.showBidAsk
                 // Restore per-cell drawings, tolerating a different cell count
                 // (e.g. correlation roster changed since the save).
                 for (i, cellDrawings) in corrState.drawings.enumerated()
@@ -706,6 +717,9 @@ final class WorkspaceViewModel {
                 vm.emaConfigs = mtfState.emaConfigs.map { $0.toEMALine() }
                 vm.showATR = mtfState.showATR
                 vm.atrPeriod = mtfState.atrPeriod
+                vm.currentSide = mtfState.side
+                for cell in vm.chartViewModels { cell.currentSide = mtfState.side }
+                vm.showBidAsk = mtfState.showBidAsk
                 for (i, cellDrawings) in mtfState.drawings.enumerated()
                     where i < vm.chartViewModels.count {
                     vm.chartViewModels[i].drawings = cellDrawings

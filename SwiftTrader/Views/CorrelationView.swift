@@ -215,6 +215,8 @@ struct CorrelationView: View {
                 },
                 accountEquity: trading.account?.equity,
                 visualOrderSpread: trading.spreads[instrument] ?? 0,
+                chartSide: vm.currentSide,
+                showBidAskLines: vm.showBidAsk,
                 isSubmittingOrder: trading.isSubmitting,
                 externalCursorTime: viewModel.sharedCursorTime,
                 onCursorChange: { time in viewModel.sharedCursorTime = time },

@@ -26,6 +26,15 @@ final class ChartViewModel {
     var currentPeriod = "FIFTEEN_MINS" {
         didSet { onStateChanged?() }
     }
+    /// Which side of the market the candles are built from. Switching reloads the chart from the
+    /// matching cache/feed (see `switchSide`).
+    var currentSide: ChartSide = .bid {
+        didSet { onStateChanged?() }
+    }
+    /// Show both the live bid and ask as moving price lines (the candle-side line + the opposite side).
+    var showBidAsk = false {
+        didSet { onStateChanged?() }
+    }
     var availableInstruments: [String] = ["EURUSD"]
     var showSessions = true {
         didSet { onStateChanged?() }
@@ -178,7 +187,7 @@ final class ChartViewModel {
         let displayKey = CandleCache.CacheKey.forDisplay(
             instrument: currentInstrument,
             period: currentPeriod,
-            clientSideRebucketing: clientSideRebucketing
+            clientSideRebucketing: clientSideRebucketing, side: currentSide
         )
         let cached = await coordinator.cache.getBars(for: displayKey)
         if !cached.isEmpty {
@@ -310,6 +319,14 @@ final class ChartViewModel {
         // The viewport anchor (an absolute time) and `autoScroll` persist across the reload, so the
         // new timeframe re-centers on the same moment (or stays at the live edge). Keep the zoom too.
         currentPeriod = period
+        reloadChart(keepZoom: true)
+    }
+
+    /// Switch the candle side (bid/ask) and reload from the matching cache/feed, mirroring
+    /// `switchPeriod` — the time anchor + zoom carry over.
+    func switchSide(_ side: ChartSide) {
+        guard side != currentSide else { return }
+        currentSide = side
         reloadChart(keepZoom: true)
     }
 
@@ -445,11 +462,12 @@ final class ChartViewModel {
         let key = CandleCache.CacheKey.forDisplay(
             instrument: currentInstrument,
             period: currentPeriod,
-            clientSideRebucketing: clientSideRebucketing
+            clientSideRebucketing: clientSideRebucketing, side: currentSide
         )
         let logInstrument = currentInstrument
         let logPeriod = currentPeriod
         let rebucketingFlag = clientSideRebucketing
+        let side = currentSide
         chartLogger.info("reloadChart \(logInstrument, privacy: .public) \(logPeriod, privacy: .public) rebucketing=\(rebucketingFlag)")
         reloadTask = Task {
             let cacheT0 = Date()
@@ -483,6 +501,7 @@ final class ChartViewModel {
         let instrument = currentInstrument
         let period = currentPeriod
         let rebucketing = clientSideRebucketing
+        let side = currentSide
         let t0 = Date()
 
         // Cache paint is done by the caller (start / reloadChart). `bars.isEmpty` here
@@ -511,7 +530,7 @@ final class ChartViewModel {
                 let history = try await coordinator.fetchCandles(
                     instrument: instrument, period: period,
                     count: Self.barCount(for: period),
-                    rebucketing: rebucketing
+                    rebucketing: rebucketing, side: side
                 )
                 if Task.isCancelled { return }
                 guard instrument == currentInstrument, period == currentPeriod else { return }
@@ -565,11 +584,12 @@ final class ChartViewModel {
         let instrument = currentInstrument
         let period = currentPeriod
         let rebucketing = clientSideRebucketing
+        let side = currentSide
         do {
             let history = try await coordinator.fetchCandles(
                 instrument: instrument, period: period,
                 count: Self.barCount(for: period),
-                rebucketing: rebucketing
+                rebucketing: rebucketing, side: side
             )
             guard instrument == currentInstrument, period == currentPeriod else { return }
             bars = history
@@ -661,13 +681,14 @@ final class ChartViewModel {
         let instrument = currentInstrument
         let period = currentPeriod
         let rebucketing = clientSideRebucketing
+        let side = currentSide
         wsTask = Task {
             var attempt = 1
             var lastError: String?
             while !Task.isCancelled, attempt <= Self.maxWebSocketAttempts {
                 do {
                     for try await bar in coordinator.streamCandles(
-                        instrument: instrument, period: period, rebucketing: rebucketing
+                        instrument: instrument, period: period, rebucketing: rebucketing, side: side
                     ) {
                         // Reset retry budget once we've successfully received bars —
                         // future drops should get the full retry window again.
@@ -927,7 +948,7 @@ final class ChartViewModel {
             // For the aggregated derived path the coordinator already writes into the
             // `.aggregated` cache itself; the outer write would target the wrong key.
             if !isDerivedAggregatedPeriod {
-                Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod) }
+                Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod, rebucketing: false, side: currentSide) }
             }
         }
         updateATRFromBar(bar)
@@ -944,10 +965,11 @@ final class ChartViewModel {
         let instrument = currentInstrument
         let period = currentPeriod
         let rebucketing = clientSideRebucketing
+        let side = currentSide
         reconcileTask = Task {
             guard let authoritative = try? await coordinator.fetchCandles(
                 instrument: instrument, period: period,
-                count: Self.barCount(for: period), rebucketing: rebucketing
+                count: Self.barCount(for: period), rebucketing: rebucketing, side: side
             ) else { return }
             guard !Task.isCancelled,
                   instrument == currentInstrument, period == currentPeriod,
@@ -1145,6 +1167,7 @@ final class ChartViewModel {
         let instrument = currentInstrument
         let period = currentPeriod
         let rebucketing = clientSideRebucketing
+        let side = currentSide
         let oldCount = bars.count
         let maxAttempts = 3
 
@@ -1163,7 +1186,7 @@ final class ChartViewModel {
                 let allBars = try await coordinator.fetchEarlierCandles(
                     instrument: instrument, period: period,
                     count: Self.earlierBarCount(for: period),
-                    rebucketing: rebucketing
+                    rebucketing: rebucketing, side: side
                 )
                 guard instrument == currentInstrument, period == currentPeriod else { return }
                 let addedCount = allBars.count - oldCount
