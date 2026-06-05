@@ -320,6 +320,16 @@ final class TradingViewModel {
         }
     }
 
+    /// Amend a resting pending order's entry/trigger price (drag of its entry line). SL/TP edits go
+    /// through `modifyPosition` with the pending order's groupId, which `modifyOrder` already handles.
+    func modifyPendingEntry(label: String, trigger: Double) async {
+        do {
+            try await coordinator.modifyPendingEntry(label: label, newTriggerPrice: trigger)
+        } catch {
+            orderError = error.localizedDescription
+        }
+    }
+
     // MARK: - Order Calculation
 
     struct OneClickParams: Equatable {

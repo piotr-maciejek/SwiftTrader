@@ -8,6 +8,9 @@ protocol TradingCoordinating: Sendable {
                      orderType: String, entryPrice: Double?) async throws -> Position
     func closeOrder(label: String) async throws
     func modifyOrder(label: String, stopLoss: Double, takeProfit: Double) async throws -> Position
+    /// Amend a resting pending (limit/stop) order's ENTRY/trigger price in place. `label` is the
+    /// pending order's id (its opening order's orderId). Standalone-only; server mode is unsupported.
+    func modifyPendingEntry(label: String, newTriggerPrice: Double) async throws
     func streamSnapshots() -> AsyncThrowingStream<TradingSnapshot, Error>
     func streamPendingOrders() -> AsyncThrowingStream<PendingOrdersSnapshot, Error>
     /// Latest live (bid, ask) for an instrument from the trading feed, or nil if unavailable. Used to
@@ -18,6 +21,11 @@ protocol TradingCoordinating: Sendable {
 extension TradingCoordinating {
     /// Default: no live quote (server mode / test fakes) → callers fall back to the chart price.
     func currentQuote(instrument: String) async -> (bid: Double, ask: Double)? { nil }
+
+    /// Default: entry-trigger amend is standalone-only (server mode / test fakes don't support it).
+    func modifyPendingEntry(label: String, newTriggerPrice: Double) async throws {
+        throw NativeTradingError.notSupported("modifying a pending order's entry price")
+    }
 
     /// Back-compat for market-order callers (tests, existing code).
     func submitOrder(instrument: String, direction: String, amount: Double,

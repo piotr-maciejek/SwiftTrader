@@ -27,6 +27,7 @@ struct ChartView: View {
     var atrPips: Double?
     var todayATRPercent: Double?
     var onModifyPosition: ((String, Double, Double) -> Void)? = nil
+    var onModifyPendingEntry: ((String, Double) -> Void)? = nil
     var visualOrder: VisualOrderState? = nil
     var onConfirmVisualOrder: (() -> Void)? = nil
     var onCancelVisualOrder: (() -> Void)? = nil
@@ -155,6 +156,8 @@ struct ChartView: View {
                         onUserDrag: onUserDrag,
                         crosshair: $crosshair,
                         positions: relevantPositions,
+                        pendingOrders: relevantPendingOrders,
+                        onModifyPendingEntry: onModifyPendingEntry,
                         chartHeight: chartHeight,
                         priceRange: priceRange(for: visibleBarRange(chartWidth: chartWidth)),
                         dragPreview: $dragPreview,
@@ -219,8 +222,13 @@ struct ChartView: View {
                     titleVisibility: .visible
                 ) {
                     Button("Confirm") {
-                        if let edit = pendingSLTPEdit {
-                            onModifyPosition?(edit.label, edit.stopLoss, edit.takeProfit)
+                        switch pendingSLTPEdit?.action {
+                        case .protective(let label, let sl, let tp):
+                            onModifyPosition?(label, sl, tp)
+                        case .entry(let label, let trigger):
+                            onModifyPendingEntry?(label, trigger)
+                        case nil:
+                            break
                         }
                         pendingSLTPEdit = nil
                         dragPreview = nil
@@ -873,7 +881,12 @@ struct ChartView: View {
 
     private func drawDragPreviewLine(context: inout GraphicsContext, chartWidth: CGFloat,
                                       chartHeight: CGFloat, preview: DragPreviewState) {
-        let color: Color = preview.field == .stopLoss ? bearishColor : bullishColor
+        let color: Color
+        switch preview.field {
+        case .stopLoss: color = bearishColor
+        case .takeProfit: color = bullishColor
+        case .entry: color = pendingEntryColor
+        }
         var path = Path()
         path.move(to: CGPoint(x: 0, y: preview.currentY))
         path.addLine(to: CGPoint(x: chartWidth, y: preview.currentY))

@@ -184,6 +184,9 @@ struct CorrelationView: View {
                 onModifyPosition: { label, sl, tp in
                     Task { await trading.modifyPosition(label: label, stopLoss: sl, takeProfit: tp) }
                 },
+                onModifyPendingEntry: { label, trigger in
+                    Task { await trading.modifyPendingEntry(label: label, trigger: trigger) }
+                },
                 visualOrder: trading.visualOrderWithLivePrice(
                     for: instrument,
                     currentPrice: vm.bars.last?.close,

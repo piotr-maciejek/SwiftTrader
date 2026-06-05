@@ -306,6 +306,38 @@ public func encodeModifyProtectiveOrder(
     return w.data
 }
 
+/// Amends the ENTRY/trigger price of a resting pending (limit/stop) entry order in place. Mirrors the
+/// opening-order body of `encodePendingOrderGroup` (the same OPEN-direction fields), but as a top-level
+/// `OrderMessageExt` carrying the existing `orderId` + `state = PENDING` — the amend marker, exactly as
+/// `encodeModifyProtectiveOrder` distinguishes amend from create. Only the price moves; the order kind
+/// (limit/stop) is preserved by recomputing `stopDirection` from side + kind.
+public func encodeModifyPendingEntryOrder(
+    orderId: String, orderGroupId: String, instrument: String, side: String, kind: PendingKind,
+    amount: BigDecimalValue, newTriggerPrice: BigDecimalValue, priceClient: BigDecimalValue,
+    userId: String?, sessionId: String?, requestId: String, timestamp: Int64
+) -> Data {
+    var w = BinaryWriter()
+    w.writeInt32BE(javaStringHashCode(WireClass.orderMessageExt))
+    writeField(&w, fieldId: -12183) { $0.writeString(orderId) }        // existing entry order → amend
+    writeField(&w, fieldId: 29772) { $0.writeString(orderGroupId) }
+    writeField(&w, fieldId: 12424) { $0.writeString(instrument) }
+    writeEnumField(&w, fieldId: -19551, enumClass: WireClass.orderDirectionEnum, value: OrderEnumValue.directionOpen)
+    writeEnumField(&w, fieldId: -7924, enumClass: WireClass.orderSideEnum,
+                   value: side == "BUY" ? OrderEnumValue.sideBuy : OrderEnumValue.sideSell)
+    writeField(&w, fieldId: -30914) { $0.writeBigDecimal(newTriggerPrice) }  // priceStop = new trigger
+    writeField(&w, fieldId: 14767) { $0.writeBigDecimal(priceClient) }       // current market
+    writeEnumField(&w, fieldId: 19053, enumClass: WireClass.stopDirectionEnum,
+                   value: entryStopDirection(side: side, kind: kind))
+    if kind == .limit { writeField(&w, fieldId: -3668) { $0.writeBigDecimal(.zero) } }  // priceTrailingLimit
+    writeField(&w, fieldId: -5158) { $0.writeBigDecimal(amount) }
+    writeEnumField(&w, fieldId: 32505, enumClass: WireClass.orderStateEnum, value: OrderEnumValue.statePending)
+    if let sessionId { writeField(&w, fieldId: 28132) { $0.writeString(sessionId) } }
+    if let userId { writeField(&w, fieldId: -31160) { $0.writeString(userId) } }
+    writeField(&w, fieldId: 17261) { $0.writeString(requestId) }
+    writeField(&w, fieldId: -28332) { $0.writeInt64BE(timestamp) }
+    return w.data
+}
+
 /// Inbound order/position events surfaced by `DukascopySession.orderEvents()`.
 public enum OrderEvent: Sendable {
     case response(ExtApiOrderResponse)   // submit/close/modify ack or state change

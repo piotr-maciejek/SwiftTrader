@@ -617,6 +617,9 @@ struct ContentView: View {
             onModifyPosition: { label, sl, tp in
                 Task { await workspace.trading.modifyPosition(label: label, stopLoss: sl, takeProfit: tp) }
             },
+            onModifyPendingEntry: { label, trigger in
+                Task { await workspace.trading.modifyPendingEntry(label: label, trigger: trigger) }
+            },
             visualOrder: workspace.trading.visualOrderWithLivePrice(for: vm.currentInstrument, currentPrice: vm.bars.last?.close, barCount: vm.bars.count),
             onConfirmVisualOrder: {
                 Task { await workspace.trading.confirmVisualOrder(instrument: vm.currentInstrument, livePrice: vm.bars.last?.close) }

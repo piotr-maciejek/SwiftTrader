@@ -1164,8 +1164,11 @@ public actor DukascopySession {
             throw SessionError.timedOut("modify: unknown group \(orderGroupId)")
         }
         let opening = group.orders.first { $0.direction == "OPEN" }
+        // A resting pending order has no net position yet, so `group.amount` is zero — the size lives
+        // on the opening order. Prefer the first NON-ZERO amount, else the server rejects with
+        // "order amount is empty or zero".
         guard let side = group.side ?? opening?.side,
-              let amount = group.amount ?? opening?.amount else {
+              let amount = nonZeroAmount(group.amount, opening?.amount) else {
             throw SessionError.timedOut("modify: incomplete group \(orderGroupId)")
         }
         let reqId = UUID().uuidString
@@ -1176,6 +1179,40 @@ public actor DukascopySession {
             userId: latestAccount?.userId, sessionId: authSessionId,
             requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
         )
+        try await transport.sendFrame(frame)
+        return reqId
+    }
+
+    /// First non-zero amount among the candidates (a resting pending order's group net size is 0, so
+    /// the size must come from the opening order, else the server rejects "order amount is empty or zero").
+    private func nonZeroAmount(_ candidates: BigDecimalValue?...) -> BigDecimalValue? {
+        candidates.compactMap { $0 }.first { $0.doubleValue != 0 }
+    }
+
+    /// Amend the ENTRY/trigger price of a resting pending (limit/stop) entry order in place. `orderId`
+    /// is the opening order's id; `orderGroupId` its group. The order kind (limit/stop) is preserved.
+    @discardableResult
+    public func modifyPendingEntry(
+        orderGroupId: String, orderId: String, newTriggerPrice: BigDecimalValue, isLimit: Bool
+    ) async throws -> String {
+        guard state == .connected, let transport else { throw SessionError.notConnected }
+        guard let group = positions[orderGroupId], let instrument = group.instrument else {
+            throw SessionError.timedOut("modify entry: unknown group \(orderGroupId)")
+        }
+        let opening = group.orders.first { $0.direction == "OPEN" }
+        guard let side = opening?.side ?? group.side,
+              let amount = nonZeroAmount(opening?.amount, group.amount) else {
+            throw SessionError.timedOut("modify entry: incomplete group \(orderGroupId)")
+        }
+        // priceClient is the reference market at amend time (ask for a BUY, bid for a SELL); fall back
+        // to the new trigger if no quote is cached/arrives.
+        let market = await currentPrice(instrument: instrument, buy: side == "BUY") ?? newTriggerPrice
+        let reqId = UUID().uuidString
+        let frame = encodeModifyPendingEntryOrder(
+            orderId: orderId, orderGroupId: orderGroupId, instrument: instrument, side: side,
+            kind: isLimit ? .limit : .stop, amount: amount, newTriggerPrice: newTriggerPrice,
+            priceClient: market, userId: latestAccount?.userId, sessionId: authSessionId,
+            requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000))
         try await transport.sendFrame(frame)
         return reqId
     }

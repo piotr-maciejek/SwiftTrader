@@ -208,6 +208,26 @@ struct OrderMessagesTests {
         #expect(abs((o.priceClient?.doubleValue ?? 0) - 1.16) < 1e-9) // market
     }
 
+    @Test("Modify pending entry: top-level OPEN order, existing id, state PENDING, new trigger in priceStop")
+    func modifyPendingEntryRoundTrip() throws {
+        let frame = encodeModifyPendingEntryOrder(
+            orderId: "ENT-9", orderGroupId: "GRP-9", instrument: "EUR/USD", side: "SELL", kind: .limit,
+            amount: BigDecimalValue(80000, scale: 0), newTriggerPrice: BigDecimalValue(1.1750, scale: 5),
+            priceClient: BigDecimalValue(1.1700, scale: 5),
+            userId: "u", sessionId: "s", requestId: "R9", timestamp: 9
+        )
+        guard case .order(let o) = try MessageDecoder.decode(frame) else {
+            Issue.record("expected .order"); return
+        }
+        #expect(o.orderId == "ENT-9")                 // amend targets the existing entry order
+        #expect(o.orderGroupId == "GRP-9")
+        #expect(o.direction == "OPEN")
+        #expect(o.state == "PENDING")                 // amend, not create
+        #expect(o.side == "SELL")
+        #expect(o.stopDirection == "GREATER_BID")     // SELL LIMIT
+        #expect(abs((o.priceStop?.doubleValue ?? 0) - 1.1750) < 1e-9)   // new trigger
+    }
+
     @Test("Close group carries a CLOSE order on the opposite side")
     func closeGroupRoundTrip() throws {
         let frame = encodeCloseOrderGroup(

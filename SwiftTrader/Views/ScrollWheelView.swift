@@ -7,11 +7,14 @@ struct CrosshairState: Equatable {
 }
 
 struct SLTPLineHit {
+    /// Action target: a position's `label`, a pending order's `groupId` (SL/TP) or its `label`/orderId (entry).
     let positionLabel: String
     let field: Field
     let originalPrice: Double
+    /// True when the dragged line belongs to a resting pending order (vs an open position).
+    var isPending: Bool = false
 
-    enum Field: Equatable { case stopLoss, takeProfit }
+    enum Field: Equatable { case stopLoss, takeProfit, entry }
 }
 
 enum VisualOrderDragField: Equatable { case stopLoss, takeProfit, entry }
@@ -23,11 +26,17 @@ struct DragPreviewState: Equatable {
     let currentPrice: Double
 }
 
-/// Snapshot at drag end; confirmation uses this so macOS `confirmationDialog` cannot see stale `dragPreview` / failed lookups.
+/// Snapshot at drag end; the confirmation dialog acts on this so macOS `confirmationDialog` cannot see
+/// stale `dragPreview` / failed lookups. Covers open-position SL/TP, pending-order SL/TP, and the
+/// pending-order entry/trigger amend.
 struct PendingChartSLTPEdit: Equatable {
-    let label: String
-    let stopLoss: Double
-    let takeProfit: Double
+    enum Action: Equatable {
+        /// Position OR pending-order SL/TP → `onModifyPosition` (label = position.label / pending groupId).
+        case protective(label: String, stopLoss: Double, takeProfit: Double)
+        /// Pending-order entry/trigger amend → `onModifyPendingEntry` (label = pending order's orderId).
+        case entry(label: String, trigger: Double)
+    }
+    let action: Action
     let confirmationMessage: String
 }
 
@@ -38,6 +47,8 @@ struct ChartInteractionView: NSViewRepresentable {
     var onUserDrag: (() -> Void)?
     @Binding var crosshair: CrosshairState?
     var positions: [Position] = []
+    var pendingOrders: [PendingOrder] = []
+    var onModifyPendingEntry: ((String, Double) -> Void)? = nil
     var chartHeight: CGFloat = 0
     var priceRange: (min: Double, max: Double) = (0, 1)
     @Binding var dragPreview: DragPreviewState?
@@ -78,6 +89,8 @@ struct ChartInteractionView: NSViewRepresentable {
         context.coordinator.onUserDrag = onUserDrag
         context.coordinator.crosshair = $crosshair
         context.coordinator.positions = positions
+        context.coordinator.pendingOrders = pendingOrders
+        context.coordinator.onModifyPendingEntry = onModifyPendingEntry
         context.coordinator.chartHeight = chartHeight
         context.coordinator.priceRange = priceRange
         context.coordinator.dragPreview = $dragPreview
@@ -118,6 +131,8 @@ struct ChartInteractionView: NSViewRepresentable {
         var onUserDrag: (() -> Void)?
         var crosshair: Binding<CrosshairState?>
         var positions: [Position] = []
+        var pendingOrders: [PendingOrder] = []
+        var onModifyPendingEntry: ((String, Double) -> Void)?
         var chartHeight: CGFloat = 0
         var priceRange: (min: Double, max: Double) = (0, 1)
         var dragPreview: Binding<DragPreviewState?>
@@ -243,6 +258,21 @@ struct ChartInteractionView: NSViewRepresentable {
                         return SLTPLineHit(positionLabel: pos.label, field: .takeProfit,
                                            originalPrice: pos.takeProfit)
                     }
+                }
+            }
+            // Resting pending orders: entry/trigger (target = orderId), SL/TP (target = groupId).
+            for ord in pendingOrders {
+                if abs(mouseY - yForPrice(ord.openPrice)) <= threshold {
+                    return SLTPLineHit(positionLabel: ord.label, field: .entry,
+                                       originalPrice: ord.openPrice, isPending: true)
+                }
+                if ord.stopLoss != 0, abs(mouseY - yForPrice(ord.stopLoss)) <= threshold {
+                    return SLTPLineHit(positionLabel: ord.groupId, field: .stopLoss,
+                                       originalPrice: ord.stopLoss, isPending: true)
+                }
+                if ord.takeProfit != 0, abs(mouseY - yForPrice(ord.takeProfit)) <= threshold {
+                    return SLTPLineHit(positionLabel: ord.groupId, field: .takeProfit,
+                                       originalPrice: ord.takeProfit, isPending: true)
                 }
             }
             return nil
@@ -499,20 +529,31 @@ struct ChartInteractionView: NSViewRepresentable {
             }
 
             if coord.isDraggingSLTP {
+                let hit = coord.activeDrag
                 coord.activeDrag = nil
                 coord.isDraggingSLTP = false
-                if let preview = coord.dragPreview.wrappedValue,
-                   let pos = coord.positions.first(where: { $0.label == preview.positionLabel }) {
-                    let newSL = preview.field == .stopLoss ? preview.currentPrice : pos.stopLoss
-                    let newTP = preview.field == .takeProfit ? preview.currentPrice : pos.takeProfit
-                    let fieldName = preview.field == .stopLoss ? "SL" : "TP"
-                    let message = "Move \(fieldName) to \(String(format: "%.5f", preview.currentPrice))?"
-                    coord.pendingSLTPEdit.wrappedValue = PendingChartSLTPEdit(
-                        label: pos.label,
-                        stopLoss: newSL,
-                        takeProfit: newTP,
-                        confirmationMessage: message
-                    )
+                if let preview = coord.dragPreview.wrappedValue, let hit {
+                    let priceStr = String(format: "%.5f", preview.currentPrice)
+                    func sltpEdit(label: String, sl: Double, tp: Double) {
+                        let newSL = preview.field == .stopLoss ? preview.currentPrice : sl
+                        let newTP = preview.field == .takeProfit ? preview.currentPrice : tp
+                        coord.pendingSLTPEdit.wrappedValue = PendingChartSLTPEdit(
+                            action: .protective(label: label, stopLoss: newSL, takeProfit: newTP),
+                            confirmationMessage: "Move \(preview.field == .stopLoss ? "SL" : "TP") to \(priceStr)?")
+                    }
+                    if hit.field == .entry {
+                        // Pending-order entry/trigger amend (label = the pending order's orderId).
+                        coord.pendingSLTPEdit.wrappedValue = PendingChartSLTPEdit(
+                            action: .entry(label: hit.positionLabel, trigger: preview.currentPrice),
+                            confirmationMessage: "Move entry to \(priceStr)?")
+                    } else if hit.isPending,
+                              let ord = coord.pendingOrders.first(where: { $0.groupId == hit.positionLabel }) {
+                        sltpEdit(label: hit.positionLabel, sl: ord.stopLoss, tp: ord.takeProfit)
+                    } else if let pos = coord.positions.first(where: { $0.label == hit.positionLabel }) {
+                        sltpEdit(label: pos.label, sl: pos.stopLoss, tp: pos.takeProfit)
+                    } else {
+                        coord.dragPreview.wrappedValue = nil
+                    }
                 } else {
                     coord.dragPreview.wrappedValue = nil
                 }

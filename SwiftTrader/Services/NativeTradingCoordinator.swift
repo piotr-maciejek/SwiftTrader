@@ -133,6 +133,25 @@ actor NativeTradingCoordinator: TradingCoordinating {
                         profitLoss: 0, profitLossPips: 0, state: "FILLED")
     }
 
+    /// Amend a resting pending order's entry/trigger price in place. `label` is the pending order's
+    /// id (= its opening order's orderId). Resolves the group, recomputes limit-vs-stop from the
+    /// opening order's `stopDirection`, and sends the amend; authoritative state returns via the stream.
+    func modifyPendingEntry(label: String, newTriggerPrice: Double) async throws {
+        guard let session else { throw NativeTradingError.notConnected }
+        let live = await session.positionsSnapshot()
+        guard let group = resolveGroup(label: label, in: live),
+              let gid = group.orderGroupId, let inst = group.instrument,
+              let opening = openingOrder(group), opening.state == "PENDING",
+              let orderId = opening.orderId else {
+            throw NativeTradingError.notSupported("modifying entry price for unknown pending order \(label)")
+        }
+        let scale = inst.contains("JPY") ? 3 : 5
+        let isLimit = orderType(side: opening.side ?? "BUY", stopDirection: opening.stopDirection).hasSuffix("LIMIT")
+        try await session.modifyPendingEntry(
+            orderGroupId: gid, orderId: orderId,
+            newTriggerPrice: BigDecimalValue(newTriggerPrice, scale: scale), isLimit: isLimit)
+    }
+
     /// Apply one SL/TP leg: modify an existing protective order, add a new one, or
     /// (price ≤ 0) cancel the existing one.
     private func applyLeg(gid: String, isTP: Bool, newPrice: Double, existingId: String?, scale: Int) async throws {
