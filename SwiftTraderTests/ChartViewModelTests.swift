@@ -752,6 +752,24 @@ struct ChartViewModelTests {
         vm.stop()
     }
 
+    @Test("jumpToLiveEdge clears the parked anchor, re-enables autoscroll, and re-arms the snap")
+    func jumpToLiveEdgeResetsFollowState() {
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        vm.bars = bars(100)
+        // Parked away from the live edge.
+        vm.autoScroll = false
+        vm.viewportAnchorTimeMs = 50_000
+        vm.transform.hasAutoScrolledToEnd = true
+
+        vm.jumpToLiveEdge()
+
+        #expect(vm.autoScroll == true)
+        #expect(vm.viewportAnchorTimeMs == nil)
+        // scrollToEnd() clears the one-shot guard so ChartView re-snaps to the live edge.
+        #expect(vm.transform.hasAutoScrolledToEnd == false)
+        vm.stop()
+    }
+
     // MARK: - Stale-cache backfill detection (launch "Updating…" badge / forming-bar gate)
 
     /// A Date in UTC from y/m/d h:m — the trading calendar resolves weekday/hour in ET,

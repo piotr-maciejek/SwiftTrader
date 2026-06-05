@@ -88,3 +88,51 @@ struct WorkspacePeriodCycleTests {
         #expect(vm.currentPeriod == "FIFTEEN_MINS")
     }
 }
+
+@Suite("WorkspaceViewModel.scrollSelectedTabToLiveEdge")
+@MainActor
+struct WorkspaceScrollToLiveEdgeTests {
+
+    /// Park a chart VM away from the live edge so a successful jump is observable.
+    private func park(_ vm: ChartViewModel) {
+        vm.autoScroll = false
+        vm.viewportAnchorTimeMs = 50_000
+        vm.transform.hasAutoScrolledToEnd = true
+    }
+
+    private func isFollowing(_ vm: ChartViewModel) -> Bool {
+        vm.autoScroll && vm.viewportAnchorTimeMs == nil && vm.transform.hasAutoScrolledToEnd == false
+    }
+
+    @Test("Chart tab: jumps the one chart back to the live edge")
+    func chartTab() {
+        let ws = WorkspaceViewModel()
+        let vm = ChartViewModel(coordinator: MockMarketDataCoordinator())
+        park(vm)
+        let tab = WorkspaceViewModel.Tab(content: .chart(vm))
+        ws.tabs = [tab]; ws.selectedTabID = tab.id
+
+        ws.scrollSelectedTabToLiveEdge()
+        #expect(isFollowing(vm))
+    }
+
+    @Test("Correlation tab: jumps every cell")
+    func correlationTab() {
+        let ws = WorkspaceViewModel()
+        let vm = CorrelationViewModel(currency: "USD", period: "FIFTEEN_MINS",
+                                      coordinator: MockMarketDataCoordinator())
+        vm.chartViewModels.forEach { park($0) }
+        let tab = WorkspaceViewModel.Tab(content: .correlation(vm))
+        ws.tabs = [tab]; ws.selectedTabID = tab.id
+
+        ws.scrollSelectedTabToLiveEdge()
+        #expect(vm.chartViewModels.allSatisfy { isFollowing($0) })
+    }
+
+    @Test("No selected tab: silent no-op")
+    func noSelection() {
+        let ws = WorkspaceViewModel()
+        ws.tabs = []; ws.selectedTabID = nil
+        ws.scrollSelectedTabToLiveEdge()  // must not crash
+    }
+}

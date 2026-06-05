@@ -30,7 +30,10 @@ actor NativeTradingCoordinator: TradingCoordinating {
 
     private var snapshotConts: [UUID: AsyncThrowingStream<TradingSnapshot, Error>.Continuation] = [:]
     private var pendingConts: [UUID: AsyncThrowingStream<PendingOrdersSnapshot, Error>.Continuation] = [:]
-    private var listenersStarted = false
+    /// Memoized one-time startup: loads the connect-time account + groups and starts the live
+    /// listeners. Awaited by every stream registration so the first yield can't observe an empty
+    /// `groups` (see `startup`). A fresh coordinator (per reconnect/attach) gets a fresh task.
+    private var startupTask: Task<Void, Never>?
     private var lastTickEmit = Date.distantPast
     /// When the last tick arrived — feeds `Account.lastTickAgeMs` so the connection banner
     /// can flag a degraded (silent) feed. Nil until the first tick.
@@ -130,6 +133,25 @@ actor NativeTradingCoordinator: TradingCoordinating {
                         profitLoss: 0, profitLossPips: 0, state: "FILLED")
     }
 
+    /// Amend a resting pending order's entry/trigger price in place. `label` is the pending order's
+    /// id (= its opening order's orderId). Resolves the group, recomputes limit-vs-stop from the
+    /// opening order's `stopDirection`, and sends the amend; authoritative state returns via the stream.
+    func modifyPendingEntry(label: String, newTriggerPrice: Double) async throws {
+        guard let session else { throw NativeTradingError.notConnected }
+        let live = await session.positionsSnapshot()
+        guard let group = resolveGroup(label: label, in: live),
+              let gid = group.orderGroupId, let inst = group.instrument,
+              let opening = openingOrder(group), opening.state == "PENDING",
+              let orderId = opening.orderId else {
+            throw NativeTradingError.notSupported("modifying entry price for unknown pending order \(label)")
+        }
+        let scale = inst.contains("JPY") ? 3 : 5
+        let isLimit = orderType(side: opening.side ?? "BUY", stopDirection: opening.stopDirection).hasSuffix("LIMIT")
+        try await session.modifyPendingEntry(
+            orderGroupId: gid, orderId: orderId,
+            newTriggerPrice: BigDecimalValue(newTriggerPrice, scale: scale), isLimit: isLimit)
+    }
+
     /// Apply one SL/TP leg: modify an existing protective order, add a new one, or
     /// (price ≤ 0) cancel the existing one.
     private func applyLeg(gid: String, isTP: Bool, newPrice: Double, existingId: String?, scale: Int) async throws {
@@ -218,7 +240,7 @@ actor NativeTradingCoordinator: TradingCoordinating {
     private func registerSnapshot(id: UUID, cont: AsyncThrowingStream<TradingSnapshot, Error>.Continuation) async {
         guard session != nil else { cont.finish(throwing: NativeTradingError.notConnected); return }
         snapshotConts[id] = cont
-        await startListenersIfNeeded()
+        await ensureStarted()
         cont.yield(buildSnapshot())
     }
     private func unregisterSnapshot(_ id: UUID) { snapshotConts[id] = nil }
@@ -226,16 +248,32 @@ actor NativeTradingCoordinator: TradingCoordinating {
     private func registerPending(id: UUID, cont: AsyncThrowingStream<PendingOrdersSnapshot, Error>.Continuation) async {
         guard session != nil else { cont.finish(throwing: NativeTradingError.notConnected); return }
         pendingConts[id] = cont
-        await startListenersIfNeeded()
+        await ensureStarted()
         cont.yield(PendingOrdersSnapshot(pendingOrders: buildPending()))
     }
     private func unregisterPending(_ id: UUID) { pendingConts[id] = nil }
 
-    private func startListenersIfNeeded() async {
-        guard !listenersStarted, let session else { return }
-        listenersStarted = true
-        groups = await session.positionsSnapshot()
+    /// Run (once) the memoized startup and await its completion — so a caller that yields right after
+    /// is guaranteed `account` + `groups` are loaded. Concurrent registrations share the one task.
+    private func ensureStarted() async {
+        if startupTask == nil { startupTask = Task { await self.startup() } }
+        await startupTask?.value
+    }
+
+    /// Start the live listeners, then load the connect-time account + groups DETERMINISTICALLY:
+    /// snapshot `groups` only AFTER `accountSnapshot()` resolves. That call blocks until the
+    /// PackedAccountInfo lands, and the same message populates `positions` — so by the time we read
+    /// it, the resting pending-order / position groups are present. Snapshotting before the account
+    /// arrives (the old bug) left `groups` empty, so the first stream yield dropped resting pending
+    /// orders that never generate a later order event.
+    private func startup() async {
+        guard let session else { return }
+        startListenerTasks(session)
         account = try? await session.accountSnapshot()
+        groups = await session.positionsSnapshot()
+    }
+
+    private func startListenerTasks(_ session: DukascopySession) {
         // Order/position updates → refresh groups + account, re-emit both streams.
         Task { [weak self] in
             guard let self, let session = await self.session else { return }
@@ -252,20 +290,35 @@ actor NativeTradingCoordinator: TradingCoordinating {
             guard let self, let session = await self.session else { return }
             for await state in await session.stateStream() { await self.onSessionState(state) }
         }
-        // Account refresh. Otherwise `account` is fetched only at connect + on order events, so a
-        // snapshot that hadn't arrived yet at connect leaves equity stuck at 0 (needing an account
-        // switch to recover), and equity/free-margin go stale between trades. `accountSnapshot()`
-        // returns the latest immediately once it's arrived, so poll: the first call self-heals a
-        // missed connect snapshot, later ones keep equity live.
+        // Account + order-group self-heal poll. The deterministic `startup` load covers the connect
+        // case; this keeps equity live and re-snapshots groups so orders placed/cancelled mid-session
+        // (incl. from another machine) — which may not generate a local order event — still surface.
+        // `refreshGroupsIfChanged` re-emits only on a real change, so there's no churn.
         Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, let session = await self.session else { return }
                 if let acct = try? await session.accountSnapshot(timeout: 15) {
                     await self.updateAccount(acct)
                 }
+                await self.refreshGroupsIfChanged()
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+    /// Re-snapshot the session's order groups and re-emit if the derived pending orders or positions
+    /// changed. Guards against the connect race where `groups` is captured (via `positionsSnapshot()`)
+    /// before the PackedAccountInfo lands: a resting pending order delivered just after that snapshot,
+    /// and never modified, would otherwise never surface (it generates no `orderEvents()`). Polled
+    /// from the account loop so it converges within one interval; the change check keeps it quiet when
+    /// nothing moved.
+    private func refreshGroupsIfChanged() async {
+        guard let session else { return }
+        let oldPending = buildPending()
+        let oldPositions = groups.compactMap { position(from: $0) }
+        groups = await session.positionsSnapshot()
+        if buildPending() != oldPending { emitPending() }
+        if groups.compactMap({ position(from: $0) }) != oldPositions { emitSnapshot() }
     }
 
     private func updateAccount(_ acct: DukascopyClient.AccountInfo) {
@@ -388,7 +441,8 @@ actor NativeTradingCoordinator: TradingCoordinating {
             label: orderId, instrument: slashless, direction: side,
             amount: amountUnits / 1_000_000, openPrice: trigger,
             stopLoss: sl, takeProfit: tp, state: "PENDING",
-            orderType: orderType(side: side, stopDirection: opening.stopDirection))
+            orderType: orderType(side: side, stopDirection: opening.stopDirection),
+            groupId: g.orderGroupId ?? "")
     }
 
     /// SL/TP prices from the group's protective CLOSE orders, distinguished by

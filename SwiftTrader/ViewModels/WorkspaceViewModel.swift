@@ -114,6 +114,10 @@ final class WorkspaceViewModel {
         trading.metadataStore = metadataStore
         trading.accountID = AccountStore.shared.selectedAccountID
         positionMetadata = metadataStore.reload(accountID: AccountStore.shared.selectedAccountID)
+        // Heal limit/stop fills that opened AND closed while offline: the live position snapshot
+        // never delivered them, but the closed-trade record carries the real fill, so complete any
+        // provisional pending-order metadata by id when history loads.
+        tradeHistory.onTradesLoaded = { [weak self] trades in self?.completeProvisionalMetadata(from: trades) }
         // Saved custom correlations: load now + mirror future changes (local + cross-machine) so the
         // sidebar stays in sync.
         customCorrelationStore.onChange = { [weak self] list in self?.customCorrelations = list }
@@ -437,6 +441,19 @@ final class WorkspaceViewModel {
         connectNews()
     }
 
+    /// Complete provisional pending-order metadata from closed-trade history. A limit/stop that
+    /// filled and closed entirely while the app was shut never reaches the live position binder, but
+    /// its closed-trade record carries the real fill — so finish the record (by id) here. Idempotent:
+    /// only touches still-provisional (`fillPrice == 0`) records.
+    private func completeProvisionalMetadata(from trades: [TradeRecord]) {
+        let acct = trading.accountID
+        for t in trades where t.openPrice > 0 {
+            guard let rec = metadataStore.record(for: t.positionId, accountID: acct), rec.isProvisional
+            else { continue }
+            metadataStore.upsert(rec.completed(fillPrice: t.openPrice, openTimeMs: t.openTime), accountID: acct)
+        }
+    }
+
     func reconnectAll(port: Int) {
         // Build one fresh coordinator for the new port and broadcast it.
         // All tabs swap to it atomically — no stale per-tab coordinators clinging
@@ -522,6 +539,21 @@ final class WorkspaceViewModel {
             // standard = longer TFs (D/4H/1H/15m); intraday = shorter (4H/1H/15m/5m).
             // offset > 0 → longer (standard), offset < 0 → shorter (intraday).
             vm.zoom = offset > 0 ? .standard : .intraday
+        }
+    }
+
+    /// Scroll the selected tab's chart(s) to the live edge (⌘E / the chart's bottom-right button).
+    /// A chart tab moves its one chart; a correlation / multi-timeframe grid jumps every cell, since
+    /// each cell owns an independent transform.
+    func scrollSelectedTabToLiveEdge() {
+        guard let tab = selectedTab else { return }
+        switch tab.content {
+        case .chart(let vm):
+            vm.jumpToLiveEdge()
+        case .correlation(let vm):
+            vm.chartViewModels.forEach { $0.jumpToLiveEdge() }
+        case .multiTimeframe(let vm):
+            vm.chartViewModels.forEach { $0.jumpToLiveEdge() }
         }
     }
 

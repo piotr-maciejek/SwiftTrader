@@ -208,6 +208,26 @@ struct OrderMessagesTests {
         #expect(abs((o.priceClient?.doubleValue ?? 0) - 1.16) < 1e-9) // market
     }
 
+    @Test("Modify pending entry: top-level OPEN order, existing id, state PENDING, new trigger in priceStop")
+    func modifyPendingEntryRoundTrip() throws {
+        let frame = encodeModifyPendingEntryOrder(
+            orderId: "ENT-9", orderGroupId: "GRP-9", instrument: "EUR/USD", side: "SELL", kind: .limit,
+            amount: BigDecimalValue(80000, scale: 0), newTriggerPrice: BigDecimalValue(1.1750, scale: 5),
+            priceClient: BigDecimalValue(1.1700, scale: 5),
+            userId: "u", sessionId: "s", requestId: "R9", timestamp: 9
+        )
+        guard case .order(let o) = try MessageDecoder.decode(frame) else {
+            Issue.record("expected .order"); return
+        }
+        #expect(o.orderId == "ENT-9")                 // amend targets the existing entry order
+        #expect(o.orderGroupId == "GRP-9")
+        #expect(o.direction == "OPEN")
+        #expect(o.state == "PENDING")                 // amend, not create
+        #expect(o.side == "SELL")
+        #expect(o.stopDirection == "GREATER_BID")     // SELL LIMIT
+        #expect(abs((o.priceStop?.doubleValue ?? 0) - 1.1750) < 1e-9)   // new trigger
+    }
+
     @Test("Close group carries a CLOSE order on the opposite side")
     func closeGroupRoundTrip() throws {
         let frame = encodeCloseOrderGroup(
@@ -279,6 +299,34 @@ struct OrderMessagesTests {
         #expect(o.direction == "CLOSE")
         #expect(o.stopDirection == "GREATER_BID") // BUY take-profit
         #expect(abs((o.priceStop?.doubleValue ?? 0) - 1.175) < 1e-9)
+    }
+
+    @Test("Resting pending orders (loose `orders`) are reconstructed into pending groups")
+    func pendingOrderGroupsReconstructed() {
+        // A SELL LIMIT resting at connect: one PENDING opening order + its protective SL/TP legs,
+        // all sharing one orderGroupId, delivered as loose `orders` (not a `group`).
+        let opening = OrderMsg(orderId: "ORD-1", orderGroupId: "GRP-1", instrument: "EUR/AUD",
+                               amount: BigDecimalValue(80000, scale: 0), side: "SELL",
+                               direction: "OPEN", state: "PENDING",
+                               priceStop: BigDecimalValue(1.6000, scale: 5))
+        let sl = OrderMsg(orderId: "SL-1", orderGroupId: "GRP-1", instrument: "EUR/AUD",
+                          side: "BUY", direction: "CLOSE", state: "PENDING",
+                          priceStop: BigDecimalValue(1.6100, scale: 5), stopDirection: "GREATER_ASK")
+        // A FILLED position group already carried in `groups` — its leftover order must NOT become a
+        // phantom pending group, and a non-pending loose order is ignored.
+        let filledLeg = OrderMsg(orderGroupId: "GRP-FILLED", direction: "OPEN", state: "FILLED")
+        let info = PackedAccountInfo(account: AccountInfo(), groups: [],
+                                     orders: [opening, sl, filledLeg])
+
+        let rebuilt = info.pendingOrderGroups()
+        #expect(rebuilt.count == 1)
+        let g = rebuilt.first
+        #expect(g?.orderGroupId == "GRP-1")
+        #expect(g?.instrument == "EUR/AUD")
+        #expect(g?.orders.count == 2)                                   // opening + SL preserved
+        let open = g?.orders.first { $0.direction == "OPEN" }
+        #expect(open?.state == "PENDING")
+        #expect(abs((open?.priceStop?.doubleValue ?? 0) - 1.6000) < 1e-9)
     }
 
     @Test("Enum value tables map known wire ints")

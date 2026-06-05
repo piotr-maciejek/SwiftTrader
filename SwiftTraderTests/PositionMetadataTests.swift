@@ -344,4 +344,136 @@ struct PositionMetadataTests {
         #expect(all["ID2"]?.pressPrice == 1.2000)
         vm.stop()
     }
+
+    // MARK: - Pending (limit/stop) order metadata
+
+    /// Boot a VM wired to a fake coordinator + store, and wait until both streams are live.
+    private func startBoundVM(_ fake: FakeTradingCoordinator, store: PositionMetadataStore,
+                             acctID: UUID) async -> TradingViewModel {
+        let vm = TradingViewModel(coordinator: fake)
+        vm.metadataStore = store
+        vm.accountID = acctID
+        vm.start()
+        for _ in 0..<200 {
+            if fake.snapshotContinuation != nil && fake.pendingOrdersContinuation != nil { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(fake.snapshotContinuation != nil && fake.pendingOrdersContinuation != nil)
+        return vm
+    }
+
+    private func pendingSell(groupId: String, limit: Double, sl: Double) -> PendingOrder {
+        PendingOrder(label: "ORD_\(groupId)", instrument: "EURAUD", direction: "SELL",
+                     amount: 0.08, openPrice: limit, stopLoss: sl, takeProfit: 0,
+                     state: "PENDING", orderType: "SELL_LIMIT", groupId: groupId)
+    }
+
+    @Test("A pending order writes a provisional record that completes (by id) on fill")
+    func pendingProvisionalCompletesOnFill() async {
+        let fake = FakeTradingCoordinator()
+        let suite = "pmtest-pend-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PositionMetadataStore(defaults: defaults, cloudEnabled: false)
+        let acctID = UUID()
+        let vm = await startBoundVM(fake, store: store, acctID: acctID)
+
+        // Seed empty open positions (clears the seed branch).
+        fake.snapshotContinuation?.yield(TradingSnapshot(positions: [], account: acct(), spreads: nil))
+        await settle()
+
+        // A resting SELL LIMIT: limit 1.6000, initial SL 1.6100 (100 pips of risk), groupId "GRP1".
+        fake.pendingOrdersContinuation?.yield(
+            PendingOrdersSnapshot(pendingOrders: [pendingSell(groupId: "GRP1", limit: 1.6000, sl: 1.6100)]))
+        await settle()
+
+        let prov = store.all(accountID: acctID)["GRP1"]
+        #expect(prov != nil)
+        #expect(prov?.isProvisional == true)        // fillPrice 0 → no R/slip yet
+        #expect(prov?.fillPrice == 0)
+        #expect(prov?.pressPrice == 1.6000)         // the limit price (slippage reference)
+        #expect(prov?.initialStopLoss == 1.6100)
+        #expect(prov?.riskPips == nil)
+        #expect(prov?.realizedR(closePrice: 1.6100) == nil)
+
+        // It fills at the limit: position labeled with the SAME groupId.
+        let filled = Position(label: "GRP1", instrument: "EURAUD", direction: "SELL", amount: 0.08,
+                              openPrice: 1.6000, stopLoss: 1.6100, takeProfit: 0,
+                              profitLoss: 0, profitLossPips: 0, state: "FILLED")
+        fake.snapshotContinuation?.yield(TradingSnapshot(positions: [filled], account: acct(), spreads: nil))
+        await settle()
+
+        let done = store.all(accountID: acctID)["GRP1"]
+        #expect(done?.isProvisional == false)
+        #expect(done?.fillPrice == 1.6000)
+        #expect(approx(done?.riskPips, 100))
+        #expect(approx(done?.slippagePips, 0))                  // filled at the limit
+        #expect(approx(done?.realizedR(closePrice: 1.6100), -1)) // stopped out = −1R
+        vm.stop()
+    }
+
+    @Test("Re-streamed pending snapshot keeps submitTimeMs but refreshes a modified SL")
+    func pendingRestreamPreservesSubmitTimeRefreshesSL() async {
+        let fake = FakeTradingCoordinator()
+        let suite = "pmtest-pend2-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PositionMetadataStore(defaults: defaults, cloudEnabled: false)
+        let acctID = UUID()
+        let vm = await startBoundVM(fake, store: store, acctID: acctID)
+        fake.snapshotContinuation?.yield(TradingSnapshot(positions: [], account: acct(), spreads: nil))
+        await settle()
+
+        fake.pendingOrdersContinuation?.yield(
+            PendingOrdersSnapshot(pendingOrders: [pendingSell(groupId: "GRP9", limit: 1.6000, sl: 1.6100)]))
+        await settle()
+        let t0 = store.all(accountID: acctID)["GRP9"]?.submitTimeMs
+        #expect(t0 != nil)
+
+        // User moves the SL while it's still resting → record refreshes SL, keeps submit time.
+        fake.pendingOrdersContinuation?.yield(
+            PendingOrdersSnapshot(pendingOrders: [pendingSell(groupId: "GRP9", limit: 1.6000, sl: 1.6050)]))
+        await settle()
+        let rec = store.all(accountID: acctID)["GRP9"]
+        #expect(rec?.submitTimeMs == t0)
+        #expect(rec?.initialStopLoss == 1.6050)
+        vm.stop()
+    }
+
+    @Test("A pending fill that lands in the first (seed) snapshot still completes")
+    func pendingFilledOfflineCompletesOnSeed() async {
+        let fake = FakeTradingCoordinator()
+        let suite = "pmtest-pend3-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PositionMetadataStore(defaults: defaults, cloudEnabled: false)
+        let acctID = UUID()
+
+        // A provisional record persisted before the (simulated) restart.
+        store.upsert(meta(id: "GRP2", instrument: "EURAUD", direction: "BUY",
+                          pressPrice: 1.5000, fillPrice: 0, initialSL: 1.4900, initialTP: 0,
+                          submitTimeMs: 1, openTimeMs: 0), accountID: acctID)
+        #expect(store.all(accountID: acctID)["GRP2"]?.isProvisional == true)
+
+        let vm = await startBoundVM(fake, store: store, acctID: acctID)
+        // First snapshot after connect already carries the filled position (pre-existing on reconnect).
+        let filled = Position(label: "GRP2", instrument: "EURAUD", direction: "BUY", amount: 0.08,
+                              openPrice: 1.5010, stopLoss: 1.4900, takeProfit: 0,
+                              profitLoss: 0, profitLossPips: 0, state: "FILLED")
+        fake.snapshotContinuation?.yield(TradingSnapshot(positions: [filled], account: acct(), spreads: nil))
+        await settle()
+
+        let done = store.all(accountID: acctID)["GRP2"]
+        #expect(done?.isProvisional == false)
+        #expect(done?.fillPrice == 1.5010)
+        vm.stop()
+    }
+
+    @Test("A provisional record (fillPrice 0) reports no risk/R")
+    func provisionalHasNoR() {
+        let prov = meta(id: "p", fillPrice: 0, initialSL: 1.0990)
+        #expect(prov.isProvisional)
+        #expect(prov.riskPips == nil)
+        #expect(prov.realizedR(closePrice: 1.1020) == nil)
+    }
 }

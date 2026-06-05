@@ -599,6 +599,7 @@ struct ContentView: View {
             ),
             onChartWidthChanged: { vm.chartWidth = $0 },
             onUserDrag: { vm.onUserScroll() },
+            onScrollToLiveEdge: { vm.jumpToLiveEdge() },
             showSessions: vm.showSessions,
             currentPeriod: vm.currentPeriod,
             showVolume: vm.showVolume,
@@ -615,6 +616,9 @@ struct ContentView: View {
             todayATRPercent: vm.todayATRPercent,
             onModifyPosition: { label, sl, tp in
                 Task { await workspace.trading.modifyPosition(label: label, stopLoss: sl, takeProfit: tp) }
+            },
+            onModifyPendingEntry: { label, trigger in
+                Task { await workspace.trading.modifyPendingEntry(label: label, trigger: trigger) }
             },
             visualOrder: workspace.trading.visualOrderWithLivePrice(for: vm.currentInstrument, currentPrice: vm.bars.last?.close, barCount: vm.bars.count),
             onConfirmVisualOrder: {

@@ -9,6 +9,9 @@ struct ChartView: View {
     @Binding var transform: ChartTransform
     var onChartWidthChanged: ((CGFloat) -> Void)?
     var onUserDrag: (() -> Void)?
+    /// Tapped by the bottom-right "scroll to latest" button to jump back to the live edge. Nil hides
+    /// the button. Present in every context (main + grid cells) since each owns its own transform.
+    var onScrollToLiveEdge: (() -> Void)?
     var showSessions: Bool = true
     var currentPeriod: String = "FIFTEEN_MINS"
     var showVolume: Bool = true
@@ -24,6 +27,7 @@ struct ChartView: View {
     var atrPips: Double?
     var todayATRPercent: Double?
     var onModifyPosition: ((String, Double, Double) -> Void)? = nil
+    var onModifyPendingEntry: ((String, Double) -> Void)? = nil
     var visualOrder: VisualOrderState? = nil
     var onConfirmVisualOrder: (() -> Void)? = nil
     var onCancelVisualOrder: (() -> Void)? = nil
@@ -152,6 +156,8 @@ struct ChartView: View {
                         onUserDrag: onUserDrag,
                         crosshair: $crosshair,
                         positions: relevantPositions,
+                        pendingOrders: relevantPendingOrders,
+                        onModifyPendingEntry: onModifyPendingEntry,
                         chartHeight: chartHeight,
                         priceRange: priceRange(for: visibleBarRange(chartWidth: chartWidth)),
                         dragPreview: $dragPreview,
@@ -216,8 +222,13 @@ struct ChartView: View {
                     titleVisibility: .visible
                 ) {
                     Button("Confirm") {
-                        if let edit = pendingSLTPEdit {
-                            onModifyPosition?(edit.label, edit.stopLoss, edit.takeProfit)
+                        switch pendingSLTPEdit?.action {
+                        case .protective(let label, let sl, let tp):
+                            onModifyPosition?(label, sl, tp)
+                        case .entry(let label, let trigger):
+                            onModifyPendingEntry?(label, trigger)
+                        case nil:
+                            break
                         }
                         pendingSLTPEdit = nil
                         dragPreview = nil
@@ -273,6 +284,26 @@ struct ChartView: View {
                 }
                 .padding(.leading, 8)
                 .padding(.top, 6)
+
+                // "Scroll to latest" — last child so it's topmost and hit-testable above the Canvas
+                // gestures. Inset clear of the price axis (right) and time axis (bottom); the same
+                // inset scales cleanly to small grid cells.
+                if let onScrollToLiveEdge {
+                    Button(action: onScrollToLiveEdge) {
+                        Image(systemName: "arrow.right.to.line")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 5)
+                            .background(Color.black.opacity(0.55))
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Scroll to latest")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, priceAxisWidth + 8)
+                    .padding(.bottom, timeAxisHeight + 8)
+                }
             }
         }
     }
@@ -850,7 +881,12 @@ struct ChartView: View {
 
     private func drawDragPreviewLine(context: inout GraphicsContext, chartWidth: CGFloat,
                                       chartHeight: CGFloat, preview: DragPreviewState) {
-        let color: Color = preview.field == .stopLoss ? bearishColor : bullishColor
+        let color: Color
+        switch preview.field {
+        case .stopLoss: color = bearishColor
+        case .takeProfit: color = bullishColor
+        case .entry: color = pendingEntryColor
+        }
         var path = Path()
         path.move(to: CGPoint(x: 0, y: preview.currentY))
         path.addLine(to: CGPoint(x: chartWidth, y: preview.currentY))

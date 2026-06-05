@@ -18,6 +18,11 @@ final class TradeHistoryViewModel {
     var isLoading = false
     var error: String?
 
+    /// Fired after each successful `reload()` with the clamped trades, so the owner can complete any
+    /// provisional pending-order metadata for a limit/stop that filled AND closed while offline (the
+    /// closed-trade record carries the real fill the live position snapshot never delivered).
+    var onTradesLoaded: (([TradeRecord]) -> Void)?
+
     private var service: any TradeHistoryFetching
 
     init(service: any TradeHistoryFetching = TradeHistoryService()) {
@@ -70,6 +75,7 @@ final class TradeHistoryViewModel {
             // this a preset like "Today" leaks an adjacent day's trades and skews the
             // Trades/Wins/Losses/Net counts.
             trades = fetched.filter { range.contains($0.closeDate) }
+            onTradesLoaded?(trades)
         } catch {
             self.error = error.localizedDescription
             trades = []

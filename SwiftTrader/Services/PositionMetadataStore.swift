@@ -71,6 +71,12 @@ final class PositionMetadataStore {
         return cache
     }
 
+    /// One record by id, read from the freshest stored dict (not the in-memory cache) so binding sees
+    /// a provisional pending-order record another write may have just persisted. `nil` if absent.
+    func record(for id: String, accountID: UUID?) -> PositionMetadata? {
+        readStored(key: Self.key(for: accountID))[id]
+    }
+
     /// Merge one record into the freshest stored dict (cloud-first), prune, persist to both stores,
     /// and publish.
     func upsert(_ meta: PositionMetadata, accountID: UUID?) {

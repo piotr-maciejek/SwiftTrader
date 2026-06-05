@@ -166,6 +166,7 @@ struct CorrelationView: View {
                 ),
                 onChartWidthChanged: { vm.chartWidth = $0 },
                 onUserDrag: { vm.onUserScroll() },
+                onScrollToLiveEdge: { vm.jumpToLiveEdge() },
                 showSessions: vm.showSessions,
                 currentPeriod: vm.currentPeriod,
                 showVolume: vm.showVolume,
@@ -182,6 +183,9 @@ struct CorrelationView: View {
                 todayATRPercent: vm.todayATRPercent,
                 onModifyPosition: { label, sl, tp in
                     Task { await trading.modifyPosition(label: label, stopLoss: sl, takeProfit: tp) }
+                },
+                onModifyPendingEntry: { label, trigger in
+                    Task { await trading.modifyPendingEntry(label: label, trigger: trigger) }
                 },
                 visualOrder: trading.visualOrderWithLivePrice(
                     for: instrument,
