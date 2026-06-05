@@ -1325,7 +1325,13 @@ public actor DukascopySession {
             for g in p.groups where g.orderGroupId != nil {
                 positions[g.orderGroupId!] = g
             }
-            if !p.groups.isEmpty {
+            // Resting pending (limit/stop) orders arrive as loose `orders`, not `groups` — rebuild a
+            // group per orderGroupId so they surface like a live-placed one. Skip ids already present
+            // as a position group.
+            for g in p.pendingOrderGroups() where g.orderGroupId.map({ positions[$0] == nil }) ?? false {
+                positions[g.orderGroupId!] = g
+            }
+            if !p.groups.isEmpty || !p.orders.isEmpty {
                 log.info("packed account info: \(p.groups.count) position group(s), \(p.orders.count) order(s)")
             }
         case .orderGroup(let g):

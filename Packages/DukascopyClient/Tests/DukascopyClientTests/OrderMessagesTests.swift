@@ -281,6 +281,34 @@ struct OrderMessagesTests {
         #expect(abs((o.priceStop?.doubleValue ?? 0) - 1.175) < 1e-9)
     }
 
+    @Test("Resting pending orders (loose `orders`) are reconstructed into pending groups")
+    func pendingOrderGroupsReconstructed() {
+        // A SELL LIMIT resting at connect: one PENDING opening order + its protective SL/TP legs,
+        // all sharing one orderGroupId, delivered as loose `orders` (not a `group`).
+        let opening = OrderMsg(orderId: "ORD-1", orderGroupId: "GRP-1", instrument: "EUR/AUD",
+                               amount: BigDecimalValue(80000, scale: 0), side: "SELL",
+                               direction: "OPEN", state: "PENDING",
+                               priceStop: BigDecimalValue(1.6000, scale: 5))
+        let sl = OrderMsg(orderId: "SL-1", orderGroupId: "GRP-1", instrument: "EUR/AUD",
+                          side: "BUY", direction: "CLOSE", state: "PENDING",
+                          priceStop: BigDecimalValue(1.6100, scale: 5), stopDirection: "GREATER_ASK")
+        // A FILLED position group already carried in `groups` — its leftover order must NOT become a
+        // phantom pending group, and a non-pending loose order is ignored.
+        let filledLeg = OrderMsg(orderGroupId: "GRP-FILLED", direction: "OPEN", state: "FILLED")
+        let info = PackedAccountInfo(account: AccountInfo(), groups: [],
+                                     orders: [opening, sl, filledLeg])
+
+        let rebuilt = info.pendingOrderGroups()
+        #expect(rebuilt.count == 1)
+        let g = rebuilt.first
+        #expect(g?.orderGroupId == "GRP-1")
+        #expect(g?.instrument == "EUR/AUD")
+        #expect(g?.orders.count == 2)                                   // opening + SL preserved
+        let open = g?.orders.first { $0.direction == "OPEN" }
+        #expect(open?.state == "PENDING")
+        #expect(abs((open?.priceStop?.doubleValue ?? 0) - 1.6000) < 1e-9)
+    }
+
     @Test("Enum value tables map known wire ints")
     func enumTables() {
         #expect(OrderEnums.positionSide(2342524) == "BUY")

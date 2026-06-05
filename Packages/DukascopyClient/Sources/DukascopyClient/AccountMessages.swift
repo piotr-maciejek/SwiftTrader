@@ -116,4 +116,21 @@ public struct PackedAccountInfo: Sendable {
         }
         return PackedAccountInfo(account: account, groups: groups, orders: orders)
     }
+
+    /// Reconstruct an `OrderGroup` for each resting pending (limit/stop) entry. At connect these
+    /// arrive as loose `orders` (grouped by `orderGroupId`), NOT as `groups` — so without this they'd
+    /// be invisible until the next live order event (which never comes for an unchanged resting
+    /// order). Each rebuilt group is the PENDING opening order plus its protective SL/TP CLOSE legs,
+    /// matching the shape delivered incrementally when an order is placed live, so the same
+    /// pending-order/SL-TP extraction works unchanged.
+    public func pendingOrderGroups() -> [OrderGroup] {
+        Dictionary(grouping: orders.filter { $0.orderGroupId != nil }, by: { $0.orderGroupId! })
+            .compactMap { gid, os in
+                guard let opening = os.first(where: { $0.direction == "OPEN" }),
+                      opening.state == "PENDING" else { return nil }
+                return OrderGroup(orderGroupId: gid, instrument: opening.instrument,
+                                  amount: opening.amount, side: opening.side,
+                                  status: "OPEN", orders: os)
+            }
+    }
 }
