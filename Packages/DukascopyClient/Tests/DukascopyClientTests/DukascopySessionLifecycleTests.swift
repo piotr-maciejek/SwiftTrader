@@ -119,4 +119,29 @@ struct DukascopySessionLifecycleTests {
         }
         #expect(completed == true)
     }
+
+    // MARK: - Closed-position reconcile (stale-open pruning)
+
+    // `reconcileClosedPositions` backstops a dropped CLOSE event by pruning open positions the
+    // broker's closed-position DB reports closed. The join must be exact: prune ONLY ids that are
+    // both locally open and broker-confirmed closed, never an id the broker didn't mention.
+
+    @Test("prunes exactly the open positions the broker reports closed")
+    func reconcilePrunesIntersection() {
+        let stale = DukascopySession.stalePositionIds(
+            openIds: ["p1", "p2", "p3"],
+            brokerClosedIds: ["p2", "p9"])   // p9 isn't open here; p1/p3 still open
+        #expect(stale == ["p2"])
+    }
+
+    @Test("never prunes a still-open position the broker doesn't report closed")
+    func reconcileLeavesOpenUntouched() {
+        // The dangerous failure mode: hiding a genuinely open position. A disjoint closed set
+        // (e.g. an unrelated older trade) must prune nothing.
+        #expect(DukascopySession.stalePositionIds(
+            openIds: ["p1", "p2"], brokerClosedIds: ["old1", "old2"]).isEmpty)
+        // Empty open set or empty closed set → nothing to prune.
+        #expect(DukascopySession.stalePositionIds(openIds: [], brokerClosedIds: ["p1"]).isEmpty)
+        #expect(DukascopySession.stalePositionIds(openIds: ["p1"], brokerClosedIds: []).isEmpty)
+    }
 }

@@ -41,6 +41,9 @@ actor NativeTradingCoordinator: TradingCoordinating {
     /// Live session connectivity, driven by the session's state stream — feeds
     /// `Account.connected` so a dead transport raises the banner instead of a stale `true`.
     private var sessionConnected = true
+    /// Guards the closed-position reconcile so an overlapping trigger (post-close + periodic sweep)
+    /// can't fire a second redundant query while one is already in flight.
+    private var reconcileInFlight = false
 
     init(session: DukascopySession?) {
         self.session = session
@@ -93,6 +96,25 @@ actor NativeTradingCoordinator: TradingCoordinating {
             }
         }
         try await session.closePosition(positionId: label)
+        // The close is fire-and-forget; its confirming OrderGroup CLOSE event can be dropped by the
+        // feed, leaving the position shown as open. Reconcile against the broker's closed-position DB
+        // shortly after so the UI self-heals even when that event never arrives. The periodic sweep
+        // (see the self-heal poll) is the general backstop; this just makes the common path snappy.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            await self?.reconcileStaleClosed()
+        }
+    }
+
+    /// Drop any locally-open position the broker reports closed (a missed CLOSE event). Windowed to
+    /// the last 2h — a freshly-closed position always falls inside it, and a closed-position query
+    /// over that span is cheap. Safe to call often: it only prunes broker-confirmed closes.
+    private func reconcileStaleClosed() async {
+        guard let session, !reconcileInFlight else { return }
+        reconcileInFlight = true
+        defer { reconcileInFlight = false }
+        let sinceMs = Int64(Date().timeIntervalSince1970 * 1000) - 2 * 60 * 60 * 1000
+        await session.reconcileClosedPositions(sinceMillis: sinceMs)
     }
 
     /// Modify (or add/remove) SL and TP on an open position or pending entry.
@@ -295,12 +317,18 @@ actor NativeTradingCoordinator: TradingCoordinating {
         // (incl. from another machine) — which may not generate a local order event — still surface.
         // `refreshGroupsIfChanged` re-emits only on a real change, so there's no churn.
         Task { [weak self] in
+            var tick = 0
             while !Task.isCancelled {
                 guard let self, let session = await self.session else { return }
                 if let acct = try? await session.accountSnapshot(timeout: 15) {
                     await self.updateAccount(acct)
                 }
                 await self.refreshGroupsIfChanged()
+                // Backstop for a missed CLOSE event from ANY cause (manual close, SL/TP fill, or a
+                // close on another machine): every ~10s, prune positions the broker reports closed.
+                // Throttled relative to the 2s account poll so the extra closed-position query is light.
+                tick += 1
+                if tick % 5 == 0 { await self.reconcileStaleClosed() }
                 try? await Task.sleep(for: .seconds(2))
             }
         }

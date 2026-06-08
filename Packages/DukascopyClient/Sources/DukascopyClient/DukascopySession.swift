@@ -999,6 +999,44 @@ public actor DukascopySession {
     /// Snapshot of the currently-open position groups.
     public func positionsSnapshot() -> [OrderGroup] { Array(positions.values) }
 
+    /// Authoritative backstop for a missed close. The live `positions` dict is only pruned by an
+    /// inbound `OrderGroup` CLOSE event (see the reader's `.orderGroup` case) — a fire-and-forget
+    /// frame Dukascopy can silently drop, which strands a closed position as perpetually "open".
+    /// Here we ask the broker's closed-position DB (the same source the History tab trusts) which
+    /// positions actually closed in `[sinceMillis, now]` and drop any that are still open locally.
+    /// Removal is broker-confirmed, so this can never hide a genuinely open position. Each dropped
+    /// group is re-yielded as a CLOSE event so coordinators re-snapshot exactly as if the original
+    /// event had arrived. Returns the number of stale positions pruned.
+    @discardableResult
+    public func reconcileClosedPositions(sinceMillis: Int64, idleTimeout: TimeInterval = 8) async -> Int {
+        guard state == .connected, !positions.isEmpty else { return 0 }
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        guard let closed = try? await fetchClosedPositions(
+            fromMillis: sinceMillis, toMillis: nowMs, idleTimeout: idleTimeout)
+        else { return 0 }
+        // `ClosedPosition.positionId` shares the id space with `OrderGroup.orderGroupId` (both are the
+        // Dukascopy position id used to close — see `closePosition(positionId:)`), so it's the join key.
+        let closedIds = Set(closed.map(\.positionId))
+        let stale = Self.stalePositionIds(openIds: Set(positions.keys), brokerClosedIds: closedIds)
+        guard !stale.isEmpty else { return 0 }
+        for id in stale {
+            guard var g = positions.removeValue(forKey: id) else { continue }
+            log.info("reconcile: pruned stale open position \(id, privacy: .public) — broker reports closed")
+            g.status = "CLOSE"
+            for (_, c) in orderEventStreams { c.yield(.group(g)) }
+        }
+        return stale.count
+    }
+
+    /// Pure pruning decision for `reconcileClosedPositions`: of the positions we still show open,
+    /// which ones did the broker report closed? The answer is exactly the intersection — a position
+    /// is pruned only when it's BOTH locally open AND broker-confirmed closed, so an id the broker
+    /// doesn't mention is never touched (it stays open). Extracted as a pure, static function so the
+    /// safety invariant is unit-tested without a live session.
+    static func stalePositionIds(openIds: Set<String>, brokerClosedIds: Set<String>) -> Set<String> {
+        openIds.intersection(brokerClosedIds)
+    }
+
     /// Multicast stream of inbound order/position events (acks + live updates).
     public func orderEvents() -> AsyncStream<OrderEvent> {
         let id = UUID()
