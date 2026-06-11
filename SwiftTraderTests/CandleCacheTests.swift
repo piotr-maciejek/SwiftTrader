@@ -296,4 +296,25 @@ struct CandleCacheTests {
         let gaps = await cache.findGaps(instrument: "EURUSD", period: "FIFTEEN_MINS")
         #expect(gaps.isEmpty, "aggregated periods rebuild from their source — no direct gap-fill")
     }
+
+    @Test("findGaps: side-aware — an ASK hole is found on .ask, not on .bid")
+    func findGapsSideAware() async {
+        let cache = CandleCache()
+        let cadence: Int64 = 3_600_000
+        let askKey = CandleCache.CacheKey(instrument: "EURUSD", period: "ONE_HOUR", side: .ask)
+        // ASK series has a 1-bar mid-session hole; BID series is contiguous.
+        _ = await cache.merge(
+            [makeBar(time: wedMidSessionMs), makeBar(time: wedMidSessionMs + 2 * cadence)],
+            for: askKey
+        )
+        _ = await cache.merge(
+            (0..<3).map { makeBar(time: wedMidSessionMs + Int64($0) * cadence) },
+            for: oneHourKey
+        )
+        let askGaps = await cache.findGaps(instrument: "EURUSD", period: "ONE_HOUR", side: .ask)
+        #expect(askGaps.count == 1)
+        #expect(askGaps.first?.missingBars == 1)
+        let bidGaps = await cache.findGaps(instrument: "EURUSD", period: "ONE_HOUR")
+        #expect(bidGaps.isEmpty, "default side is BID — the ASK hole must not leak across sides")
+    }
 }

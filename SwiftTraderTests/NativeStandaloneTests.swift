@@ -511,3 +511,74 @@ struct AggregatedBucketCompleteTests {
             bucketStartMs: start, spanMs: fourH, sourceStepMs: hour, sourceTimes: [start], nowMs: start + hour))
     }
 }
+
+@Suite("HistoryPrefetcher warm-up")
+struct HistoryPrefetcherTests {
+    /// Records every page request so the test can assert what the warm loop asked for.
+    actor PageRecorder {
+        struct Call: Equatable, Sendable {
+            let period: String
+            let side: ChartSide
+        }
+        private(set) var calls: [Call] = []
+        func record(_ c: Call) { calls.append(c) }
+    }
+
+    @Test("Warm-up fetches BID fully first, then mirrors the plan on ASK")
+    func warmsBothSides() async throws {
+        let cache = CandleCache()
+        let recorder = PageRecorder()
+        // One page deep enough for every series target (2y for 1H), so each
+        // (series, side) finishes in a single fetch and the gap-scan sees a
+        // single-bar series (no gaps → no extra fetches).
+        let deepMs = Int64(Date().timeIntervalSince1970 * 1000) - Int64(3 * 365) * 24 * 3_600_000
+        let prefetcher = HistoryPrefetcher(
+            instruments: ["EURUSD"],
+            cache: cache,
+            awaitIdle: {},
+            fetchPage: { instrument, period, _, _, side in
+                await recorder.record(.init(period: period, side: side))
+                let bar = SwiftTrader.CandleBar(
+                    time: deepMs, open: 1.0, high: 1.2, low: 0.9, close: 1.1, volume: 1
+                )
+                _ = await cache.merge(
+                    [bar],
+                    for: CandleCache.CacheKey(
+                        instrument: instrument, period: period, source: .server, side: side
+                    )
+                )
+                return [bar]
+            },
+            initialDelay: .zero
+        )
+        await prefetcher.ensureStarted()
+
+        // 2 series × 1 instrument × 2 sides = 4 pages; each deepen paces 250ms.
+        for _ in 0..<500 {
+            if await recorder.calls.count >= 4 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        // Grace window: the gap-scan runs after the depth pass and must add nothing.
+        try await Task.sleep(for: .milliseconds(100))
+        await prefetcher.stop()
+
+        let calls = await recorder.calls
+        #expect(calls == [
+            .init(period: "ONE_HOUR", side: .bid),
+            .init(period: "ONE_MIN", side: .bid),
+            .init(period: "ONE_HOUR", side: .ask),
+            .init(period: "ONE_MIN", side: .ask),
+        ])
+
+        // Both sides landed under their own cache keys, no cross-side bleed.
+        for period in ["ONE_HOUR", "ONE_MIN"] {
+            for side in [ChartSide.bid, .ask] {
+                let key = CandleCache.CacheKey(
+                    instrument: "EURUSD", period: period, source: .server, side: side
+                )
+                let bars = await cache.getBars(for: key)
+                #expect(bars.count == 1, "expected exactly one warmed bar for \(period) \(side.rawValue)")
+            }
+        }
+    }
+}

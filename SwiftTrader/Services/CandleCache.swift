@@ -204,9 +204,9 @@ actor CandleCache {
     /// and the two global FX holidays (`isFXHoliday` — Dec 25, Jan 1). Only meaningful
     /// for the basic stored periods (ONE_MIN, ONE_HOUR, DAILY); aggregated series rebuild
     /// from these so their gaps fix as a side effect. Returns gaps in ascending time order.
-    func findGaps(instrument: String, period: String) async -> [CacheGap] {
+    func findGaps(instrument: String, period: String, side: ChartSide = .bid) async -> [CacheGap] {
         guard let cadenceMs = Self.periodCadenceMs(period) else { return [] }
-        let key = CacheKey(instrument: instrument, period: period, source: .server)
+        let key = CacheKey(instrument: instrument, period: period, source: .server, side: side)
         await ensureLoaded(key)
         let bars = store[key]?.bars ?? []
         guard bars.count >= 2 else { return [] }
