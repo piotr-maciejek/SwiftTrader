@@ -258,10 +258,27 @@ public actor DukascopySession {
             log.info("connect: CONNECTED")
         } catch {
             log.error("connect: FAILED: \(error.localizedDescription, privacy: .public)")
+            await connectDidFail(error)
+            throw error
+        }
+    }
+
+    /// Cleanup after a `connect()` failure. During an in-place `reconnect()` the
+    /// multicast consumers MUST stay registered for the retry — finishing them here
+    /// silently killed every live stream when reconnect attempt 1 failed and attempt 2
+    /// succeeded (fills/SL hits dropped while the session looked healthy). The state
+    /// goes `.disconnected`, not `.failed`: terminal failure is `markFailed`'s job, and
+    /// a `.failed` broadcast mid-retry makes the app abandon a session that's still
+    /// being driven back up. Only an initial (non-reconnect) connect failure is
+    /// terminal here. Internal for tests.
+    func connectDidFail(_ error: Error) async {
+        if reconnectInProgress {
+            setState(.disconnected)
+            await teardown()
+        } else {
             setState(.failed(String(describing: error)))
             await teardown()
             finishMulticastStreams()
-            throw error
         }
     }
 
@@ -335,9 +352,10 @@ public actor DukascopySession {
     /// `.failed` / `.disconnected` is broadcast via `setState` BEFORE this runs, so it's
     /// still delivered (AsyncStream buffers it) ahead of the finish.
     ///
-    /// Called only on TERMINAL teardown (`markFailed`, connect-failure, `close`) — NOT
-    /// from `reconnect()`'s `teardown()`, which deliberately keeps consumers registered
-    /// across an in-place transport rebuild so live feeds resume seamlessly.
+    /// Called only on TERMINAL teardown (`markFailed`, an INITIAL connect failure,
+    /// `close`) — never from the reconnect path (see `connectDidFail`), which
+    /// deliberately keeps consumers registered across an in-place transport rebuild
+    /// so live feeds resume seamlessly.
     private func finishMulticastStreams() {
         for (_, c) in tickStreams { c.finish() }
         tickStreams.removeAll()
@@ -668,16 +686,31 @@ public actor DukascopySession {
         consecutiveWatchdogReconnects += 1
         Task { [weak self] in
             guard let self else { return }
+            var lastError: Error?
             for attempt in 1...3 {
                 do {
                     try await self.reconnect()
                     return
                 } catch {
+                    lastError = error
                     log.error("watchdog reconnect attempt \(attempt, privacy: .public)/3 failed: \(error.localizedDescription, privacy: .public)")
                     if attempt < 3 { try? await Task.sleep(for: .seconds(TimeInterval(min(15, 3 * attempt)))) }
                 }
             }
+            // All rebuilds failed. The session sits .disconnected with consumers still
+            // registered and NOTHING left to re-trigger a reconnect (the watchdog only
+            // fires from history idle-timeouts, which need a connected session) — a
+            // permanent silent zombie. Declare terminal failure so the app surfaces
+            // re-login instead of dead-looking charts.
+            await self.markFailed(
+                "watchdog reconnect failed after 3 attempts: \(lastError?.localizedDescription ?? "unknown")")
         }
+    }
+
+    /// Test seam: arrange the reconnect-in-progress flag without driving a real
+    /// reconnect, so `connectDidFail`'s two paths are testable offline.
+    func setReconnectInProgressForTesting(_ flag: Bool) {
+        reconnectInProgress = flag
     }
 
     /// Resolve a single pending history request with an error (e.g. a server error
