@@ -22,6 +22,7 @@ public actor DukascopySession {
         case notConnected
         case timedOut(String)
         case orderRejected(String, String?)
+        case malformedResponse(String)
 
         public var description: String {
             switch self {
@@ -32,6 +33,7 @@ public actor DukascopySession {
             case .timedOut(let what): "\(what) timed out"
             case .orderRejected(let state, let reason):
                 "order rejected (\(state))" + (reason.map { ": \($0)" } ?? "")
+            case .malformedResponse(let what): "malformed response: \(what)"
             }
         }
 
@@ -596,6 +598,11 @@ public actor DukascopySession {
         lastWatchdogReconnectAt = nil
         pendingHistory[reqId]?.lastActivity = Date()
         if let order = g.messageOrder {
+            guard Self.validChunkIndex(order) else {
+                log.error("fetchHistory req=\(reqId, privacy: .public): chunk index \(order) out of range — failing request")
+                failHistory(reqId, error: SessionError.malformedResponse("history chunk index \(order) out of range"))
+                return
+            }
             pendingHistory[reqId]?.groups[order] = g
             log.debug("fetchHistory chunk req=\(reqId, privacy: .public) order=\(order) finished=\(g.historyFinished == true)")
             if g.historyFinished == true {
@@ -606,22 +613,48 @@ public actor DukascopySession {
         resolveHistoryIfReady(reqId)
     }
 
+    /// Bound on per-request chunk indices. Far above anything a legitimate fetch
+    /// produces; exists so a corrupt index can't drive the assembly loop below
+    /// into billions of iterations on the session actor.
+    static let maxChunkOrder: Int32 = 50_000
+
+    /// True when a chunk index is acceptable for accumulation.
+    static func validChunkIndex(_ order: Int32) -> Bool {
+        order >= 0 && order <= maxChunkOrder
+    }
+
+    /// Ordered, completeness-checked chunk assembly: payloads for `0...maxOrder`,
+    /// or a thrown error when any index is absent — a hole means part of the data
+    /// never arrived, and returning the rest as if complete plants silent gaps.
+    /// `maxOrder < 0` → empty (a request that finished with no chunks).
+    static func orderedChunks<T>(_ chunks: [Int32: T], maxOrder: Int32) throws -> [T] {
+        guard maxOrder >= 0 else { return [] }
+        let missing = (0...maxOrder).filter { chunks[$0] == nil }
+        guard missing.isEmpty else {
+            throw SessionError.malformedResponse("response missing \(missing.count) of \(maxOrder + 1) chunk(s)")
+        }
+        return (0...maxOrder).compactMap { chunks[$0] }
+    }
+
+    private func failHistory(_ reqId: String, error: Error) {
+        guard let pending = pendingHistory.removeValue(forKey: reqId) else { return }
+        pending.continuation?.resume(throwing: error)
+    }
+
     private func resolveHistoryIfReady(_ reqId: String) {
         guard let pending = pendingHistory[reqId], pending.finished,
               let cont = pending.continuation else { return }
         pendingHistory[reqId] = nil
         do {
             var bars: [CandleBar] = []
-            if pending.maxOrder >= 0 {
-                for order in 0...pending.maxOrder {
-                    guard let g = pending.groups[order], let s = g.candles else { continue }
-                    bars.append(contentsOf: try HistoryDecoder.decodeCandles(s))
-                }
+            for g in try Self.orderedChunks(pending.groups, maxOrder: pending.maxOrder) {
+                guard let s = g.candles else { continue }
+                bars.append(contentsOf: try HistoryDecoder.decodeCandles(s))
             }
             log.debug("fetchHistory req=\(reqId, privacy: .public) done: \(bars.count) bars from \(pending.maxOrder + 1) chunk(s)")
             cont.resume(returning: bars)
         } catch {
-            log.error("fetchHistory req=\(reqId, privacy: .public) decode failed: \(error.localizedDescription, privacy: .public)")
+            log.error("fetchHistory req=\(reqId, privacy: .public) assembly failed: \(error.localizedDescription, privacy: .public)")
             cont.resume(throwing: error)
         }
     }
@@ -766,7 +799,14 @@ public actor DukascopySession {
         guard let reqId = resp.requestId, pendingClosed[reqId] != nil else { return }
         pendingClosed[reqId]?.lastActivity = Date()
         if let order = resp.messageOrder {
-            if let blob = resp.positionsEncoded { pendingClosed[reqId]?.chunks[order] = blob }
+            guard Self.validChunkIndex(order) else {
+                log.error("fetchClosedPositions req=\(reqId, privacy: .public): chunk index \(order) out of range — failing request")
+                failClosed(reqId, error: SessionError.malformedResponse("closed-positions chunk index \(order) out of range"))
+                return
+            }
+            // Store even a blob-less chunk: its index was seen, so it must not read
+            // as a hole in the completeness check at assembly time.
+            pendingClosed[reqId]?.chunks[order] = resp.positionsEncoded ?? Data()
             log.debug("fetchClosedPositions chunk req=\(reqId, privacy: .public) order=\(order) finished=\(resp.finished == true)")
             if resp.finished == true {
                 pendingClosed[reqId]?.maxOrder = order
@@ -781,16 +821,19 @@ public actor DukascopySession {
         resolveClosedIfReady(reqId)
     }
 
+    private func failClosed(_ reqId: String, error: Error) {
+        guard let pending = pendingClosed.removeValue(forKey: reqId) else { return }
+        pending.continuation?.resume(throwing: error)
+    }
+
     private func resolveClosedIfReady(_ reqId: String) {
         guard let pending = pendingClosed[reqId], pending.finished,
               let cont = pending.continuation else { return }
         pendingClosed[reqId] = nil
         do {
             var blob = Data()
-            if pending.maxOrder >= 0 {
-                for order in 0...pending.maxOrder {
-                    if let c = pending.chunks[order] { blob.append(c) }
-                }
+            for c in try Self.orderedChunks(pending.chunks, maxOrder: pending.maxOrder) {
+                blob.append(c)
             }
             let positions = blob.isEmpty ? [] : try PositionDataBitsDecoder.decodeList(blob)
             log.debug("fetchClosedPositions req=\(reqId, privacy: .public) done: \(positions.count) position(s)")
