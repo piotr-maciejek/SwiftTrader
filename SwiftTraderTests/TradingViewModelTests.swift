@@ -34,6 +34,8 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
     var pendingOrdersContinuation: AsyncThrowingStream<PendingOrdersSnapshot, Error>.Continuation?
     /// Captured on the first call to streamSnapshots so tests can push trading snapshots.
     var snapshotContinuation: AsyncThrowingStream<TradingSnapshot, Error>.Continuation?
+    /// Captured on the first call to orderRejections so tests can push broker rejections.
+    var rejectionContinuation: AsyncStream<String>.Continuation?
 
     func submitOrder(instrument: String, direction: String, amount: Double,
                      stopLoss: Double, takeProfit: Double,
@@ -65,6 +67,13 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
     func streamPendingOrders() -> AsyncThrowingStream<PendingOrdersSnapshot, Error> {
         AsyncThrowingStream { continuation in
             self.pendingOrdersContinuation = continuation
+            continuation.onTermination = { _ in }
+        }
+    }
+
+    func orderRejections() -> AsyncStream<String> {
+        AsyncStream { continuation in
+            self.rejectionContinuation = continuation
             continuation.onTermination = { _ in }
         }
     }
@@ -214,6 +223,126 @@ struct VisualOrderSubmitRaceTests {
 
         #expect(fake.submitCallCount == 0)
         #expect(vm.orderError == nil)
+    }
+}
+
+@Suite("Currency-Aware Sizing")
+@MainActor
+struct CurrencyAwareSizingTests {
+
+    private func makeAccount(currency: String) -> Account {
+        Account(balance: 10_000, equity: 10_000, usedMargin: 0, freeMargin: 10_000,
+                currency: currency, leverage: 30, connected: true, lastTickAgeMs: 0)
+    }
+
+    /// Push one snapshot through the fake's stream so the VM picks up account + rates
+    /// via the same path production uses.
+    private func feed(_ vm: TradingViewModel, _ fake: FakeTradingCoordinator,
+                      account: Account, rates: [String: Double]?) async {
+        vm.start()
+        for _ in 0..<50 {
+            if fake.snapshotContinuation != nil { break }
+            await Task.yield()
+        }
+        fake.snapshotContinuation?.yield(
+            TradingSnapshot(positions: [], account: account, spreads: [:], rates: rates))
+        for _ in 0..<50 {
+            if vm.account != nil { break }
+            await Task.yield()
+        }
+    }
+
+    @Test("Cross-currency pair sizes with the converted rate")
+    func crossCurrencySizing() async throws {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        // EUR account trading USDJPY; JPY→EUR comes from the inverse of EURJPY = 171.
+        await feed(vm, fake, account: makeAccount(currency: "EUR"),
+                   rates: ["EURJPY": 171.0])
+
+        let bars = (0..<50).map { i in
+            CandleBar(time: Int64(i), open: 149.90, high: 150.10, low: 149.80,
+                      close: 150.00, volume: 100, partial: false)
+        }
+        vm.beginVisualOrder(direction: "BUY", instrument: "USDJPY", bars: bars)
+
+        let order = try #require(vm.visualOrder(for: "USDJPY"))
+        let (sl, _) = TradingViewModel.visualOrderSLTP(direction: "BUY", bars: bars, currentPrice: 150.00)
+        let expected = PositionSizing.calculate(
+            equity: 10_000, freeMargin: 10_000, riskFraction: 0.005,
+            entryPrice: 150.00, stopLoss: sl, leverage: 30,
+            spread: 0, quoteToAccountRate: 1.0 / 171.0)
+        #expect(order.amount == expected.lots)
+        #expect(order.isConversionUnavailable == false)
+        vm.stop()
+    }
+
+    @Test("Missing rate refuses to auto-size and flags the order")
+    func missingRateKeepsManualAmount() async throws {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        // EUR account, JPY-quote pair, but no rates at all (server mode).
+        await feed(vm, fake, account: makeAccount(currency: "EUR"), rates: nil)
+
+        let bars = (0..<50).map { i in
+            CandleBar(time: Int64(i), open: 149.90, high: 150.10, low: 149.80,
+                      close: 150.00, volume: 100, partial: false)
+        }
+        vm.beginVisualOrder(direction: "BUY", instrument: "USDJPY", bars: bars)
+
+        let order = try #require(vm.visualOrder(for: "USDJPY"))
+        #expect(order.isConversionUnavailable == true)
+        #expect(order.amount == vm.amount)   // untouched default, not an auto-size
+        #expect(order.isMarginCapped == false)
+        vm.stop()
+    }
+
+    @Test("Same-currency pair sizes with no rates dict at all")
+    func sameCurrencyNeedsNoRates() async throws {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        // USD account trading EURUSD (quote USD): rate is 1 without any streamed rates.
+        await feed(vm, fake, account: makeAccount(currency: "USD"), rates: nil)
+
+        vm.beginVisualOrder(direction: "BUY", instrument: "EURUSD", bars: makeBars(count: 50))
+
+        let order = try #require(vm.visualOrder(for: "EURUSD"))
+        #expect(order.isConversionUnavailable == false)
+        let (sl, _) = TradingViewModel.visualOrderSLTP(
+            direction: "BUY", bars: makeBars(count: 50), currentPrice: 1.1000)
+        let expected = PositionSizing.calculate(
+            equity: 10_000, freeMargin: 10_000, riskFraction: 0.005,
+            entryPrice: 1.1000, stopLoss: sl, leverage: 30,
+            spread: 0, quoteToAccountRate: 1)
+        #expect(order.amount == expected.lots)
+        vm.stop()
+    }
+}
+
+@Suite("Order Rejection Stream")
+@MainActor
+struct OrderRejectionStreamTests {
+
+    @Test("A late broker rejection surfaces as orderError")
+    func lateRejectionSetsOrderError() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        vm.start()
+
+        for _ in 0..<50 {
+            if fake.rejectionContinuation != nil { break }
+            await Task.yield()
+        }
+        #expect(fake.rejectionContinuation != nil)
+
+        fake.rejectionContinuation?.yield("Order rejected (REJECTED): insufficient margin — EUR/USD")
+
+        for _ in 0..<50 {
+            if vm.orderError != nil { break }
+            await Task.yield()
+        }
+        #expect(vm.orderError == "Order rejected (REJECTED): insufficient margin — EUR/USD")
+        vm.stop()
     }
 }
 

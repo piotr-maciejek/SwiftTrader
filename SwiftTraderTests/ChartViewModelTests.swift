@@ -89,6 +89,31 @@ struct ChartViewModelTests {
         #expect(mock.cachedBars[0].bar.time == 2000)
     }
 
+    @Test("Cache write keys by the bar's chart identity even if the user switches mid-hop")
+    func handleBarCachesUnderGuardTimeIdentity() async {
+        // handleBar's staleness guard checks instrument/period synchronously, but the
+        // cacheBar write hops through an async Task. If that Task read the CURRENT
+        // chart identity, an instrument switch in between would file this EURUSD bar
+        // under the new pair's disk cache key — a cross-pair poison that survives
+        // restarts. The write must carry the guard-time (expected*) identity.
+        let mock = MockMarketDataCoordinator()
+        let vm = ChartViewModel(coordinator: mock)
+        vm.currentPeriod = "ONE_HOUR"
+        vm.bars = [makeBar(time: 1000)]
+
+        vm.handleBar(makeBar(time: 2000),
+                     expectedInstrument: "EURUSD", expectedPeriod: "ONE_HOUR")
+        // Switch the chart BEFORE the unstructured Task body runs (it can't start
+        // until this synchronous main-actor code yields).
+        vm.currentInstrument = "USDJPY"
+        vm.currentPeriod = "FIFTEEN_MINS"
+
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(mock.cachedBars.count == 1)
+        #expect(mock.cachedBars[0].instrument == "EURUSD")
+        #expect(mock.cachedBars[0].period == "ONE_HOUR")
+    }
+
     @Test("Completed bar on a derived period appends but skips cache")
     func handleBarDerivedAppendsButSkipsCache() async {
         let mock = MockMarketDataCoordinator()

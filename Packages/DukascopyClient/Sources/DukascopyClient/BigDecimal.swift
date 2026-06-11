@@ -83,6 +83,10 @@ public enum BigDecimalCodec {
             let data = try reader.readBytes(len)
             return BigDecimalValue(unscaled: signedBigInt(from: data), scale: scale)
         case 7:
+            // Both ints are wire-controlled. A negative `len` throws in readBytes
+            // (negativeLength). `scale` is accepted as-is; a hostile huge scale only
+            // bites if `description` renders it (builds a digit string) — not hardened
+            // here since no decode path formats it.
             let scale = Int(try reader.readInt32BE())
             let len = Int(try reader.readInt32BE())
             let data = try reader.readBytes(len)

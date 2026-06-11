@@ -181,13 +181,21 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
                 serverKey: hourlyKey, instrument: instrument, period: source, latest: latest
             )
             let merged = await cache.getBars(for: hourlyKey)
-            let aggregated = BarAggregator.aggregate(
-                hourly: merged, openPartial: nil, target: target
-            )
+            // The cached source holds completed bars only, so the forming target bucket
+            // would aggregate as complete and be PERSISTED with a frozen close (wrong
+            // all weekend after a Friday mid-session rebuild). Re-flag it partial —
+            // merge then drops it — and re-append it for display like the fresh path.
+            let aggregated = BarAggregator.markForming(
+                BarAggregator.aggregate(hourly: merged, openPartial: nil, target: target),
+                formingStartMs: BarAggregator.formingBucketStartMs(target: target, now: Date()))
             let aggKey = CandleCache.CacheKey(
                 instrument: instrument, period: target.periodCode, source: .aggregated
             )
-            return await cache.merge(aggregated, for: aggKey)
+            let cached = await cache.merge(aggregated, for: aggKey)
+            if let last = aggregated.last, last.partial {
+                return cached + [last]
+            }
+            return cached
         }
 
         let hourlyCount = count * target.sourceSpan
@@ -197,9 +205,11 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
         let merged = await cache.merge(fetched, for: hourlyKey)
         let partial = fetched.last.flatMap { $0.partial ? $0 : nil }
 
-        let aggregated = BarAggregator.aggregate(
-            hourly: merged, openPartial: partial, target: target
-        )
+        // markForming covers the case where the server's tail bar wasn't flagged
+        // partial (so `partial` is nil) yet the bucket is still open.
+        let aggregated = BarAggregator.markForming(
+            BarAggregator.aggregate(hourly: merged, openPartial: partial, target: target),
+            formingStartMs: BarAggregator.formingBucketStartMs(target: target, now: Date()))
         let aggKey = CandleCache.CacheKey(
             instrument: instrument, period: target.periodCode, source: .aggregated
         )
@@ -226,13 +236,20 @@ final class MarketDataCoordinator: MarketDataProviding, Sendable {
             instrument: instrument, period: source, count: hourlyCount, before: before
         )
         let merged = await cache.merge(fetched, for: hourlyKey)
-        let aggregated = BarAggregator.aggregate(
-            hourly: merged, openPartial: nil, target: target
-        )
+        // Same forming-bucket guard: scroll-back re-aggregates the whole merged
+        // source, open bucket included — never persist it as a closed bar.
+        let aggregated = BarAggregator.markForming(
+            BarAggregator.aggregate(hourly: merged, openPartial: nil, target: target),
+            formingStartMs: BarAggregator.formingBucketStartMs(target: target, now: Date()))
         let aggKey = CandleCache.CacheKey(
             instrument: instrument, period: target.periodCode, source: .aggregated
         )
-        return await cache.merge(aggregated, for: aggKey)
+        let cachedAgg = await cache.merge(aggregated, for: aggKey)
+        // merge drops the partial forming bucket — re-append it for display.
+        if let last = aggregated.last, last.partial, last.time > (cachedAgg.last?.time ?? 0) {
+            return cachedAgg + [last]
+        }
+        return cachedAgg
     }
 
     private func aggregatedStream(

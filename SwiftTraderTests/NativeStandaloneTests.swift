@@ -192,6 +192,44 @@ struct NativeMarketDataCoordinatorRoutingTests {
         #expect(NativeMarketDataCoordinator().maxConcurrentColdLoads == 3)
     }
 
+    @Test("A warm-source Daily rebuild never persists the forming bucket and displays it partial")
+    func warmRebuildKeepsFormingBucketPartial() async throws {
+        // The cached 1H source holds ONLY completed bars (the cache drops partials), so
+        // the rebuild path can't learn the forming Daily bucket from its source — it
+        // must derive it from the clock. Regression test for the frozen-Friday-close
+        // cache poison: pre-fix, the forming bucket aggregated as complete and was
+        // persisted to the .aggregated cache.
+        let cache = CandleCache()
+        let srcKey = CandleCache.CacheKey(instrument: "EURUSD", period: "ONE_HOUR", source: .server)
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let hourMs: Int64 = 3_600_000
+        let lastClosedHour = (nowMs / hourMs) * hourMs - hourMs
+        // 240 completed hourly bars (10 days) cover a 5-day DAILY window, so the
+        // covers-window (no source fetch) branch aggregates straight from cache.
+        let bars = (0..<240).map { i in
+            SwiftTrader.CandleBar(time: lastClosedHour - Int64(i) * hourMs,
+                                  open: 1, high: 2, low: 0.5, close: 1.5, volume: 1)
+        }.sorted { $0.time < $1.time }
+        _ = await cache.merge(bars, for: srcKey)
+
+        let (coord, _) = make(cache: cache) { _ in [] }
+        let result = try await coord.fetchCandles(
+            instrument: "EURUSD", period: "DAILY", count: 5, rebucketing: false)
+
+        let formingStart = BarAggregator.formingBucketStartMs(target: .daily, now: Date())
+        let aggKey = CandleCache.CacheKey(instrument: "EURUSD", period: "DAILY", source: .aggregated)
+        let persisted = await cache.getBars(for: aggKey)
+        // Closed buckets persist; the forming bucket (and any partial) never does.
+        #expect(!persisted.isEmpty)
+        #expect(persisted.allSatisfy { $0.time < formingStart })
+        #expect(persisted.allSatisfy { !$0.partial })
+        // Whatever the DISPLAY series shows at/after the forming start is flagged partial.
+        #expect(result.contains { $0.time < formingStart })
+        for bar in result where bar.time >= formingStart {
+            #expect(bar.partial, "forming bucket at \(bar.time) must be partial")
+        }
+    }
+
     @Test("An aggregated cache missing the just-closed bucket is not served (rebuild)")
     func aggCacheStalenessGate() {
         // A fixed, market-open instant: Wed 2026-06-03 10:00:30 UTC.
@@ -466,10 +504,10 @@ struct AggregatedBucketCompleteTests {
             bucketStartMs: start, spanMs: fourH, sourceStepMs: hour, sourceTimes: Set(), nowMs: start + fourH + hour))
     }
 
-    @Test("A still-forming bucket is never flagged incomplete (handled by the partial flag)")
-    func formingBucketComplete() {
+    @Test("A still-forming bucket is withheld from persistence (fail-closed)")
+    func formingBucketWithheld() {
         let start = ms(2026, 6, 3, 13)
-        #expect(NativeMarketDataCoordinator.aggregatedBucketComplete(
+        #expect(!NativeMarketDataCoordinator.aggregatedBucketComplete(
             bucketStartMs: start, spanMs: fourH, sourceStepMs: hour, sourceTimes: [start], nowMs: start + hour))
     }
 }

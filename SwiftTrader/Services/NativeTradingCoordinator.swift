@@ -30,6 +30,8 @@ actor NativeTradingCoordinator: TradingCoordinating {
 
     private var snapshotConts: [UUID: AsyncThrowingStream<TradingSnapshot, Error>.Continuation] = [:]
     private var pendingConts: [UUID: AsyncThrowingStream<PendingOrdersSnapshot, Error>.Continuation] = [:]
+    /// Late/unsolicited broker rejections (e.g. a modify dropped after its ack window).
+    private var rejectionConts: [UUID: AsyncStream<String>.Continuation] = [:]
     /// Memoized one-time startup: loads the connect-time account + groups and starts the live
     /// listeners. Awaited by every stream registration so the first yield can't observe an empty
     /// `groups` (see `startup`). A fresh coordinator (per reconnect/attach) gets a fresh task.
@@ -259,6 +261,14 @@ actor NativeTradingCoordinator: TradingCoordinating {
         }
     }
 
+    nonisolated func orderRejections() -> AsyncStream<String> {
+        AsyncStream { cont in
+            let id = UUID()
+            let task = Task { await self.registerRejections(id: id, cont: cont) }
+            cont.onTermination = { _ in task.cancel(); Task { await self.unregisterRejections(id) } }
+        }
+    }
+
     private func registerSnapshot(id: UUID, cont: AsyncThrowingStream<TradingSnapshot, Error>.Continuation) async {
         guard session != nil else { cont.finish(throwing: NativeTradingError.notConnected); return }
         snapshotConts[id] = cont
@@ -274,6 +284,13 @@ actor NativeTradingCoordinator: TradingCoordinating {
         cont.yield(PendingOrdersSnapshot(pendingOrders: buildPending()))
     }
     private func unregisterPending(_ id: UUID) { pendingConts[id] = nil }
+
+    private func registerRejections(id: UUID, cont: AsyncStream<String>.Continuation) async {
+        guard session != nil else { cont.finish(); return }
+        rejectionConts[id] = cont
+        await ensureStarted()
+    }
+    private func unregisterRejections(_ id: UUID) { rejectionConts[id] = nil }
 
     /// Run (once) the memoized startup and await its completion — so a caller that yields right after
     /// is guaranteed `account` + `groups` are loaded. Concurrent registrations share the one task.
@@ -296,10 +313,11 @@ actor NativeTradingCoordinator: TradingCoordinating {
     }
 
     private func startListenerTasks(_ session: DukascopySession) {
-        // Order/position updates → refresh groups + account, re-emit both streams.
+        // Order/position updates → refresh groups + account, re-emit both streams
+        // (and surface any broker rejection riding on the event).
         Task { [weak self] in
             guard let self, let session = await self.session else { return }
-            for await _ in await session.orderEvents() { await self.onOrderEvent() }
+            for await event in await session.orderEvents() { await self.onOrderEvent(event) }
         }
         // Ticks → update rates/spreads + live P&L (throttled).
         Task { [weak self] in
@@ -359,12 +377,43 @@ actor NativeTradingCoordinator: TradingCoordinating {
         emitSnapshot()
     }
 
-    private func onOrderEvent() async {
+    private func onOrderEvent(_ event: OrderEvent) async {
         guard let session else { return }
+        // Surface broker rejections that arrive after the submitting call already
+        // returned (the in-call ack window catches the prompt ones, which throw).
+        if let message = Self.rejectionMessage(for: event) {
+            for (_, c) in rejectionConts { c.yield(message) }
+        }
         groups = await session.positionsSnapshot()
         account = try? await session.accountSnapshot()
         emitSnapshot()
         emitPending()
+    }
+
+    /// Human-readable description of a rejection carried by an order event, or nil.
+    static func rejectionMessage(for event: OrderEvent) -> String? {
+        switch event {
+        case .response(let r) where r.isRejected:
+            let detail = r.notes ?? r.comments
+            return "Order rejected (\(r.state ?? "REJECTED"))"
+                + (detail.map { ": \($0)" } ?? "")
+                + (r.instrument.map { " — \($0)" } ?? "")
+        case .order(let o) where ["REJECTED", "ERROR", "REVOKED"].contains(o.state ?? ""):
+            return "Order rejected (\(o.state ?? "REJECTED"))"
+                + (o.instrument.map { " — \($0)" } ?? "")
+        default:
+            return nil
+        }
+    }
+
+    /// Subscribe the cross pair needed to convert `quoteCurrency` into `accountCurrency`
+    /// so a conversion rate starts streaming for position sizing. Both orderings are
+    /// requested (only the one Dukascopy actually lists produces ticks; the other is
+    /// ignored upstream, which is harmless). No-op when the currencies already match.
+    func ensureConversionRate(quoteCurrency: String, accountCurrency: String) async {
+        guard let session, quoteCurrency != accountCurrency else { return }
+        let pairs: Set<String> = ["\(quoteCurrency)/\(accountCurrency)", "\(accountCurrency)/\(quoteCurrency)"]
+        try? await session.ensureSubscribedQuotes(pairs)
     }
 
     /// Latest live (bid, ask) reconstructed from the per-tick mid + spread (mid = (bid+ask)/2,
@@ -425,7 +474,9 @@ actor NativeTradingCoordinator: TradingCoordinating {
         // broadcasts ask−bid, not pips. The visual-order R:R and risk-sizing formulas add
         // the spread to price-unit distances, so publishing pips here made the spread
         // ~10,000× too large and collapsed R:R to 0 (and skewed position sizing).
-        return TradingSnapshot(positions: positions, account: acct, spreads: spreads)
+        // `rates` rides along so position sizing can convert quote-currency risk into
+        // the account currency (server mode sends no rates and sizing degrades safely).
+        return TradingSnapshot(positions: positions, account: acct, spreads: spreads, rates: rates)
     }
 
     private func buildPending() -> [PendingOrder] {

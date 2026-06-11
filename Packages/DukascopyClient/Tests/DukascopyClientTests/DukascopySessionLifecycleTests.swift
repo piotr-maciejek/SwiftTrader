@@ -120,6 +120,62 @@ struct DukascopySessionLifecycleTests {
         #expect(completed == true)
     }
 
+    @Test("A reconnect-path connect failure keeps multicast consumers registered")
+    func reconnectFailureKeepsStreams() async {
+        let session = makeSession()
+        let tick = await session.tickStream()
+        let order = await session.orderEvents()
+        for _ in 0..<200 { await Task.yield() }
+
+        await session.setReconnectInProgressForTesting(true)
+        await session.connectDidFail(DukascopySession.SessionError.timedOut("transport"))
+
+        // The streams must NOT finish — a failed in-place rebuild keeps consumers
+        // registered for the retry. withTimeout returning nil means the drain hung
+        // (stream still open), which is the desired outcome here.
+        let tickFinished = await withTimeout(0.5) { () -> Bool in
+            for await _ in tick {}
+            return true
+        }
+        let orderFinished = await withTimeout(0.5) { () -> Bool in
+            for await _ in order {}
+            return true
+        }
+        #expect(tickFinished == nil)
+        #expect(orderFinished == nil)
+        // Mid-retry state is .disconnected — .failed is reserved for terminal death.
+        #expect(await session.state == .disconnected)
+
+        // Terminal close still finishes them (no leak).
+        await session.close()
+        let closed = await withTimeout(3) { () -> Bool in
+            for await _ in tick {}
+            for await _ in order {}
+            return true
+        }
+        #expect(closed == true)
+    }
+
+    @Test("An initial (non-reconnect) connect failure is terminal: streams finish, state .failed")
+    func initialConnectFailureIsTerminal() async {
+        let session = makeSession()
+        let tick = await session.tickStream()
+        let order = await session.orderEvents()
+        for _ in 0..<200 { await Task.yield() }
+
+        await session.connectDidFail(DukascopySession.SessionError.timedOut("transport"))
+
+        let finished = await withTimeout(3) { () -> Bool in
+            for await _ in tick {}
+            for await _ in order {}
+            return true
+        }
+        #expect(finished == true)
+        if case .failed = await session.state {} else {
+            Issue.record("expected .failed, got \(await session.state)")
+        }
+    }
+
     // MARK: - Closed-position reconcile (stale-open pruning)
 
     // `reconcileClosedPositions` backstops a dropped CLOSE event by pruning open positions the

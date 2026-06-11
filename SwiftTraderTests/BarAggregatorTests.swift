@@ -102,6 +102,50 @@ struct BarAggregatorTests {
         #expect(out[0].close == 1.1)
     }
 
+    // MARK: Forming-bucket marking
+
+    @Test("formingBucketStartMs: 4H bucket containing a mid-session instant")
+    func formingStartFourHours() {
+        // Tue 2024-04-16 18:30 ET sits in the 17:00–21:00 ET bucket.
+        let now = nyDate(2024, 4, 16, 18, 30)
+        #expect(BarAggregator.formingBucketStartMs(target: .fourHours, now: now)
+                == timeMs(nyDate(2024, 4, 16, 17, 0)))
+    }
+
+    @Test("formingBucketStartMs: 3m fixed grid floors to the grid cell")
+    func formingStartFixedGrid() {
+        let now = nyDate(2024, 4, 16, 18, 7)   // 18:07 → 18:06 cell on a 3m grid
+        #expect(BarAggregator.formingBucketStartMs(target: .threeMinutes, now: now)
+                == timeMs(nyDate(2024, 4, 16, 18, 6)))
+    }
+
+    @Test("weekStartMs anchors the forming weekly bucket to Sunday 00:00 ET")
+    func formingStartWeekly() {
+        let now = nyDate(2024, 4, 17, 11, 0)   // Wednesday
+        #expect(BarAggregator.weekStartMs(now) == timeMs(nyDate(2024, 4, 14, 0, 0)))
+    }
+
+    @Test("markForming flags bars at/after the forming start, leaves earlier bars untouched")
+    func markFormingFlags() {
+        let closed = hourly(2024, 4, 16, 13, open: 1, high: 1, low: 1, close: 1)
+        let atBoundary = hourly(2024, 4, 16, 17, open: 1, high: 1, low: 1, close: 1)
+        let after = hourly(2024, 4, 16, 18, open: 1, high: 1, low: 1, close: 1)
+        let out = BarAggregator.markForming([closed, atBoundary, after],
+                                            formingStartMs: timeMs(nyDate(2024, 4, 16, 17, 0)))
+        #expect(out[0].partial == false)
+        #expect(out[1].partial == true)
+        #expect(out[2].partial == true)
+        // OHLCV pass through unchanged.
+        #expect(out[1].time == atBoundary.time && out[1].close == atBoundary.close)
+    }
+
+    @Test("markForming keeps an already-partial bar partial")
+    func markFormingIdempotent() {
+        let bar = hourly(2024, 4, 16, 17, open: 1, high: 1, low: 1, close: 1, partial: true)
+        let out = BarAggregator.markForming([bar], formingStartMs: bar.time)
+        #expect(out[0].partial == true)
+    }
+
     // MARK: DAILY aggregation
 
     @Test("DAILY bucket spans a full trading day of 24 wall-clock hours")

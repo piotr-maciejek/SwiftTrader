@@ -5,6 +5,7 @@ public enum CodecError: Error, CustomStringConvertible {
     case invalidVarLen(firstByte: UInt8)
     case invalidString
     case unexpectedClassId(Int32)
+    case negativeLength(Int)
 
     public var description: String {
         switch self {
@@ -12,6 +13,7 @@ public enum CodecError: Error, CustomStringConvertible {
         case .invalidVarLen(let b): String(format: "codec: invalid var-length first byte 0x%02x", b)
         case .invalidString: "codec: invalid UTF-8 string"
         case .unexpectedClassId(let id): "codec: unexpected classId \(id)"
+        case .negativeLength(let n): "codec: negative field/byte length \(n)"
         }
     }
 }
@@ -101,6 +103,14 @@ public struct BinaryReader {
     public var remaining: Int { data.count - offset }
 
     private mutating func require(_ n: Int) throws {
+        // Lengths come off the wire as SIGNED Int32 (field lengths, BigDecimal byte
+        // counts, …). A negative n passes the bounds check below (`offset + n` only
+        // shrinks) and then traps in `readBytes` building a backwards Range — a fatal
+        // crash on one malformed frame. Throw instead so the read loop's per-message
+        // decode failure handling skips the frame like every other corruption.
+        if n < 0 {
+            throw CodecError.negativeLength(n)
+        }
         if offset + n > data.count {
             throw CodecError.truncated(needed: n, available: remaining)
         }

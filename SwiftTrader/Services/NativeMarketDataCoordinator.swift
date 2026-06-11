@@ -503,13 +503,17 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         let sourceSpan: Int        // source bars per target bar (sizes the source fetch)
         let periodCode: String
         let bucket: @Sendable ([SwiftTrader.CandleBar], SwiftTrader.CandleBar?) -> [SwiftTrader.CandleBar]
+        /// Start of the bucket containing `now` — bars at/after it are still forming and
+        /// must be (re)flagged partial after aggregation (see `BarAggregator.markForming`).
+        let formingStart: @Sendable (Date) -> Int64
     }
 
     static func aggSpec(for period: String) -> AggSpec? {
         if let target = AggregatedPeriod(period) {
             return AggSpec(
                 sourcePeriod: target.sourcePeriod, sourceSpan: target.sourceSpan, periodCode: target.periodCode,
-                bucket: { src, partial in BarAggregator.aggregate(hourly: src, openPartial: partial, target: target) }
+                bucket: { src, partial in BarAggregator.aggregate(hourly: src, openPartial: partial, target: target) },
+                formingStart: { now in BarAggregator.formingBucketStartMs(target: target, now: now) }
             )
         }
         // WEEKLY is native-only (server mode fetches it from jforex-server). Dukascopy
@@ -522,7 +526,8 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         if period == "WEEKLY" {
             return AggSpec(
                 sourcePeriod: "ONE_HOUR", sourceSpan: 120, periodCode: "WEEKLY",
-                bucket: { src, partial in BarAggregator.aggregateWeekly(src, openPartial: partial) }
+                bucket: { src, partial in BarAggregator.aggregateWeekly(src, openPartial: partial) },
+                formingStart: { now in BarAggregator.weekStartMs(now) }
             )
         }
         let granularityMs: Int64
@@ -536,6 +541,9 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             sourcePeriod: "ONE_MIN", sourceSpan: Int(granularityMs / 60_000), periodCode: period,
             bucket: { src, partial in
                 BarAggregator.aggregateFixedGrid(src, granularityMs: granularityMs, openPartial: partial)
+            },
+            formingStart: { now in
+                BarAggregator.fixedGridBucketStartMs(Int64(now.timeIntervalSince1970 * 1000), granularityMs)
             }
         )
     }
@@ -617,7 +625,14 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         // Aggregate only the recent `neededSource` bars, not the entire (possibly years-deep,
         // prefetched) source cache. Scroll-back fills older buckets via fetchEarlierAggregated.
         let window = merged.count > neededSource ? Array(merged.suffix(neededSource)) : merged
-        let aggregated = spec.bucket(window, partial)
+        // Re-flag the forming bucket partial regardless of how the window was sourced.
+        // Only the fresh-fetch branch can supply `partial`; the warm-rebuild and
+        // covers-window paths aggregate from the cache, which holds completed source
+        // bars only — without this the forming Daily/4H bucket comes out flagged
+        // complete and gets persisted with a frozen close (wrong all weekend after a
+        // Friday mid-session rebuild).
+        let aggregated = BarAggregator.markForming(
+            spec.bucket(window, partial), formingStartMs: spec.formingStart(Date()))
         // Persist ONLY fully-covered buckets. A CLOSED bucket missing a market-open source slot —
         // e.g. only 1 of a 4H bucket's four 1H bars arrived before it closed during a history-feed
         // stall — is INCOMPLETE and must never be cached: the serve path doesn't re-validate a
@@ -661,11 +676,19 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             instrument: instrument, period: source, count: count * spec.sourceSpan, before: before, side: side
         )
         let merged = await cache.merge(fetched, for: sourceKey)
-        let aggregated = spec.bucket(merged, nil)
+        // Same forming-bucket guard as fetchAggregated: scroll-back re-aggregates the
+        // whole merged source, which includes the open bucket — don't persist it.
+        let aggregated = BarAggregator.markForming(
+            spec.bucket(merged, nil), formingStartMs: spec.formingStart(Date()))
         let aggKey = CandleCache.CacheKey(
             instrument: instrument, period: spec.periodCode, source: .aggregated, side: side
         )
-        return await cache.merge(aggregated, for: aggKey)
+        let cachedAgg = await cache.merge(aggregated, for: aggKey)
+        // merge drops the partial forming bucket — re-append it for display.
+        if let last = aggregated.last, last.partial, last.time > (cachedAgg.last?.time ?? 0) {
+            return cachedAgg + [last]
+        }
+        return cachedAgg
     }
 
     /// Pull any bars between the cache's latest and the most recent possible bar (the
@@ -870,7 +893,11 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     ) -> Bool {
         guard sourceStepMs > 0, spanMs > 0 else { return true }
         let bucketEnd = bucketStartMs + spanMs
-        guard bucketEnd <= nowMs else { return true }   // forming — handled by the partial flag
+        // Forming bucket → fail closed. `markForming` flags it partial (so the cache
+        // drops it anyway); withholding it here too means the persist gate no longer
+        // TRUSTS that flag — a forming bucket that slips through unflagged must never
+        // be written as a closed bar.
+        guard bucketEnd <= nowMs else { return false }
         var slot = bucketStartMs
         while slot < bucketEnd {
             let date = Date(timeIntervalSince1970: Double(slot) / 1000)

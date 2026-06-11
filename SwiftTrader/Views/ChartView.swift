@@ -1428,6 +1428,9 @@ struct ChartView: View {
         if order.isMarginCapped && !incognitoMode {
             infoLines.append(("margin limited", Color.orange.opacity(alpha)))
         }
+        if order.isConversionUnavailable {
+            infoLines.append(("no FX rate — size not auto-calculated", Color.red.opacity(alpha)))
+        }
         let lineHeight: CGFloat = 14
         let infoStartY = amountY + 20
         for (i, (text, color)) in infoLines.enumerated() {
