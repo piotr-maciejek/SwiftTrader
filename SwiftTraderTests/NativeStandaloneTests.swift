@@ -582,3 +582,52 @@ struct HistoryPrefetcherTests {
         }
     }
 }
+
+@Suite("InProgressStore")
+struct InProgressStoreTests {
+    private static func snapshot() -> InProgressSnapshot {
+        InProgressSnapshot(
+            oneHour: nil, oneMin: nil, fiveMin: nil, fifteenMin: nil, thirtyMin: nil,
+            fetchedAt: Date()
+        )
+    }
+
+    @Test("clear(instrumentPrefix:) drops every side of one instrument, others untouched")
+    func clearDropsAllSides() async {
+        let store = InProgressStore()
+        for key in ["EURUSD|BID", "EURUSD|ASK", "GBPUSD|BID"] {
+            _ = await store.awaitOrLaunch(key) { Self.snapshot() }
+        }
+        await store.clear(instrumentPrefix: "EURUSD")
+        #expect(await store.freshSnapshot("EURUSD|BID", ttl: 60) == nil)
+        #expect(await store.freshSnapshot("EURUSD|ASK", ttl: 60) == nil)
+        #expect(await store.freshSnapshot("GBPUSD|BID", ttl: 60) != nil)
+    }
+}
+
+@Suite("SL/TP leg spacing")
+struct LegSpacingTests {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    @Test("Second leg waits out the remainder of the rate-limit window")
+    func remainderWhenFastConfirm() {
+        let r = NativeTradingCoordinator.legSpacingRemainder(
+            sinceFirstSend: t0, now: t0.addingTimeInterval(0.3)
+        )
+        #expect(abs(r - 0.9) < 0.0001)
+    }
+
+    @Test("No extra wait once the window has fully elapsed")
+    func zeroAfterWindow() {
+        #expect(NativeTradingCoordinator.legSpacingRemainder(
+            sinceFirstSend: t0, now: t0.addingTimeInterval(1.2)) == 0)
+        #expect(NativeTradingCoordinator.legSpacingRemainder(
+            sinceFirstSend: t0, now: t0.addingTimeInterval(5)) == 0)
+    }
+
+    @Test("Timeout path still ends with zero remainder (4s wait > 1.2s window)")
+    func timeoutPathNeedsNoSleep() {
+        #expect(NativeTradingCoordinator.legSpacingRemainder(
+            sinceFirstSend: t0, now: t0.addingTimeInterval(4.0)) == 0)
+    }
+}
