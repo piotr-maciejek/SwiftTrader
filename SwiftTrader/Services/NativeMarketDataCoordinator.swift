@@ -90,18 +90,21 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                 instruments: Self.defaultInstruments,
                 cache: cache,
                 awaitIdle: { await coalescer.awaitForegroundIdle() },
-                fetchPage: { instrument, period, before, count in
-                    // The background prefetcher warms the BID series only; ask is fetched on demand.
-                    let key = "\(instrument)|\(period)|\(before ?? -1)|\(count)"
+                fetchPage: { instrument, period, before, count, side in
+                    // Same key shape as fetchRawCandles — side included so a same-window
+                    // BID/ASK pair never coalesces into one underlying fetch.
+                    let key = "\(instrument)|\(period)|\(before ?? -1)|\(count)|\(side.rawValue)"
                     let bars = (try? await coalescer.run(key: key, foreground: false) {
                         NativeMarketDataCoordinator.stripWeekendFillers(
-                            try await rawFetch(instrument, period, count, before, .bid)
+                            try await rawFetch(instrument, period, count, before, side)
                         )
                     }) ?? []
                     if !bars.isEmpty {
                         _ = await cache.merge(
                             bars,
-                            for: CandleCache.CacheKey(instrument: instrument, period: period, source: .server)
+                            for: CandleCache.CacheKey(
+                                instrument: instrument, period: period, source: .server, side: side
+                            )
                         )
                     }
                     return bars
@@ -809,7 +812,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
 
     /// Bridges a raw history request to `DukascopySession.fetchHistoryDetailed`: computes the
     /// `[start, end]` window and maps `DukascopyClient.CandleBar` → `SwiftTrader.CandleBar`.
-    /// History is fetched on the **Bid** side to match server mode. The newest bar is
+    /// History is fetched on the requested side (default Bid). The newest bar is
     /// flagged `partial` only when its bucket hasn't closed (the live-forming candle);
     /// scroll-back windows (`before` set) never trip it. A non-empty `missingWindows`
     /// on the result is logged as a warning — the gap-detection / recovery pass picks
@@ -1070,7 +1073,7 @@ private actor HistoryCoalescer {
 /// idle before each, so user-driven loads always win the single socket. Work is finite —
 /// each series stops once it reaches its target depth or the datafeed runs out — so a
 /// prefetcher left behind by a reconnect drains quickly instead of looping forever.
-private actor HistoryPrefetcher {
+actor HistoryPrefetcher {
     /// A basic period to warm and how deep. 1H feeds 1H/4H/Daily; 1m feeds 1m/3m/5m/15m/30m.
     private struct Series {
         let period: String
@@ -1089,7 +1092,8 @@ private actor HistoryPrefetcher {
     private let instruments: [String]
     private let cache: CandleCache
     private let awaitIdle: @Sendable () async -> Void
-    private let fetchPage: @Sendable (_ instrument: String, _ period: String, _ before: Int64?, _ count: Int) async -> [SwiftTrader.CandleBar]
+    private let fetchPage: @Sendable (_ instrument: String, _ period: String, _ before: Int64?, _ count: Int, _ side: ChartSide) async -> [SwiftTrader.CandleBar]
+    private let initialDelay: Duration
 
     private var started = false
     private var task: Task<Void, Never>?
@@ -1098,12 +1102,14 @@ private actor HistoryPrefetcher {
         instruments: [String],
         cache: CandleCache,
         awaitIdle: @escaping @Sendable () async -> Void,
-        fetchPage: @escaping @Sendable (_ instrument: String, _ period: String, _ before: Int64?, _ count: Int) async -> [SwiftTrader.CandleBar]
+        fetchPage: @escaping @Sendable (_ instrument: String, _ period: String, _ before: Int64?, _ count: Int, _ side: ChartSide) async -> [SwiftTrader.CandleBar],
+        initialDelay: Duration = .seconds(5)
     ) {
         self.instruments = instruments
         self.cache = cache
         self.awaitIdle = awaitIdle
         self.fetchPage = fetchPage
+        self.initialDelay = initialDelay
     }
 
     /// Launch the warm-up loop once. Safe to call on every fetch.
@@ -1121,12 +1127,16 @@ private actor HistoryPrefetcher {
 
     private func runLoop() async {
         // Let the initial visible grid load before we start competing for idle windows.
-        try? await Task.sleep(for: .seconds(5))
+        try? await Task.sleep(for: initialDelay)
         nativeLog.info("prefetch: starting background warm-up for \(self.instruments.count) pairs")
-        for series in Self.plan {
-            for instrument in instruments {
-                if Task.isCancelled { return }
-                await deepen(instrument: instrument, series: series)
+        // BID first (what every chart opens on), then the full ASK mirror so a side
+        // toggle paints from cache instead of triggering a cold deep fetch.
+        for side in [ChartSide.bid, .ask] {
+            for series in Self.plan {
+                for instrument in instruments {
+                    if Task.isCancelled { return }
+                    await deepen(instrument: instrument, series: series, side: side)
+                }
             }
         }
         nativeLog.info("prefetch: warm-up complete")
@@ -1140,12 +1150,12 @@ private actor HistoryPrefetcher {
         await gapScan()
     }
 
-    /// Scan every (instrument, basic period) for missing-bar runs and refill them.
+    /// Scan every (instrument, basic period, side) for missing-bar runs and refill them.
     /// Same pacing as the depth pass: one request at a time, gated on foreground idle
     /// so user-driven loads always win. Logs at every boundary so the run is traceable
     /// in `log stream --predicate 'subsystem == "com.swifttrader" AND category == "native"'`.
     private func gapScan() async {
-        nativeLog.info("gap-scan: beginning sweep of \(self.instruments.count) instruments × [ONE_HOUR, ONE_MIN]")
+        nativeLog.info("gap-scan: beginning sweep of \(self.instruments.count) instruments × [ONE_HOUR, ONE_MIN] × [BID, ASK]")
         let t0 = Date()
         var seriesScanned = 0
         var seriesWithGaps = 0
@@ -1153,20 +1163,21 @@ private actor HistoryPrefetcher {
         var totalGapsFilled = 0
         var totalBarsPulled = 0
 
-        for period in Self.gapScanPeriods {
+        for side in [ChartSide.bid, .ask] {
+          for period in Self.gapScanPeriods {
             for instrument in instruments {
                 if Task.isCancelled {
                     nativeLog.info("gap-scan: cancelled mid-sweep — \(totalGapsFilled)/\(totalGapsFound) gaps filled so far")
                     return
                 }
                 seriesScanned += 1
-                let gaps = await cache.findGaps(instrument: instrument, period: period)
+                let gaps = await cache.findGaps(instrument: instrument, period: period, side: side)
                 if gaps.isEmpty { continue }
                 seriesWithGaps += 1
                 totalGapsFound += gaps.count
                 let missingTotal = gaps.reduce(0) { $0 + $1.missingBars }
                 nativeLog.info(
-                    "gap-scan \(instrument, privacy: .public) \(period, privacy: .public): found \(gaps.count) gap(s) totalling \(missingTotal) bar(s)"
+                    "gap-scan \(instrument, privacy: .public) \(period, privacy: .public) \(side.rawValue, privacy: .public): found \(gaps.count) gap(s) totalling \(missingTotal) bar(s)"
                 )
 
                 // Cap per-series work — a runaway cache (e.g. years of 1m with a hole every
@@ -1181,28 +1192,29 @@ private actor HistoryPrefetcher {
                     await awaitIdle()
                     if Task.isCancelled { return }
                     nativeLog.debug(
-                        "gap-fill \(instrument, privacy: .public) \(period, privacy: .public) [\(idx + 1)/\(toFix.count)]: window [\(gap.fromMs), \(gap.toMs)] = \(gap.missingBars) bar(s)"
+                        "gap-fill \(instrument, privacy: .public) \(period, privacy: .public) \(side.rawValue, privacy: .public) [\(idx + 1)/\(toFix.count)]: window [\(gap.fromMs), \(gap.toMs)] = \(gap.missingBars) bar(s)"
                     )
                     let cadenceMs = Self.cadenceMs(period)
                     // Anchor the fetch at the right edge of the gap; count = missing + slop
                     // so the underlying server window covers the full gap.
                     let beforeMs = gap.toMs + cadenceMs
                     let count = gap.missingBars + 2
-                    let bars = await fetchPage(instrument, period, beforeMs, count)
+                    let bars = await fetchPage(instrument, period, beforeMs, count, side)
                     if bars.isEmpty {
                         nativeLog.warning(
-                            "gap-fill \(instrument, privacy: .public) \(period, privacy: .public) [\(gap.fromMs), \(gap.toMs)]: fetch returned 0 bars (CDN may still be missing this chunk)"
+                            "gap-fill \(instrument, privacy: .public) \(period, privacy: .public) \(side.rawValue, privacy: .public) [\(gap.fromMs), \(gap.toMs)]: fetch returned 0 bars (CDN may still be missing this chunk)"
                         )
                     } else {
                         totalGapsFilled += 1
                         totalBarsPulled += bars.count
                         nativeLog.info(
-                            "gap-fill \(instrument, privacy: .public) \(period, privacy: .public) [\(gap.fromMs), \(gap.toMs)]: pulled \(bars.count) bars"
+                            "gap-fill \(instrument, privacy: .public) \(period, privacy: .public) \(side.rawValue, privacy: .public) [\(gap.fromMs), \(gap.toMs)]: pulled \(bars.count) bars"
                         )
                     }
                     try? await Task.sleep(for: .milliseconds(250))
                 }
             }
+          }
         }
 
         let elapsed = Int(Date().timeIntervalSince(t0))
@@ -1213,8 +1225,10 @@ private actor HistoryPrefetcher {
 
     /// Page `series.period` for one instrument backward until it reaches the target depth
     /// or the datafeed has nothing older. Each page waits for foreground idle first.
-    private func deepen(instrument: String, series: Series) async {
-        let key = CandleCache.CacheKey(instrument: instrument, period: series.period, source: .server)
+    private func deepen(instrument: String, series: Series, side: ChartSide) async {
+        let key = CandleCache.CacheKey(
+            instrument: instrument, period: series.period, source: .server, side: side
+        )
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         let targetStartMs = nowMs - series.targetSpanSeconds * 1000
         var pages = 0
@@ -1223,7 +1237,7 @@ private actor HistoryPrefetcher {
             if Task.isCancelled { return }
             let earliest = await cache.earliestTime(for: key)
             if let earliest, earliest <= targetStartMs { return }   // deep enough
-            let page = await fetchPage(instrument, series.period, earliest, series.pageCount)
+            let page = await fetchPage(instrument, series.period, earliest, series.pageCount, side)
             pages += 1
             if page.isEmpty { return }   // hit the start of available history
             // Pace so a freshly-arrived foreground load always gets the next idle window.
