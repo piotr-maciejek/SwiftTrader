@@ -167,6 +167,29 @@ enum BarAggregator {
         }
     }
 
+    /// Start (epoch ms) of the bucket containing `now` for a derived target — any
+    /// aggregated bar at/after this is still FORMING. Used to force `partial` on the
+    /// open bucket when the source series alone can't reveal it (a cache rebuild sees
+    /// only completed source bars, so the forming bucket would aggregate as complete
+    /// and get persisted with a frozen close).
+    static func formingBucketStartMs(target: AggregatedPeriod, now: Date) -> Int64 {
+        if target.isSessionAligned {
+            let start = NYTradingCalendar.bucketStart(at: now, period: target)
+            return Int64((start.timeIntervalSince1970 * 1000).rounded())
+        }
+        return fixedGridBucketStartMs(Int64(now.timeIntervalSince1970 * 1000), 180_000)
+    }
+
+    /// Re-flag every bar at/after `formingStartMs` as `partial` (already-partial bars
+    /// pass through). Bars before the forming bucket are returned untouched.
+    static func markForming(_ bars: [CandleBar], formingStartMs: Int64) -> [CandleBar] {
+        bars.map { bar in
+            guard bar.time >= formingStartMs, !bar.partial else { return bar }
+            return CandleBar(time: bar.time, open: bar.open, high: bar.high, low: bar.low,
+                             close: bar.close, volume: bar.volume, partial: true)
+        }
+    }
+
     /// Bucket-start epoch ms for `bar` under `target`. Session-aligned periods
     /// (4H/Daily) defer to `NYTradingCalendar`; fixed-grid periods (3m) use a
     /// pure epoch grid that needs no timezone/DST/session logic.
