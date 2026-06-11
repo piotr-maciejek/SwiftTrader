@@ -947,8 +947,16 @@ final class ChartViewModel {
             }
             // For the aggregated derived path the coordinator already writes into the
             // `.aggregated` cache itself; the outer write would target the wrong key.
+            // The cache key must be the GUARD-time identity, not re-read inside the Task:
+            // an instrument/period switch between this synchronous code and the Task body
+            // running would file this bar under the new chart's key — poisoning another
+            // pair's disk cache with a wildly-off-price bar that survives restarts.
             if !isDerivedAggregatedPeriod {
-                Task { await coordinator.cacheBar(bar, instrument: currentInstrument, period: currentPeriod, rebucketing: false, side: currentSide) }
+                let side = currentSide
+                Task {
+                    await coordinator.cacheBar(bar, instrument: expectedInstrument,
+                                               period: expectedPeriod, rebucketing: false, side: side)
+                }
             }
         }
         updateATRFromBar(bar)
