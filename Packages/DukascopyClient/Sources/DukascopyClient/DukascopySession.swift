@@ -88,6 +88,10 @@ public actor DukascopySession {
 
     private var pendingHistory: [String: PendingHistory] = [:]
     private var pendingClosed: [String: PendingClosed] = [:]
+    /// In-flight order operations awaiting a broker ack, keyed by requestId. Resolved by
+    /// the matchers in `dispatch` (explicit rejection or positive group/order evidence) or
+    /// by the ack timeout (→ `.unresolved`, treated as success — never induce a re-submit).
+    private var pendingOrderAcks: [String: PendingOrderAck] = [:]
     private var latestAccount: AccountInfo?
     private var accountWaiters: [UUID: CheckedContinuation<AccountInfo, Error>] = [:]
     // Multicast: each consumer of `tickStream()` gets its own continuation, all yielded to
@@ -1092,8 +1096,10 @@ public actor DukascopySession {
     }
 
     /// Submit a MARKET order by sending an `OrderGroupMessage` (the desktop client's
-    /// path). Fire-and-forget: the server streams the resulting order/position state
-    /// back via `orderEvents()`. Returns the `requestId` so the caller can correlate.
+    /// path). The resulting order/position state streams back via `orderEvents()`;
+    /// after sending, this waits briefly for a broker ack and throws
+    /// `SessionError.orderRejected` on an explicit rejection (silence still returns
+    /// success). Returns the `requestId` so the caller can correlate.
     /// `priceClient` is the current market price the user is acting on.
     @discardableResult
     public func submitMarketOrder(
@@ -1115,11 +1121,16 @@ public actor DukascopySession {
             requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
         )
         try await transport.sendFrame(frame)
+        try await checkOrderAck(
+            requestId: reqId,
+            meta: PendingOrderAckMeta(instrument: instrument, label: label,
+                                      orderGroupId: nil, submittedAt: Date()),
+            op: "market order")
         return reqId
     }
 
-    /// Submit a pending LIMIT/STOP entry order at `triggerPrice`. Fire-and-forget;
-    /// the resulting pending order arrives via `orderEvents()`.
+    /// Submit a pending LIMIT/STOP entry order at `triggerPrice`. The resulting pending
+    /// order arrives via `orderEvents()`; an explicit broker rejection throws.
     @discardableResult
     public func submitPendingOrder(
         instrument: String, side: String, kind: PendingKind,
@@ -1140,12 +1151,17 @@ public actor DukascopySession {
             requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
         )
         try await transport.sendFrame(frame)
+        try await checkOrderAck(
+            requestId: reqId,
+            meta: PendingOrderAckMeta(instrument: instrument, label: label,
+                                      orderGroupId: nil, submittedAt: Date()),
+            op: "pending order")
         return reqId
     }
 
     /// Close an entire position group by its `orderGroupId`. Sends the position group
-    /// with a nested CLOSE order at the current market price. Fire-and-forget; the
-    /// resulting state change arrives via `orderEvents()`.
+    /// with a nested CLOSE order at the current market price. The resulting state
+    /// change arrives via `orderEvents()`; an explicit broker rejection throws.
     @discardableResult
     public func closePosition(positionId: String) async throws -> String {
         guard state == .connected, let transport else { throw SessionError.notConnected }
@@ -1168,6 +1184,11 @@ public actor DukascopySession {
             requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
         )
         try await transport.sendFrame(frame)
+        try await checkOrderAck(
+            requestId: reqId,
+            meta: PendingOrderAckMeta(instrument: instrument, label: nil,
+                                      orderGroupId: positionId, submittedAt: Date()),
+            op: "close position")
         return reqId
     }
 
@@ -1176,8 +1197,13 @@ public actor DukascopySession {
     public func cancelOrder(orderId: String) async throws -> String {
         guard state == .connected, let transport else { throw SessionError.notConnected }
         var found: OrderMsg?
+        var owningGroup: OrderGroup?
         for g in positions.values {
-            if let o = g.orders.first(where: { $0.orderId == orderId }) { found = o; break }
+            if let o = g.orders.first(where: { $0.orderId == orderId }) {
+                found = o
+                owningGroup = g
+                break
+            }
         }
         guard let order = found else { throw SessionError.timedOut("cancel: unknown order \(orderId)") }
         let reqId = UUID().uuidString
@@ -1186,6 +1212,12 @@ public actor DukascopySession {
             requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
         )
         try await transport.sendFrame(frame)
+        try await checkOrderAck(
+            requestId: reqId,
+            meta: PendingOrderAckMeta(instrument: owningGroup?.instrument, label: nil,
+                                      orderGroupId: order.orderGroupId ?? owningGroup?.orderGroupId,
+                                      submittedAt: Date()),
+            op: "cancel order")
         return reqId
     }
 
@@ -1218,6 +1250,11 @@ public actor DukascopySession {
             requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000)
         )
         try await transport.sendFrame(frame)
+        try await checkOrderAck(
+            requestId: reqId,
+            meta: PendingOrderAckMeta(instrument: instrument, label: nil,
+                                      orderGroupId: orderGroupId, submittedAt: Date()),
+            op: "modify SL/TP")
         return reqId
     }
 
@@ -1252,6 +1289,11 @@ public actor DukascopySession {
             priceClient: market, userId: latestAccount?.userId, sessionId: authSessionId,
             requestId: reqId, timestamp: Int64(Date().timeIntervalSince1970 * 1000))
         try await transport.sendFrame(frame)
+        try await checkOrderAck(
+            requestId: reqId,
+            meta: PendingOrderAckMeta(instrument: instrument, label: nil,
+                                      orderGroupId: orderGroupId, submittedAt: Date()),
+            op: "modify pending entry")
         return reqId
     }
 
@@ -1285,6 +1327,144 @@ public actor DukascopySession {
     private func handleOrderResponse(_ r: ExtApiOrderResponse) {
         log.info("order response: state=\(r.state ?? "-", privacy: .public) orderId=\(r.orderId ?? "-", privacy: .public) positionId=\(r.positionId ?? "-", privacy: .public) reqId=\(r.requestId ?? "-", privacy: .public)")
         for (_, c) in orderEventStreams { c.yield(.response(r)) }
+        if let (key, outcome) = Self.ackMatch(response: r, pending: pendingOrderAcks.mapValues(\.meta)) {
+            resolveOrderAck(key, outcome)
+        }
+    }
+
+    // MARK: - Order acks
+
+    /// Outcome of waiting for a broker ack on an order operation.
+    enum OrderAckOutcome: Sendable, Equatable {
+        case accepted                                  // positive evidence (group/order update)
+        case rejected(state: String, reason: String?)  // explicit broker rejection → throw
+        case unresolved                                // timeout / teardown → status quo: success
+    }
+
+    /// What an in-flight order op looks like to the matchers. `orderGroupId` is set for
+    /// ops on an existing group (close/cancel/modify); submits don't know theirs yet.
+    struct PendingOrderAckMeta: Sendable {
+        let instrument: String?    // slashed, as sent
+        let label: String?
+        let orderGroupId: String?
+        let submittedAt: Date
+    }
+
+    private struct PendingOrderAck {
+        let meta: PendingOrderAckMeta
+        var continuation: CheckedContinuation<OrderAckOutcome, Never>?
+    }
+
+    /// Register the op and suspend until an inbound event resolves it or the timeout
+    /// fires. Never throws and never resolves `.rejected` without explicit broker evidence:
+    /// silence is `.unresolved` (success) so a slow ack can't goad the caller into a
+    /// double submit.
+    private func awaitOrderAck(
+        requestId: String, meta: PendingOrderAckMeta, timeout: TimeInterval = 3
+    ) async -> OrderAckOutcome {
+        await withCheckedContinuation { (cont: CheckedContinuation<OrderAckOutcome, Never>) in
+            pendingOrderAcks[requestId] = PendingOrderAck(meta: meta, continuation: cont)
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(timeout))
+                await self?.resolveOrderAck(requestId, .unresolved)
+            }
+        }
+    }
+
+    private func resolveOrderAck(_ key: String, _ outcome: OrderAckOutcome) {
+        guard var pending = pendingOrderAcks.removeValue(forKey: key) else { return }
+        pending.continuation?.resume(returning: outcome)
+        pending.continuation = nil
+    }
+
+    /// Throw on an explicit rejection; `.accepted`/`.unresolved` both return normally.
+    private func checkOrderAck(requestId: String, meta: PendingOrderAckMeta, op: String) async throws {
+        let outcome = await awaitOrderAck(requestId: requestId, meta: meta)
+        switch outcome {
+        case .rejected(let state, let reason):
+            log.error("\(op, privacy: .public) rejected: state=\(state, privacy: .public) reason=\(reason ?? "-", privacy: .public)")
+            throw SessionError.orderRejected(state, reason)
+        case .unresolved:
+            log.notice("\(op, privacy: .public) ack unresolved within timeout (treated as accepted)")
+        case .accepted:
+            break
+        }
+    }
+
+    private static let rejectedOrderStates: Set<String> = ["REJECTED", "ERROR", "REVOKED"]
+
+    /// Match an `ExtApiOrderResponse` against in-flight ops: exact requestId echo first;
+    /// a rejection without one falls back to the newest op sharing the label (or
+    /// instrument) — a rejection usually follows the most recent send.
+    static func ackMatch(
+        response: ExtApiOrderResponse, pending: [String: PendingOrderAckMeta]
+    ) -> (key: String, outcome: OrderAckOutcome)? {
+        let outcome: OrderAckOutcome = response.isRejected
+            ? .rejected(state: response.state ?? "REJECTED", reason: response.notes ?? response.comments)
+            : .accepted
+        if let rid = response.requestId, pending[rid] != nil {
+            return (rid, outcome)
+        }
+        guard response.isRejected else { return nil }
+        let candidates = pending.filter { _, meta in
+            if let label = response.label, let metaLabel = meta.label { return label == metaLabel }
+            if let inst = response.instrument, let metaInst = meta.instrument { return inst == metaInst }
+            return false
+        }
+        guard let newest = candidates.max(by: { $0.value.submittedAt < $1.value.submittedAt }) else { return nil }
+        return (newest.key, outcome)
+    }
+
+    /// Match a single-order update: a rejected state resolves the op on its group
+    /// (close/cancel/modify) or, for submits, the newest op on the same instrument.
+    /// Non-rejected order updates are not treated as acks (too ambiguous).
+    static func ackMatch(
+        order: OrderMsg, pending: [String: PendingOrderAckMeta]
+    ) -> (key: String, outcome: OrderAckOutcome)? {
+        guard let state = order.state, rejectedOrderStates.contains(state) else { return nil }
+        let outcome = OrderAckOutcome.rejected(state: state, reason: nil)
+        if let gid = order.orderGroupId,
+           let hit = pending.first(where: { $0.value.orderGroupId == gid }) {
+            return (hit.key, outcome)
+        }
+        let candidates = pending.filter { _, meta in
+            meta.orderGroupId == nil && meta.instrument != nil && meta.instrument == order.instrument
+        }
+        guard let newest = candidates.max(by: { $0.value.submittedAt < $1.value.submittedAt }) else { return nil }
+        return (newest.key, outcome)
+    }
+
+    /// Match a group update: a nested rejected order resolves `.rejected`; otherwise the
+    /// update is positive evidence — it confirms ops targeting that group (close/cancel/
+    /// modify), and an OPEN group confirms the oldest in-flight submit on its instrument
+    /// (FIFO, matching broker processing order).
+    static func ackMatch(
+        group: OrderGroup, pending: [String: PendingOrderAckMeta]
+    ) -> (key: String, outcome: OrderAckOutcome)? {
+        if let bad = group.orders.first(where: { rejectedOrderStates.contains($0.state ?? "") }) {
+            let rejected = OrderAckOutcome.rejected(state: bad.state ?? "REJECTED", reason: nil)
+            if let gid = group.orderGroupId,
+               let hit = pending.first(where: { $0.value.orderGroupId == gid }) {
+                return (hit.key, rejected)
+            }
+            let candidates = pending.filter { _, meta in
+                meta.orderGroupId == nil && meta.instrument != nil && meta.instrument == group.instrument
+            }
+            if let newest = candidates.max(by: { $0.value.submittedAt < $1.value.submittedAt }) {
+                return (newest.key, rejected)
+            }
+            return nil
+        }
+        if let gid = group.orderGroupId,
+           let hit = pending.first(where: { $0.value.orderGroupId == gid }) {
+            return (hit.key, .accepted)
+        }
+        guard group.isOpen else { return nil }
+        let candidates = pending.filter { _, meta in
+            meta.orderGroupId == nil && meta.instrument != nil && meta.instrument == group.instrument
+        }
+        guard let oldest = candidates.min(by: { $0.value.submittedAt < $1.value.submittedAt }) else { return nil }
+        return (oldest.key, .accepted)
     }
 
     /// Fail every in-flight history request and account waiter — called on teardown
@@ -1301,6 +1481,13 @@ public actor DukascopySession {
         let waiters = accountWaiters
         accountWaiters.removeAll()
         for (_, cont) in waiters { cont.resume(throwing: error) }
+
+        // Order acks resolve `.unresolved`, NOT an error: the frame may have been
+        // delivered, so this must read as "outcome unknown" (the snapshot stream
+        // reconciles after reconnect) — an error here could trigger a double submit.
+        let acks = pendingOrderAcks
+        pendingOrderAcks.removeAll()
+        for (_, var p) in acks { p.continuation?.resume(returning: .unresolved); p.continuation = nil }
     }
 
     // MARK: - Reader loop
@@ -1388,6 +1575,10 @@ public actor DukascopySession {
             if let reqId = e.requestId, pendingClosed[reqId] != nil {
                 failClosed(reqId, with: e)
             }
+            // A server error echoing an order op's requestId is that op's rejection.
+            if let reqId = e.requestId, pendingOrderAcks[reqId] != nil {
+                resolveOrderAck(reqId, .rejected(state: "ERROR", reason: e.reason))
+            }
             if e.fatal == true {
                 await markFailed("server error: \(e.reason ?? "unknown")")
             }
@@ -1414,8 +1605,14 @@ public actor DukascopySession {
                 if g.isOpen { positions[id] = g } else { positions.removeValue(forKey: id) }
             }
             for (_, c) in orderEventStreams { c.yield(.group(g)) }
+            if let (key, outcome) = Self.ackMatch(group: g, pending: pendingOrderAcks.mapValues(\.meta)) {
+                resolveOrderAck(key, outcome)
+            }
         case .order(let o):
             for (_, c) in orderEventStreams { c.yield(.order(o)) }
+            if let (key, outcome) = Self.ackMatch(order: o, pending: pendingOrderAcks.mapValues(\.meta)) {
+                resolveOrderAck(key, outcome)
+            }
         case .orderResponse(let r):
             handleOrderResponse(r)
         case .calendarEvent(let e):

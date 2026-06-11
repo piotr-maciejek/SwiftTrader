@@ -24,6 +24,7 @@ final class TradingViewModel {
     private var coordinator: any TradingCoordinating
     private var wsTask: Task<Void, Never>?
     private var pendingWsTask: Task<Void, Never>?
+    private var rejectionTask: Task<Void, Never>?
 
     /// Submit-time captures awaiting the position's first appearance in the snapshot stream.
     private var pendingCaptures: [PendingCapture] = []
@@ -49,6 +50,7 @@ final class TradingViewModel {
     func start() {
         connectWebSocket()
         connectPendingOrdersWebSocket()
+        listenForOrderRejections()
     }
 
     func stop() {
@@ -56,6 +58,8 @@ final class TradingViewModel {
         wsTask = nil
         pendingWsTask?.cancel()
         pendingWsTask = nil
+        rejectionTask?.cancel()
+        rejectionTask = nil
         isConnected = false
         // A reconnect / account switch invalidates the binding state: positions re-seed and any
         // unmatched captures belong to the old session.
@@ -430,6 +434,18 @@ final class TradingViewModel {
             order.isMarginCapped = result.isMarginCapped
         }
         visualOrders[instrument] = order
+    }
+
+    /// Surface broker rejections that arrive after an order call already returned
+    /// (in-call rejections throw from the coordinator and land in `orderError` there).
+    private func listenForOrderRejections() {
+        rejectionTask?.cancel()
+        rejectionTask = Task {
+            for await message in coordinator.orderRejections() {
+                if Task.isCancelled { break }
+                orderError = message
+            }
+        }
     }
 
     private func connectWebSocket() {

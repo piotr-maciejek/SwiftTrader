@@ -19,6 +19,10 @@ protocol TradingCoordinating: Sendable {
     /// Make a quote→account-currency conversion rate available (subscribe the cross pair).
     /// Standalone-only; the default is a no-op.
     func ensureConversionRate(quoteCurrency: String, accountCurrency: String) async
+    /// Human-readable broker rejection messages that arrive AFTER an order call returned
+    /// (late/unsolicited rejections). In-call rejections throw from the op instead.
+    /// Standalone-only; the default stream finishes immediately.
+    func orderRejections() -> AsyncStream<String>
 }
 
 extension TradingCoordinating {
@@ -28,6 +32,11 @@ extension TradingCoordinating {
     /// Default no-op: only standalone mode can subscribe the cross pair that supplies a
     /// quote→account conversion rate for position sizing (server mode sends no rates).
     func ensureConversionRate(quoteCurrency: String, accountCurrency: String) async {}
+
+    /// Default: no late-rejection feed (server mode / test fakes).
+    func orderRejections() -> AsyncStream<String> {
+        AsyncStream { $0.finish() }
+    }
 
     /// Default: entry-trigger amend is standalone-only (server mode / test fakes don't support it).
     func modifyPendingEntry(label: String, newTriggerPrice: Double) async throws {

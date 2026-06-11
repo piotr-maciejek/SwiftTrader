@@ -34,6 +34,8 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
     var pendingOrdersContinuation: AsyncThrowingStream<PendingOrdersSnapshot, Error>.Continuation?
     /// Captured on the first call to streamSnapshots so tests can push trading snapshots.
     var snapshotContinuation: AsyncThrowingStream<TradingSnapshot, Error>.Continuation?
+    /// Captured on the first call to orderRejections so tests can push broker rejections.
+    var rejectionContinuation: AsyncStream<String>.Continuation?
 
     func submitOrder(instrument: String, direction: String, amount: Double,
                      stopLoss: Double, takeProfit: Double,
@@ -65,6 +67,13 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
     func streamPendingOrders() -> AsyncThrowingStream<PendingOrdersSnapshot, Error> {
         AsyncThrowingStream { continuation in
             self.pendingOrdersContinuation = continuation
+            continuation.onTermination = { _ in }
+        }
+    }
+
+    func orderRejections() -> AsyncStream<String> {
+        AsyncStream { continuation in
+            self.rejectionContinuation = continuation
             continuation.onTermination = { _ in }
         }
     }
@@ -306,6 +315,33 @@ struct CurrencyAwareSizingTests {
             entryPrice: 1.1000, stopLoss: sl, leverage: 30,
             spread: 0, quoteToAccountRate: 1)
         #expect(order.amount == expected.lots)
+        vm.stop()
+    }
+}
+
+@Suite("Order Rejection Stream")
+@MainActor
+struct OrderRejectionStreamTests {
+
+    @Test("A late broker rejection surfaces as orderError")
+    func lateRejectionSetsOrderError() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        vm.start()
+
+        for _ in 0..<50 {
+            if fake.rejectionContinuation != nil { break }
+            await Task.yield()
+        }
+        #expect(fake.rejectionContinuation != nil)
+
+        fake.rejectionContinuation?.yield("Order rejected (REJECTED): insufficient margin — EUR/USD")
+
+        for _ in 0..<50 {
+            if vm.orderError != nil { break }
+            await Task.yield()
+        }
+        #expect(vm.orderError == "Order rejected (REJECTED): insufficient margin — EUR/USD")
         vm.stop()
     }
 }
