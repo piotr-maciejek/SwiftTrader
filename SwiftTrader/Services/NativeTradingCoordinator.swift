@@ -367,6 +367,16 @@ actor NativeTradingCoordinator: TradingCoordinating {
         emitPending()
     }
 
+    /// Subscribe the cross pair needed to convert `quoteCurrency` into `accountCurrency`
+    /// so a conversion rate starts streaming for position sizing. Both orderings are
+    /// requested (only the one Dukascopy actually lists produces ticks; the other is
+    /// ignored upstream, which is harmless). No-op when the currencies already match.
+    func ensureConversionRate(quoteCurrency: String, accountCurrency: String) async {
+        guard let session, quoteCurrency != accountCurrency else { return }
+        let pairs: Set<String> = ["\(quoteCurrency)/\(accountCurrency)", "\(accountCurrency)/\(quoteCurrency)"]
+        try? await session.ensureSubscribedQuotes(pairs)
+    }
+
     /// Latest live (bid, ask) reconstructed from the per-tick mid + spread (mid = (bid+ask)/2,
     /// spread = ask−bid, so bid = mid − spread/2, ask = mid + spread/2). Updated on EVERY tick
     /// (unlike the throttled snapshot), so it's the freshest price at the moment of an order press.
@@ -425,7 +435,9 @@ actor NativeTradingCoordinator: TradingCoordinating {
         // broadcasts ask−bid, not pips. The visual-order R:R and risk-sizing formulas add
         // the spread to price-unit distances, so publishing pips here made the spread
         // ~10,000× too large and collapsed R:R to 0 (and skewed position sizing).
-        return TradingSnapshot(positions: positions, account: acct, spreads: spreads)
+        // `rates` rides along so position sizing can convert quote-currency risk into
+        // the account currency (server mode sends no rates and sizing degrades safely).
+        return TradingSnapshot(positions: positions, account: acct, spreads: spreads, rates: rates)
     }
 
     private func buildPending() -> [PendingOrder] {

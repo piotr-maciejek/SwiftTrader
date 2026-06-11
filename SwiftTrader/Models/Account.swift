@@ -40,4 +40,16 @@ struct TradingSnapshot: Codable {
     let positions: [Position]
     let account: Account
     let spreads: [String: Double]?
+    /// Mid prices for the session's subscribed instruments (slashless keys), used to
+    /// convert quote-currency amounts to the account currency for position sizing.
+    /// nil in server mode, which doesn't transmit rates.
+    let rates: [String: Double]?
+
+    init(positions: [Position], account: Account, spreads: [String: Double]?,
+         rates: [String: Double]? = nil) {
+        self.positions = positions
+        self.account = account
+        self.spreads = spreads
+        self.rates = rates
+    }
 }

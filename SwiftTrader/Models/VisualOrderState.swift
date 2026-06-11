@@ -11,6 +11,9 @@ struct VisualOrderState: Equatable {
     var isAmountOverridden: Bool = false
     var isMarginCapped: Bool = false
     var isEntryOverridden: Bool = false  // true once user drags the entry line off market
+    /// True when no quote→account-currency rate is streaming, so the amount was NOT
+    /// auto-sized (it keeps the prior/manual value). Drives a warning badge.
+    var isConversionUnavailable: Bool = false
 
     var riskPips: Double {
         abs(entryPrice - stopLoss) * TradingDayATR.pipFactor(for: instrument)

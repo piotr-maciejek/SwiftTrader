@@ -8,6 +8,10 @@ final class TradingViewModel {
     var pendingOrders: [PendingOrder] = []
     var account: Account?
     var spreads: [String: Double] = [:]
+    /// Mid prices from the trading feed (slashless instrument → mid), used to convert
+    /// quote-currency risk into the account currency for position sizing. Empty in
+    /// server mode — sizing then refuses to auto-size cross-currency pairs.
+    private(set) var rates: [String: Double] = [:]
     var isConnected = false
     var isSubmitting = false
     var orderError: String?
@@ -109,14 +113,27 @@ final class TradingViewModel {
 
         var initialAmount = amount
         var marginCapped = false
+        var conversionUnavailable = false
         if let equity = account?.equity, let freeMargin = account?.freeMargin {
             let sizing = PositionSizing.calculate(
                 equity: equity, freeMargin: freeMargin, riskFraction: 0.005,
                 entryPrice: currentPrice, stopLoss: sl,
                 leverage: account?.leverage ?? 30,
-                spread: spreads[instrument] ?? 0)
-            initialAmount = sizing.lots
-            marginCapped = sizing.isMarginCapped
+                spread: spreads[instrument] ?? 0,
+                quoteToAccountRate: quoteToAccountRate(for: instrument))
+            conversionUnavailable = sizing.conversionUnavailable
+            if !sizing.conversionUnavailable {
+                initialAmount = sizing.lots
+                marginCapped = sizing.isMarginCapped
+            }
+        }
+        // Missing cross rate: ask the coordinator to start streaming one; the per-frame
+        // live recalc (visualOrderWithLivePrice) picks it up as soon as a tick lands.
+        if conversionUnavailable, let acct = account?.currency {
+            let quoteCcy = String(instrument.suffix(3)).uppercased()
+            let coordinator = self.coordinator
+            Task { await coordinator.ensureConversionRate(quoteCurrency: quoteCcy,
+                                                          accountCurrency: acct.uppercased()) }
         }
 
         visualOrders[instrument] = VisualOrderState(
@@ -131,7 +148,8 @@ final class TradingViewModel {
             endBarIndex: nextIndex + 10,
             isAmountOverridden: false,
             isMarginCapped: marginCapped,
-            isEntryOverridden: false
+            isEntryOverridden: false,
+            isConversionUnavailable: conversionUnavailable
         )
     }
 
@@ -185,9 +203,13 @@ final class TradingViewModel {
                 riskFraction: 0.005,
                 entryPrice: order.entryPrice, stopLoss: order.stopLoss,
                 leverage: account?.leverage ?? 30,
-                spread: spreads[instrument] ?? 0)
-            order.amount = result.lots
-            order.isMarginCapped = result.isMarginCapped
+                spread: spreads[instrument] ?? 0,
+                quoteToAccountRate: quoteToAccountRate(for: instrument))
+            order.isConversionUnavailable = result.conversionUnavailable
+            if !result.conversionUnavailable {
+                order.amount = result.lots
+                order.isMarginCapped = result.isMarginCapped
+            }
         }
         return order
     }
@@ -221,9 +243,13 @@ final class TradingViewModel {
                 riskFraction: 0.005,
                 entryPrice: live, stopLoss: order.stopLoss,
                 leverage: account?.leverage ?? 30,
-                spread: spreads[instrument] ?? 0)
-            order.amount = result.lots
-            order.isMarginCapped = result.isMarginCapped
+                spread: spreads[instrument] ?? 0,
+                quoteToAccountRate: quoteToAccountRate(for: instrument))
+            order.isConversionUnavailable = result.conversionUnavailable
+            if !result.conversionUnavailable {
+                order.amount = result.lots
+                order.isMarginCapped = result.isMarginCapped
+            }
             visualOrders[instrument] = order
         }
 
@@ -377,6 +403,15 @@ final class TradingViewModel {
 
     // MARK: - Private
 
+    /// Conversion rate from `instrument`'s quote currency to the account currency, for
+    /// position sizing. nil when no usable rate is streaming (then sizing must not
+    /// overwrite the user's amount — see `PositionSizing.Result.conversionUnavailable`).
+    func quoteToAccountRate(for instrument: String) -> Double? {
+        guard let acct = account?.currency else { return nil }
+        return PnLConverter.rate(from: String(instrument.suffix(3)).uppercased(),
+                                 to: acct.uppercased(), rates: rates)
+    }
+
     private func recalculateAmount(for instrument: String) {
         guard var order = visualOrders[instrument],
               !order.isAmountOverridden,
@@ -387,9 +422,13 @@ final class TradingViewModel {
             riskFraction: 0.005,
             entryPrice: order.entryPrice, stopLoss: order.stopLoss,
             leverage: account?.leverage ?? 30,
-            spread: spreads[instrument] ?? 0)
-        order.amount = result.lots
-        order.isMarginCapped = result.isMarginCapped
+            spread: spreads[instrument] ?? 0,
+            quoteToAccountRate: quoteToAccountRate(for: instrument))
+        order.isConversionUnavailable = result.conversionUnavailable
+        if !result.conversionUnavailable {
+            order.amount = result.lots
+            order.isMarginCapped = result.isMarginCapped
+        }
         visualOrders[instrument] = order
     }
 
@@ -403,6 +442,7 @@ final class TradingViewModel {
                         positions = snapshot.positions
                         account = snapshot.account
                         if let s = snapshot.spreads { spreads = s }
+                        if let r = snapshot.rates { rates = r }
                         bindPendingCaptures(snapshot.positions)
                     }
                 } catch is CancellationError {
