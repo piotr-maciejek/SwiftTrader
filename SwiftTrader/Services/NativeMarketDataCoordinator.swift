@@ -469,7 +469,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// re-fetching after a clean cache is what actually fixes a gap.
     func clearServerCache(instrument: String) async throws -> Int {
         await cache.clear(instrument: instrument)
-        await inProgressStore.clear(instrument)
+        await inProgressStore.clear(instrumentPrefix: instrument)
         return 0
     }
 
@@ -1307,12 +1307,17 @@ actor InProgressStore {
         return s
     }
 
-    /// Drop the cached snapshot for one instrument so the next live-bar seed
-    /// re-fetches from the server. Used by hard refresh to ensure a wiped chart
-    /// doesn't immediately repopulate the just-cleared 4H/Daily live bar from a
-    /// stale in-progress snapshot.
-    func clear(_ instrument: String) {
-        byInstrument.removeValue(forKey: instrument)
+    /// Drop every cached snapshot for one instrument (all sides) so the next
+    /// live-bar seed re-fetches from the server. Used by hard refresh to ensure a
+    /// wiped chart doesn't immediately repopulate the just-cleared 4H/Daily live
+    /// bar from a stale in-progress snapshot. Entries are keyed
+    /// `"instrument|side"`, so this matches by prefix; in-flight fetches are left
+    /// alone (they complete with fresh data, which is fine post-wipe).
+    func clear(instrumentPrefix instrument: String) {
+        let prefix = "\(instrument)|"
+        for key in byInstrument.keys where key.hasPrefix(prefix) {
+            byInstrument.removeValue(forKey: key)
+        }
     }
 
     /// Run `work` once per instrument even under burst arrival: concurrent callers

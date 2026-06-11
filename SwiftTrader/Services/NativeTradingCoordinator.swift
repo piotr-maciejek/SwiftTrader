@@ -1,5 +1,8 @@
 import Foundation
 import DukascopyClient
+import os
+
+private let tradingLog = Logger(subsystem: "com.swifttrader", category: "native")
 
 enum NativeTradingError: LocalizedError {
     case notConnected
@@ -139,11 +142,23 @@ actor NativeTradingCoordinator: TradingCoordinating {
         let tpChanged = priceDiffers(takeProfit, st.tpPrice, scale: scale)
 
         if slChanged {
+            let firstSentAt = Date()
             try await applyLeg(gid: gid, isTP: false, newPrice: stopLoss, existingId: st.slId, scale: scale)
-            if tpChanged { await waitForLeg(gid: gid, isTP: false, expected: stopLoss, scale: scale) }
+            if tpChanged {
+                await waitForLeg(gid: gid, isTP: false, expected: stopLoss, scale: scale)
+                // Spacing floor: waitForLeg confirming (or timing out) isn't enough on its
+                // own to guarantee the legs land a full rate-limit window apart.
+                let remainder = Self.legSpacingRemainder(sinceFirstSend: firstSentAt)
+                if remainder > 0 { try? await Task.sleep(for: .seconds(remainder)) }
+            }
         }
         if tpChanged {
             try await applyLeg(gid: gid, isTP: true, newPrice: takeProfit, existingId: st.tpId, scale: scale)
+            if slChanged, await !waitForLeg(gid: gid, isTP: true, expected: takeProfit, scale: scale) {
+                tradingLog.warning(
+                    "modifyOrder \(gid, privacy: .public): TP leg not reflected in snapshot within timeout — verify the position's protection"
+                )
+            }
         }
 
         // Best-effort echo; the authoritative state arrives via the snapshot stream.
@@ -190,17 +205,29 @@ actor NativeTradingCoordinator: TradingCoordinating {
         // price ≤ 0 with no existing order → nothing to do.
     }
 
-    /// Poll the live snapshot until `gid`'s leg reflects `expected` (or timeout), so a
-    /// following leg isn't sent inside Dukascopy's per-second order window.
-    private func waitForLeg(gid: String, isTP: Bool, expected: Double, scale: Int, timeout: TimeInterval = 4) async {
-        guard let session else { return }
+    /// Poll the live snapshot until `gid`'s leg reflects `expected` (or timeout).
+    /// Returns whether the leg was actually observed to land — a `false` return is a
+    /// timeout, NOT a confirmation, so callers must not treat it as "safe to proceed".
+    @discardableResult
+    private func waitForLeg(gid: String, isTP: Bool, expected: Double, scale: Int, timeout: TimeInterval = 4) async -> Bool {
+        guard let session else { return false }
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             try? await Task.sleep(for: .milliseconds(200))
             guard let g = (await session.positionsSnapshot()).first(where: { $0.orderGroupId == gid }) else { continue }
             let actual = isTP ? protective(g).tpPrice : protective(g).slPrice
-            if !priceDiffers(actual, expected, scale: scale) { return }
+            if !priceDiffers(actual, expected, scale: scale) { return true }
         }
+        return false
+    }
+
+    /// How much longer the second SL/TP leg must wait so the two sends sit at least a
+    /// full broker rate-limit window apart, however the first leg's wait ended (early
+    /// confirmation or timeout). 1.2s = the ~1/s order-op pacing plus margin.
+    static func legSpacingRemainder(
+        sinceFirstSend sentAt: Date, now: Date = Date(), minimumSpacing: TimeInterval = 1.2
+    ) -> TimeInterval {
+        max(0, minimumSpacing - now.timeIntervalSince(sentAt))
     }
 
     /// Resolve a group by orderGroupId (open position) or by a contained order's id (pending entry).
