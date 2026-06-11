@@ -96,6 +96,76 @@ struct BinaryCodecTests {
 
         #expect(try readField(from: &reader) == nil)
     }
+
+    // MARK: - Hostile lengths (a malformed frame must throw, never trap)
+
+    @Test("readBytes with a negative count throws instead of trapping")
+    func negativeReadBytesThrows() {
+        var r = BinaryReader(Data([0x01, 0x02, 0x03]))
+        #expect(throws: CodecError.self) {
+            _ = try r.readBytes(-1)
+        }
+    }
+
+    @Test("A field carrying a negative Int32 length throws from readField")
+    func negativeFieldLengthThrows() {
+        // fieldId(int16) + length(int32 = -5) + some bytes.
+        var w = BinaryWriter()
+        w.writeInt16BE(17261)
+        w.writeInt32BE(-5)
+        w.writeBytes(Data([0xAA, 0xBB, 0xCC]))
+        var r = BinaryReader(w.data)
+        #expect(throws: CodecError.self) {
+            _ = try readField(from: &r)
+        }
+    }
+
+    @Test("BigDecimal kind 7 with a negative byte length throws")
+    func negativeBigDecimalLengthThrows() {
+        // kind byte 7 + scale(int32) + len(int32 = -1).
+        var w = BinaryWriter()
+        w.writeByte(7)
+        w.writeInt32BE(5)
+        w.writeInt32BE(-1)
+        var r = BinaryReader(w.data)
+        #expect(throws: CodecError.self) {
+            _ = try BigDecimalCodec.decode(from: &r)
+        }
+    }
+
+    @Test("A message list declaring a huge size fails fast without a giant allocation")
+    func hostileListSizeFailsFast() {
+        // collectionClassId + varLen size of 2^30-1, then nothing — must throw on the
+        // first missing element, not reserve a multi-GB array first.
+        var w = BinaryWriter()
+        w.writeInt32BE(0x0BAD_F00D)
+        w.writeVarLen(0x3FFF_FFFF)
+        var r = BinaryReader(w.data)
+        #expect(throws: CodecError.self) {
+            _ = try decodeMessageList(from: &r) { (sub: inout BinaryReader) in
+                try sub.readByte()
+            }
+        }
+    }
+
+    @Test("Positive-length truncation still throws .truncated")
+    func positiveTruncationStillThrows() {
+        var r = BinaryReader(Data([0x01]))
+        #expect(throws: CodecError.self) {
+            _ = try r.readBytes(8)
+        }
+        // And the specific case is preserved (not folded into negativeLength).
+        var r2 = BinaryReader(Data([0x01]))
+        do {
+            _ = try r2.readBytes(8)
+            Issue.record("expected throw")
+        } catch let CodecError.truncated(needed, available) {
+            #expect(needed == 8)
+            #expect(available == 1)
+        } catch {
+            Issue.record("expected .truncated, got \(error)")
+        }
+    }
 }
 
 @Suite("Message encoding")

@@ -162,7 +162,10 @@ public enum PositionDataBitsDecoder {
         guard count >= 0 else { throw PositionDecodeError.badHeader("negative list count \(count)") }
 
         var out: [ClosedPosition] = []
-        out.reserveCapacity(Int(count))
+        // Wire-controlled count: clamp the upfront allocation to what the payload could
+        // hold (each element costs ≥ 1 byte) — a hostile count then fails on the first
+        // truncated element instead of allocating gigabytes here.
+        out.reserveCapacity(min(Int(count), r.remaining))
         for _ in 0..<count {
             let elemMarker = try r.readByte()
             if elemMarker == 0 { continue }   // a null element — skip

@@ -608,7 +608,10 @@ func decodeMessageList<T>(
     _ = try v.readInt32BE()            // declared collection type (List/ArrayList)
     let size = try v.readVarLen()
     var out: [T] = []
-    out.reserveCapacity(size)
+    // `size` is wire-controlled (up to 2^30): clamp the upfront allocation to what the
+    // payload could possibly hold (each element costs ≥ 5 bytes) — a hostile size then
+    // fails on the first truncated element instead of allocating gigabytes here.
+    out.reserveCapacity(min(size, v.remaining))
     for _ in 0..<size {
         _ = try v.readInt32BE()        // element class id
         let len = try v.readVarLen()   // message byte length
