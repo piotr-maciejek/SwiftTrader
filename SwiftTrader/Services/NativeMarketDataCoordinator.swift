@@ -332,7 +332,15 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             if let last = aggregated.last, last.time == bucketMs {
                 return extend(last)
             }
-            return extend(snap?.oneHour)
+            // A fresh in-progress partial would have produced a bucket at `bucketMs`
+            // above (the aggregator folds it into the inputs) — reaching here means
+            // the partial and the cached tail all belong to a PREVIOUS bucket, so
+            // seeding from them would graft the old bucket's OHLC onto the new bar.
+            // Open fresh at the tick instead, like the raw 1H/1m stale-seed guard.
+            if snap?.oneHour != nil {
+                nativeLog.notice("live \(period, privacy: .public) seed mismatch \(instrument, privacy: .public): in-progress 1H partial predates bucket \(bucketMs); opening fresh to avoid inheriting stale OHLC")
+            }
+            return extend(nil)
         case "THIRTY_MINS", "FIFTEEN_MINS", "FIVE_MINS", "THREE_MINS":
             // Prefer the server's authoritative in-progress bar for THIS period. It holds the
             // full OHLC accumulated since the bucket opened, so opening the chart 10 minutes
@@ -371,7 +379,13 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             if let last = aggregated.last, last.time == bucketMs {
                 return extend(last)
             }
-            return extend(snap?.oneMin)
+            // Same stale-partial reasoning as the Daily/4H fallback above: a fresh 1m
+            // partial would have landed a bucket at `bucketMs`, so whatever is left is
+            // from an earlier bucket — open fresh at the tick.
+            if snap?.oneMin != nil {
+                nativeLog.notice("live \(period, privacy: .public) seed mismatch \(instrument, privacy: .public): in-progress 1m partial predates bucket \(bucketMs); opening fresh to avoid inheriting stale OHLC")
+            }
+            return extend(nil)
         case "WEEKLY":
             // Seed the forming week from the 1H bars already in this FX week (the warm
             // shared 1H cache, same source the weekly history fetch aggregates), then
@@ -380,7 +394,11 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             let weekHours = await cache.getBars(for: hourlyKey)
                 .filter { BarAggregator.weekStartMs($0.date) == bucketMs }
             let aggregated = BarAggregator.aggregateWeekly(weekHours, openPartial: snap?.oneHour)
-            return extend(aggregated.first)
+            // Pick the CURRENT week's bucket explicitly. The 1H cache is filtered to
+            // this week above, but the in-progress partial is not — a stale partial
+            // from last week forms an earlier bucket that `.first` would wrongly
+            // select, opening the new weekly bar on last week's OHLC.
+            return extend(aggregated.first { $0.time == bucketMs })
         default:
             return extend(nil)
         }
@@ -648,7 +666,8 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         let sourceStepMs = sourceSeconds * 1000
         let persistable = aggregated.filter {
             Self.aggregatedBucketComplete(bucketStartMs: $0.time, spanMs: targetSeconds * 1000,
-                                          sourceStepMs: sourceStepMs, sourceTimes: sourceTimes, nowMs: nowMs)
+                                          sourceStepMs: sourceStepMs, sourceTimes: sourceTimes,
+                                          nowMs: nowMs, periodCode: spec.periodCode)
         }
         let cached = await cache.merge(persistable, for: aggKey)
         guard persistable.count != aggregated.count else {
@@ -686,12 +705,34 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
         let aggKey = CandleCache.CacheKey(
             instrument: instrument, period: spec.periodCode, source: .aggregated, side: side
         )
-        let cachedAgg = await cache.merge(aggregated, for: aggKey)
-        // merge drops the partial forming bucket — re-append it for display.
-        if let last = aggregated.last, last.partial, last.time > (cachedAgg.last?.time ?? 0) {
-            return cachedAgg + [last]
+        // Same completeness gate as fetchAggregated: the bucket at the new fetch
+        // boundary is truncated (its older source bars weren't fetched), and any
+        // bucket over an interior source hole is wrong — persisting either poisons
+        // the cache at depth, where nothing re-validates it. Withheld buckets are
+        // still RETURNED for display via the overlay below.
+        let sourceSeconds = CandlePeriod.parse(source)?.seconds ?? (source == "ONE_HOUR" ? 3600 : 60)
+        let spanMs = sourceSeconds * Int64(spec.sourceSpan) * 1000
+        let sourceTimes = Set(merged.map(\.time))
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let persistable = aggregated.filter {
+            Self.aggregatedBucketComplete(bucketStartMs: $0.time, spanMs: spanMs,
+                                          sourceStepMs: sourceSeconds * 1000, sourceTimes: sourceTimes,
+                                          nowMs: nowMs, periodCode: spec.periodCode)
         }
-        return cachedAgg
+        let cachedAgg = await cache.merge(persistable, for: aggKey)
+        if persistable.count == aggregated.count {
+            // merge drops the partial forming bucket — re-append it for display.
+            if let last = aggregated.last, last.partial, last.time > (cachedAgg.last?.time ?? 0) {
+                return cachedAgg + [last]
+            }
+            return cachedAgg
+        }
+        // Overlay withheld (provisional) buckets onto the cached series for display
+        // without persisting them — mirrors fetchAggregated.
+        var byTime: [Int64: SwiftTrader.CandleBar] = [:]
+        for b in cachedAgg { byTime[b.time] = b }
+        for b in aggregated { byTime[b.time] = b }
+        return byTime.values.sorted { $0.time < $1.time }
     }
 
     /// Pull any bars between the cache's latest and the most recent possible bar (the
@@ -878,8 +919,9 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// `seedLiveBucket` runs only once per bucket), so an unchecked seed grafts the PREVIOUS bucket's
     /// OHLC — e.g. a 1H bar inheriting the prior hour's high, which then sticks for the whole hour
     /// because nothing re-seeds it. Returns the partial only when its `time` matches `bucketMs`;
-    /// otherwise the caller opens the live bar fresh at the tick. (The derived periods already guard
-    /// this via their `last.time == bucketMs` / `sp.time == bucketMs` checks.)
+    /// otherwise the caller opens the live bar fresh at the tick. (The derived periods guard this
+    /// via their `last.time == bucketMs` / `sp.time == bucketMs` checks, and their fallbacks open
+    /// fresh rather than extend a partial that failed those checks.)
     static func inProgressSeed(_ partial: SwiftTrader.CandleBar?, bucketMs: Int64) -> SwiftTrader.CandleBar? {
         guard let p = partial, p.time == bucketMs else { return nil }
         return p
@@ -892,23 +934,59 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// in the future) returns true here; its `partial` flag keeps it off disk separately.
     static func aggregatedBucketComplete(
         bucketStartMs: Int64, spanMs: Int64, sourceStepMs: Int64,
-        sourceTimes: Set<Int64>, nowMs: Int64
+        sourceTimes: Set<Int64>, nowMs: Int64, periodCode: String = ""
     ) -> Bool {
         guard sourceStepMs > 0, spanMs > 0 else { return true }
-        let bucketEnd = bucketStartMs + spanMs
+        let (coverStart, coverEnd) = bucketCoverageWindow(
+            bucketStartMs: bucketStartMs, spanMs: spanMs, periodCode: periodCode
+        )
         // Forming bucket → fail closed. `markForming` flags it partial (so the cache
         // drops it anyway); withholding it here too means the persist gate no longer
         // TRUSTS that flag — a forming bucket that slips through unflagged must never
         // be written as a closed bar.
-        guard bucketEnd <= nowMs else { return false }
-        var slot = bucketStartMs
-        while slot < bucketEnd {
+        guard coverEnd <= nowMs else { return false }
+        var slot = coverStart
+        while slot < coverEnd {
             let date = Date(timeIntervalSince1970: Double(slot) / 1000)
             let marketOpen = !NYTradingCalendar.isMarketClosed(at: date) && !NYTradingCalendar.isFXHoliday(at: date)
             if marketOpen && !sourceTimes.contains(slot) { return false }
             slot += sourceStepMs
         }
         return true
+    }
+
+    /// The wall-clock window whose market-open source slots a bucket must cover.
+    /// Fixed-grid intraday and 4H labels ARE the bucket's start instant, so the window
+    /// is simply [label, label+span). DAILY and WEEKLY labels are NOT: a daily bar is
+    /// labeled by its closing calendar day's midnight NY while its session runs
+    /// 17:00 ET the previous day → 17:00 ET, and a weekly bar is labeled Sunday
+    /// midnight NY while its session runs Sun 17:00 → Fri 17:00 ET. Walking
+    /// [label, label+span) for those would skip real session hours (Sun-evening for
+    /// DAILY, all of Friday for WEEKLY) — a bucket missing exactly those source bars
+    /// would persist as complete with a wrong open/close. Re-derive the true session
+    /// window from the NY calendar instead (DST-correct: 23/25h sessions fall out of
+    /// `tradingDayStart` / calendar day arithmetic naturally).
+    static func bucketCoverageWindow(
+        bucketStartMs: Int64, spanMs: Int64, periodCode: String
+    ) -> (start: Int64, end: Int64) {
+        func ms(_ d: Date) -> Int64 { Int64((d.timeIntervalSince1970 * 1000).rounded()) }
+        let label = Date(timeIntervalSince1970: Double(bucketStartMs) / 1000)
+        switch periodCode {
+        case "DAILY":
+            // Midnight of the closing day belongs to the session that opened 17:00 ET
+            // the evening before; the next session's start is the window end.
+            let start = NYTradingCalendar.tradingDayStart(at: label)
+            let end = NYTradingCalendar.tradingDayStart(at: label.addingTimeInterval(Double(spanMs) / 1000))
+            return (ms(start), ms(end))
+        case "WEEKLY":
+            let cal = NYTradingCalendar.calendar
+            let start = cal.date(byAdding: .hour, value: 17, to: label) ?? label
+            let friday = cal.date(byAdding: .day, value: 5, to: label) ?? label
+            let end = cal.date(byAdding: .hour, value: 17, to: friday) ?? friday
+            return (ms(start), ms(end))
+        default:
+            return (bucketStartMs, bucketStartMs + spanMs)
+        }
     }
 
     static func hasSpuriousGap(_ bars: [SwiftTrader.CandleBar], periodSeconds: Int64) -> Bool {

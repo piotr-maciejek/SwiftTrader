@@ -459,4 +459,52 @@ struct BarAggregatorTests {
         #expect(out[0].high == 1.07)   // forming bar's high folded in
         #expect(out[0].close == 1.06)
     }
+
+    // MARK: Live-seed staleness premises (seedLiveBucket fallbacks)
+
+    @Test("Stale previous-week partial forms its own earlier bucket; selecting by week start skips it")
+    func weeklyStalePartialIsolatedToItsOwnWeek() {
+        // New week opened Sun Apr 21 17:00 ET; the cached in-progress 1H partial is
+        // still Friday Apr 19 (previous week).
+        let stalePartial = hourly(2024, 4, 19, 16, open: 1.02, high: 1.03, low: 1.00, close: 1.01, partial: true)
+        let currentWeekHour = hourly(2024, 4, 21, 17, open: 1.05, high: 1.10, low: 1.04, close: 1.08)
+        let bucketMs = timeMs(nyDate(2024, 4, 21, 0, 0))
+
+        let out = BarAggregator.aggregateWeekly([currentWeekHour], openPartial: stalePartial)
+        #expect(out.count == 2)
+        #expect(out.first?.time == timeMs(nyDate(2024, 4, 14, 0, 0)))  // .first is LAST week — must not seed from it
+        let currentWeek = out.first { $0.time == bucketMs }
+        #expect(currentWeek?.open == 1.05)
+        #expect(currentWeek?.high == 1.10)
+
+        // With ONLY the stale partial available, the new week has no bucket at all —
+        // the seed must open fresh at the tick.
+        let onlyStale = BarAggregator.aggregateWeekly([], openPartial: stalePartial)
+        #expect(onlyStale.first { $0.time == bucketMs } == nil)
+    }
+
+    @Test("Fresh 1H partial always yields a 4H/Daily bucket at its own bucket start")
+    func freshPartialProducesCurrentBucket() {
+        // Premise the seedLiveBucket fallbacks rely on: if the partial belongs to the
+        // forming bucket, aggregation produces that bucket — so a fallback firing
+        // proves staleness and must open fresh instead of extending the partial.
+        let partial = hourly(2024, 4, 16, 21, open: 1.12, high: 1.2, low: 1.1, close: 1.18, partial: true)
+        let out = BarAggregator.aggregate(hourly: [], openPartial: partial, target: .fourHours)
+        #expect(out.last?.time == timeMs(nyDate(2024, 4, 16, 21, 0)))
+        #expect(out.last?.partial == true)
+    }
+
+    @Test("All-stale inputs yield no bucket at the new bucket start")
+    func stalePartialNeverReachesNewBucket() {
+        // 4H bucket rolled at 21:00 ET; cached tail + partial all from the 17:00 bucket.
+        let newBucketMs = timeMs(nyDate(2024, 4, 16, 21, 0))
+        let staleTail = [
+            hourly(2024, 4, 16, 17, open: 1.0, high: 1.1, low: 0.9, close: 1.05),
+            hourly(2024, 4, 16, 18, open: 1.05, high: 1.15, low: 1.0, close: 1.1),
+        ]
+        let stalePartial = hourly(2024, 4, 16, 19, open: 1.1, high: 1.2, low: 1.05, close: 1.15, partial: true)
+        let out = BarAggregator.aggregate(hourly: staleTail, openPartial: stalePartial, target: .fourHours)
+        #expect(out.first { $0.time == newBucketMs } == nil)
+        #expect(out.last?.time == timeMs(nyDate(2024, 4, 16, 17, 0)))
+    }
 }
