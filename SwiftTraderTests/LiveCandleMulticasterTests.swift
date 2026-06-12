@@ -56,6 +56,16 @@ private func waitUntil(_ cond: @escaping () async -> Bool) async {
     for _ in 0..<100_000 where !(await cond()) { await Task.yield() }
 }
 
+/// Like `waitUntil`, but sleeps between checks (bounded ~10s) so background tasks get
+/// scheduled even when the whole suite runs in parallel — pure yield-spinning can burn
+/// its budget before a starved task ever runs.
+private func settle(_ cond: @escaping () async -> Bool) async {
+    for _ in 0..<10_000 {
+        if await cond() { return }
+        try? await Task.sleep(for: .milliseconds(1))
+    }
+}
+
 private struct TestError: Error {}
 
 @Suite("LiveCandleMulticaster")
@@ -135,6 +145,33 @@ struct LiveCandleMulticasterTests {
         let r2 = await t2.value
         #expect(r1.error is TestError)
         #expect(r2.error is TestError)
+    }
+
+    @Test("a subscriber cancelled before registration lands never leaks a zombie driver")
+    func cancelBeforeRegisterDoesNotLeak() async {
+        // The consumer is cancelled IMMEDIATELY after subscribe, racing the actor-hop
+        // that registers the continuation. If termination is observed before
+        // registration (and never again after — handlers fire once), the entry keeps
+        // a dead continuation forever and its driver consumes ticks until shutdown.
+        // Repeat to give the race real chances to land in the bad order.
+        let hub = LiveCandleMulticaster(now: openMarketClock)
+        for i in 0..<50 {
+            let probe = DriverProbe()
+            let s = hub.subscribe(key: KEY) { probe.factory() }
+            let consumer = Task { await drain(s) }
+            consumer.cancel()
+            _ = await consumer.value
+            // Each subscribe whose stream terminates produces exactly one register hop
+            // and one unregister hop — waiting on the hop count is quiescence, free of
+            // the mid-flight ambiguity of polling subscriberCount directly.
+            await settle { await hub.lifecycleHopCount() == 2 * (i + 1) }
+            #expect(await hub.lifecycleHopCount() == 2 * (i + 1))
+            #expect(await hub.subscriberCount(KEY) == 0)
+            if probe.calls > 0 {       // register won the race → its driver must be dead
+                await settle { probe.cancelled }
+                #expect(probe.cancelled)
+            }
+        }
     }
 
     @Test("after the driver ends, a fresh subscribe starts a new driver")

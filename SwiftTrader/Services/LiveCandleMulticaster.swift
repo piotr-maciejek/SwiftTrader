@@ -32,6 +32,16 @@ actor LiveCandleMulticaster {
 
     private var entries: [Key: Entry] = [:]
     private var generationCounter = 0
+    /// Ids whose stream terminated BEFORE their register hop landed (consumer cancelled
+    /// immediately after subscribe). Register consumes the tombstone and skips the dead
+    /// subscriber entirely. Ids currently live in an entry sit in `registeredIds`; both
+    /// sets are bounded — every tombstone is consumed by its (always-spawned) register.
+    private var preTerminated: Set<UUID> = []
+    private var registeredIds: Set<UUID> = []
+    /// Register/unregister hops processed so far. Test hook: a subscriber whose stream
+    /// terminates produces exactly one of each, so tests can await race quiescence
+    /// deterministically instead of polling ambiguous mid-flight state.
+    private var lifecycleHops = 0
     /// Injectable clock so replay-eligibility (market open/closed) is testable without the
     /// wall clock. Defaults to the real time in production.
     private let now: @Sendable () -> Date
@@ -48,6 +58,12 @@ actor LiveCandleMulticaster {
     ) -> AsyncThrowingStream<CandleBar, Error> {
         let id = UUID()
         return AsyncThrowingStream<CandleBar, Error> { continuation in
+            // The register hop and the termination handler's unregister hop reach the
+            // actor UNORDERED: a consumer cancelling right after subscribe can run
+            // unregister first. `unregister` tombstones that case and `register`
+            // consumes the tombstone — otherwise the dead continuation (whose handler
+            // has already fired, once) would sit in the entry forever and pin a
+            // zombie driver consuming ticks until coordinator shutdown.
             Task { await self.register(key: key, id: id, continuation: continuation, driverFactory: driverFactory) }
             continuation.onTermination = { [weak self] _ in
                 Task { await self?.unregister(key: key, id: id) }
@@ -60,6 +76,11 @@ actor LiveCandleMulticaster {
         continuation: AsyncThrowingStream<CandleBar, Error>.Continuation,
         driverFactory: @escaping DriverFactory
     ) {
+        lifecycleHops += 1
+        // The stream died before this hop landed — its termination handler already ran
+        // (and runs only once), so nothing would ever remove this continuation again.
+        if preTerminated.remove(id) != nil { return }
+        registeredIds.insert(id)
         let entry: Entry
         if let existing = entries[key] {
             entry = existing
@@ -105,7 +126,13 @@ actor LiveCandleMulticaster {
     }
 
     private func unregister(key: Key, id: UUID) {
-        guard let entry = entries[key] else { return }
+        lifecycleHops += 1
+        guard registeredIds.remove(id) != nil else {
+            // Terminated before register landed — tombstone so register skips it.
+            preTerminated.insert(id)
+            return
+        }
+        guard let entry = entries[key] else { return }   // driver already ended / shutdown
         entry.continuations.removeValue(forKey: id)
         if entry.continuations.isEmpty {
             entry.task?.cancel()
@@ -138,6 +165,9 @@ actor LiveCandleMulticaster {
     /// Current subscriber count for a key (0 if none). Used by tests to synchronize
     /// deterministically on registration; harmless in production.
     func subscriberCount(_ key: Key) -> Int { entries[key]?.continuations.count ?? 0 }
+
+    /// See `lifecycleHops`. Test hook; harmless in production.
+    func lifecycleHopCount() -> Int { lifecycleHops }
 
     /// Replay only a genuinely-live forming bar, and only while the market is open — never a
     /// partial left over from before a weekend/holiday close (mirrors the driver's own gate).

@@ -510,6 +510,64 @@ struct AggregatedBucketCompleteTests {
         #expect(!NativeMarketDataCoordinator.aggregatedBucketComplete(
             bucketStartMs: start, spanMs: fourH, sourceStepMs: hour, sourceTimes: [start], nowMs: start + hour))
     }
+
+    // MARK: DAILY/WEEKLY session-window coverage (labels are NOT bucket starts)
+
+    private let day: Int64 = 24 * 3_600_000
+
+    /// Monday 2026-06-01: label = Mon 00:00 NY = 04:00 UTC (EDT); session =
+    /// Sun 21:00 UTC → Mon 21:00 UTC (Sun/Mon 17:00 ET).
+    private var mondayLabel: Int64 { ms(2026, 6, 1, 4) }
+    private var mondaySessionStart: Int64 { ms(2026, 5, 31, 21) }
+    private func mondaySessionHours() -> [Int64] {
+        (0..<24).map { mondaySessionStart + Int64($0) * hour }
+    }
+
+    @Test("A daily bucket missing its Sunday-evening hours is INCOMPLETE")
+    func dailyMissingSundayEveningRejected() {
+        // Drop the session's first 7 hours (Sun 17:00–23:00 ET) — the bar's open is wrong.
+        // The label-window walk never visited these slots, so this used to pass.
+        let src = Set(mondaySessionHours().filter { $0 >= mondayLabel })
+        #expect(!NativeMarketDataCoordinator.aggregatedBucketComplete(
+            bucketStartMs: mondayLabel, spanMs: day, sourceStepMs: hour,
+            sourceTimes: src, nowMs: mondayLabel + 2 * day, periodCode: "DAILY"))
+    }
+
+    @Test("A daily bucket with its full session is complete even before next-session bars exist")
+    func dailyFullSessionComplete() {
+        let src = Set(mondaySessionHours())
+        // 30 min after the Mon 17:00 ET close — the next session hasn't produced bars yet.
+        #expect(NativeMarketDataCoordinator.aggregatedBucketComplete(
+            bucketStartMs: mondayLabel, spanMs: day, sourceStepMs: hour,
+            sourceTimes: src, nowMs: mondaySessionStart + day + 30 * 60_000, periodCode: "DAILY"))
+    }
+
+    /// Week of 2026-05-31: label = Sun 00:00 NY = 04:00 UTC; session =
+    /// Sun 21:00 UTC → Fri 2026-06-05 21:00 UTC (120 hourly slots).
+    private var weekLabel: Int64 { ms(2026, 5, 31, 4) }
+    private var weekSessionStart: Int64 { ms(2026, 5, 31, 21) }
+    private func weekSessionHours() -> [Int64] {
+        (0..<120).map { weekSessionStart + Int64($0) * hour }
+    }
+
+    @Test("A weekly bucket missing all of Friday is INCOMPLETE")
+    func weeklyMissingFridayRejected() {
+        // The 5-day label-window walk ([Sun 00:00, Fri 00:00) NY) never covered
+        // Friday's session hours, so a week frozen at Thursday's close used to persist.
+        let friday0400utc = ms(2026, 6, 5, 4)
+        let src = Set(weekSessionHours().filter { $0 < friday0400utc })
+        #expect(!NativeMarketDataCoordinator.aggregatedBucketComplete(
+            bucketStartMs: weekLabel, spanMs: 120 * hour, sourceStepMs: hour,
+            sourceTimes: src, nowMs: weekLabel + 8 * day, periodCode: "WEEKLY"))
+    }
+
+    @Test("A weekly bucket with its full Sun 17:00 → Fri 17:00 session is complete")
+    func weeklyFullSessionComplete() {
+        let src = Set(weekSessionHours())
+        #expect(NativeMarketDataCoordinator.aggregatedBucketComplete(
+            bucketStartMs: weekLabel, spanMs: 120 * hour, sourceStepMs: hour,
+            sourceTimes: src, nowMs: weekSessionStart + 120 * hour + hour, periodCode: "WEEKLY"))
+    }
 }
 
 @Suite("HistoryPrefetcher warm-up")
