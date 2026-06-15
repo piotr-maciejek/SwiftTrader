@@ -42,6 +42,10 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// authoritative OHLC instead of being derived from our cached 1m bars.
     private let inProgressStore = InProgressStore()
     private let inProgressTtl: TimeInterval = 30
+    /// Min spacing between cold-start re-seed attempts for a forming derived bar (see the
+    /// heal in `rawCandleStream`). A safety throttle only — the heal latches off the moment
+    /// the cached source covers the bucket, so this just bounds the brief pre-load window.
+    private static let liveReseedInterval: TimeInterval = 2
     /// Fills deep history for all pairs in the background, one idle-gated request at a
     /// time. Only present with a live session (a real `rawFetch`); nil for tests.
     private let prefetcher: HistoryPrefetcher?
@@ -231,6 +235,11 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                     return
                 }
                 var current: SwiftTrader.CandleBar?
+                // Whether `current` was seeded from the cached aggregation source (vs only the
+                // live partial). False after a cold-start/reconnect seed that raced the source
+                // load — see the re-seed heal in the within-bucket branch below.
+                var fullySeeded = false
+                var lastReseed = Date.distantPast
                 for await tick in await session.tickStream() {
                     if Task.isCancelled { break }
                     guard tick.instrument == wireInstrument else { continue }
@@ -250,11 +259,35 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                     }
                     let bucketMs = Self.liveBucketStartMs(tickMs: tick.creationTimestampMillis, period: period)
                     if let c = current, c.time == bucketMs {
-                        current = SwiftTrader.CandleBar(
+                        var extended = SwiftTrader.CandleBar(
                             time: c.time, open: c.open,
                             high: max(c.high, bid), low: min(c.low, bid),
                             close: bid, volume: c.volume, partial: true
                         )
+                        // Cold-start heal. A derived bar (Daily/4H/Weekly/grid) seeded before its
+                        // aggregation source had loaded — e.g. launching at the session open, when
+                        // the cached 1H for the live Daily candle only reached Friday — opens on just
+                        // the live partial: wrong open/volume, a phantom gap off the prior close. The
+                        // seed never self-corrects (within a bucket it's only tick-extended), so
+                        // re-seed (throttled) until the cached source covers the bucket, then adopt the
+                        // authoritative open/volume while keeping the widest extremes ticks have shown.
+                        // Latches off once anchored, so steady state costs nothing.
+                        if !fullySeeded, nowDate.timeIntervalSince(lastReseed) >= Self.liveReseedInterval {
+                            lastReseed = nowDate
+                            let re = await self.seedLiveBucket(
+                                instrument: instrument, period: period, bucketMs: bucketMs, bid: bid, side: side
+                            )
+                            if re.anchored, re.bar.time == bucketMs, re.bar.open > 0 {
+                                extended = SwiftTrader.CandleBar(
+                                    time: bucketMs, open: re.bar.open,
+                                    high: max(extended.high, re.bar.high),
+                                    low: min(extended.low, re.bar.low),
+                                    close: bid, volume: re.bar.volume, partial: true
+                                )
+                                fullySeeded = true
+                            }
+                        }
+                        current = extended
                     } else {
                         // New bucket: seed from the cached source bars that already fall in
                         // this bucket (e.g., today's 1H bars for the live Daily candle), so
@@ -262,9 +295,12 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                         // inherits the bucket's accumulated OHLC and is only EXTENDED by the
                         // tick. For raw 1H/1m (no in-bucket source) there's no history to
                         // seed and the live bar opens at the tick price as before.
-                        current = await self.seedLiveBucket(
+                        let seeded = await self.seedLiveBucket(
                             instrument: instrument, period: period, bucketMs: bucketMs, bid: bid, side: side
                         )
+                        current = seeded.bar
+                        fullySeeded = seeded.anchored
+                        lastReseed = nowDate
                     }
                     if let c = current { continuation.yield(c) }
                 }
@@ -286,9 +322,13 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// partial into `BarAggregator.aggregate(hourly:, openPartial:, target:)`; the
     /// fixed-grid intraday periods (3m/5m/15m/30m) feed the server's 1m partial into
     /// `aggregateFixedGrid(..., openPartial:)`.
+    /// Returns the forming bar plus `anchored`: true when it was seeded from the cached
+    /// aggregation source (or the authoritative server in-progress bar), false when it could
+    /// only open on the live partial because the source hadn't loaded yet. The caller re-seeds
+    /// while `anchored` is false so a cold-start under-seed heals once the source arrives.
     private func seedLiveBucket(
         instrument: String, period: String, bucketMs: Int64, bid: Double, side: ChartSide = .bid
-    ) async -> SwiftTrader.CandleBar {
+    ) async -> (bar: SwiftTrader.CandleBar, anchored: Bool) {
         let snap = await ensureInProgress(instrument: instrument, side: side)
         func extend(_ bar: SwiftTrader.CandleBar?) -> SwiftTrader.CandleBar {
             // A non-positive seed (zero-OHLC in-progress/placeholder bar) would drag the
@@ -312,9 +352,11 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             if seed == nil, let h = snap?.oneHour {
                 nativeLog.notice("live 1H seed mismatch \(instrument, privacy: .public): in-progress partial bucket \(h.time) != \(bucketMs); opening fresh to avoid inheriting a stale high")
             }
-            return extend(seed)
+            // Raw periods seed from the server's authoritative in-progress bar (or open at the
+            // tick) — there's no cached aggregation source to wait on, so they're always anchored.
+            return (extend(seed), true)
         case "ONE_MIN":
-            return extend(Self.inProgressSeed(snap?.oneMin, bucketMs: bucketMs))
+            return (extend(Self.inProgressSeed(snap?.oneMin, bucketMs: bucketMs)), true)
         case "DAILY", "FOUR_HOURS":
             // Only the trailing window of the source can affect the currently-forming
             // bucket — mirrors server mode's `aggregatedStream` tail cap (Daily=30,
@@ -330,7 +372,13 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                 hourly: inputs, openPartial: snap?.oneHour, target: target
             )
             if let last = aggregated.last, last.time == bucketMs {
-                return extend(last)
+                // Anchored only if a CACHED (completed) 1H bar falls in this bucket. When just the
+                // live partial does, `last` is built from that alone — a cold-start under-seed that
+                // must heal once the session's earlier 1H bars load (see the caller's re-seed).
+                let cachedCovers = inputs.contains {
+                    Self.liveBucketStartMs(tickMs: $0.time, period: period) == bucketMs
+                }
+                return (extend(last), cachedCovers)
             }
             // A fresh in-progress partial would have produced a bucket at `bucketMs`
             // above (the aggregator folds it into the inputs) — reaching here means
@@ -340,7 +388,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             if snap?.oneHour != nil {
                 nativeLog.notice("live \(period, privacy: .public) seed mismatch \(instrument, privacy: .public): in-progress 1H partial predates bucket \(bucketMs); opening fresh to avoid inheriting stale OHLC")
             }
-            return extend(nil)
+            return (extend(nil), false)
         case "THIRTY_MINS", "FIFTEEN_MINS", "FIVE_MINS", "THREE_MINS":
             // Prefer the server's authoritative in-progress bar for THIS period. It holds the
             // full OHLC accumulated since the bucket opened, so opening the chart 10 minutes
@@ -356,7 +404,9 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             default:             serverPartial = nil  // THREE_MINS — no server bucket
             }
             if let sp = serverPartial, sp.time == bucketMs {
-                return extend(sp)
+                // Server's authoritative in-progress bar for this period — full OHLC since the
+                // bucket opened, no cached source to wait on, so anchored.
+                return (extend(sp), true)
             }
             // Fallback: aggregate the cached 1m suffix (3m always; other periods only if the
             // server omitted the partial). Tail = a few buckets' worth so re-aggregation is
@@ -377,7 +427,10 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                 inputs, granularityMs: granularityMs, openPartial: snap?.oneMin
             )
             if let last = aggregated.last, last.time == bucketMs {
-                return extend(last)
+                let cachedCovers = inputs.contains {
+                    Self.liveBucketStartMs(tickMs: $0.time, period: period) == bucketMs
+                }
+                return (extend(last), cachedCovers)
             }
             // Same stale-partial reasoning as the Daily/4H fallback above: a fresh 1m
             // partial would have landed a bucket at `bucketMs`, so whatever is left is
@@ -385,7 +438,7 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             if snap?.oneMin != nil {
                 nativeLog.notice("live \(period, privacy: .public) seed mismatch \(instrument, privacy: .public): in-progress 1m partial predates bucket \(bucketMs); opening fresh to avoid inheriting stale OHLC")
             }
-            return extend(nil)
+            return (extend(nil), false)
         case "WEEKLY":
             // Seed the forming week from the 1H bars already in this FX week (the warm
             // shared 1H cache, same source the weekly history fetch aggregates), then
@@ -398,9 +451,10 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
             // this week above, but the in-progress partial is not — a stale partial
             // from last week forms an earlier bucket that `.first` would wrongly
             // select, opening the new weekly bar on last week's OHLC.
-            return extend(aggregated.first { $0.time == bucketMs })
+            // Anchored once the cached 1H holds bars for this week (else only the live partial does).
+            return (extend(aggregated.first { $0.time == bucketMs }), !weekHours.isEmpty)
         default:
-            return extend(nil)
+            return (extend(nil), true)
         }
     }
 

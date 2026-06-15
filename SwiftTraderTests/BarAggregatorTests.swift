@@ -494,6 +494,34 @@ struct BarAggregatorTests {
         #expect(out.last?.partial == true)
     }
 
+    @Test("Cold-start under-seed heals: forming Daily opens on the session open once the source loads")
+    func dailyColdStartUnderSeedHealsOnSourceLoad() {
+        // Repro of the AUDUSD live-Daily gap: app launched at the session open (Mon 00:00 ET),
+        // when the cached 1H only reached Friday. The forming Daily bucket (label Mon Apr 15) is
+        // then built from ONLY the live partial — opening high off the prior close, a phantom gap.
+        let dailyLabel = timeMs(nyDate(2024, 4, 15, 0, 0))   // session Sun 17 ET → Mon 17 ET
+        let fridayBar  = hourly(2024, 4, 12, 16, open: 1.30, high: 1.31, low: 1.29, close: 1.30)
+        // Current forming 1H at the moment of the cold-start seed (price already ran up).
+        let formingNow = hourly(2024, 4, 15, 0, open: 1.40, high: 1.41, low: 1.39, close: 1.40, partial: true)
+
+        // Cold start: cached source = Friday only. The Monday bucket comes from just the partial.
+        let underSeeded = BarAggregator.aggregate(hourly: [fridayBar], openPartial: formingNow, target: .daily)
+        let badMonday = underSeeded.first { $0.time == dailyLabel }
+        #expect(badMonday?.open == 1.40)   // wrong: opened on the live partial, not the session
+
+        // Source loads: the session's earlier 1H bars (Sun 17:00 ET reopen onward) are now cached.
+        let sessionOpenBar = hourly(2024, 4, 14, 17, open: 1.305, high: 1.32, low: 1.30, close: 1.31)
+        let sessionMidBar  = hourly(2024, 4, 14, 20, open: 1.31, high: 1.33, low: 1.305, close: 1.32)
+        let healed = BarAggregator.aggregate(
+            hourly: [fridayBar, sessionOpenBar, sessionMidBar], openPartial: formingNow, target: .daily
+        )
+        let goodMonday = healed.first { $0.time == dailyLabel }
+        #expect(goodMonday?.open == 1.305)            // opens on the session's first 1H (≈ Friday close)
+        #expect(goodMonday?.high == 1.41)             // widest extreme across the session + forming bar
+        #expect(goodMonday?.low == 1.30)
+        #expect(goodMonday?.partial == true)
+    }
+
     @Test("All-stale inputs yield no bucket at the new bucket start")
     func stalePartialNeverReachesNewBucket() {
         // 4H bucket rolled at 21:00 ET; cached tail + partial all from the 17:00 bucket.
