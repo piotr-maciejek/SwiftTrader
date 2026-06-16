@@ -22,6 +22,7 @@ public actor DukascopySession {
         case notConnected
         case timedOut(String)
         case orderRejected(String, String?)
+        case invalidStops(String)
         case malformedResponse(String)
 
         public var description: String {
@@ -33,6 +34,7 @@ public actor DukascopySession {
             case .timedOut(let what): "\(what) timed out"
             case .orderRejected(let state, let reason):
                 "order rejected (\(state))" + (reason.map { ": \($0)" } ?? "")
+            case .invalidStops(let what): what
             case .malformedResponse(let what): "malformed response: \(what)"
             }
         }
@@ -1177,6 +1179,31 @@ public actor DukascopySession {
     /// `SessionError.orderRejected` on an explicit rejection (silence still returns
     /// success). Returns the `requestId` so the caller can correlate.
     /// `priceClient` is the current market price the user is acting on.
+    /// Last-resort guard against a stop-loss / take-profit on the wrong side of the entry.
+    /// Dukascopy does NOT reject such an order — it fills and the wrong-side protective leg
+    /// triggers on the same tick, opening and instantly closing the position (a real,
+    /// money-losing round-trip). Refuse to put it on the wire. `entry` is the order's
+    /// reference price (market price for a market order, trigger for a pending). Throws
+    /// `SessionError.invalidStops` describing the offending leg.
+    static func validateStops(side: String, entry: Double,
+                              stopLoss: BigDecimalValue?, takeProfit: BigDecimalValue?) throws {
+        let isBuy = side == "BUY"
+        if let sl = stopLoss?.doubleValue, sl > 0 {
+            let wrong = isBuy ? sl >= entry : sl <= entry
+            if wrong {
+                throw SessionError.invalidStops(
+                    "stop-loss must be \(isBuy ? "below" : "above") the entry for a \(side) order")
+            }
+        }
+        if let tp = takeProfit?.doubleValue, tp > 0 {
+            let wrong = isBuy ? tp <= entry : tp >= entry
+            if wrong {
+                throw SessionError.invalidStops(
+                    "take-profit must be \(isBuy ? "above" : "below") the entry for a \(side) order")
+            }
+        }
+    }
+
     @discardableResult
     public func submitMarketOrder(
         instrument: String, side: String, amount: BigDecimalValue,
@@ -1188,6 +1215,7 @@ public actor DukascopySession {
         if let priceClient { price = priceClient }
         else if let p = await currentPrice(instrument: instrument, buy: side == "BUY") { price = p }
         else { throw SessionError.timedOut("market: no price for \(instrument)") }
+        try Self.validateStops(side: side, entry: price.doubleValue, stopLoss: stopLoss, takeProfit: takeProfit)
         let reqId = UUID().uuidString
         let frame = encodeMarketOrderGroup(
             instrument: instrument, side: side, amount: amount, priceClient: price,
@@ -1218,6 +1246,8 @@ public actor DukascopySession {
         // (e.g. a quiet pair that wasn't subscribed) fall back to the trigger price so
         // the order isn't blocked — the trigger is what actually matters for a pending.
         let priceClient = await currentPrice(instrument: instrument, buy: side == "BUY") ?? triggerPrice
+        // A pending order's protective legs are relative to its trigger, not the current market.
+        try Self.validateStops(side: side, entry: triggerPrice.doubleValue, stopLoss: stopLoss, takeProfit: takeProfit)
         let reqId = UUID().uuidString
         let frame = encodePendingOrderGroup(
             instrument: instrument, side: side, kind: kind, amount: amount,

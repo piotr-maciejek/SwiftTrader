@@ -40,6 +40,10 @@ struct ChartView: View {
     /// Live bid-ask spread (price units) for the visual order's instrument. Padded into
     /// the displayed risk so the % matches the realized loss after the broker takes spread.
     var visualOrderSpread: Double = 0
+    /// Quote→account-currency conversion rate for the visual order's instrument (1 when the
+    /// quote currency IS the account currency). Without it the displayed money-risk on a
+    /// cross/JPY pair is overstated by ~the rate. nil → not streaming yet; default 1.
+    var visualOrderQuoteRate: Double = 1
     /// Show the live Bid / Ask / Spread readout under the ATR overlay. On for the main chart;
     /// off for the dense correlation / multi-timeframe grid cells.
     var showQuote: Bool = false
@@ -1404,8 +1408,7 @@ struct ChartView: View {
             context.draw(plusSymbol, at: CGPoint(x: plusRect.midX, y: plusRect.midY), anchor: .center)
         }
 
-        let realizedDistance = abs(order.entryPrice - order.stopLoss) + max(0, visualOrderSpread)
-        let riskMoney = order.amount * realizedDistance * 1_000_000
+        let riskMoney = order.riskMoney(spread: visualOrderSpread, quoteToAccountRate: visualOrderQuoteRate)
         var riskMoneyText = String(format: "Risk  %.0f", riskMoney)
         if let eq = accountEquity, eq > 0 {
             riskMoneyText += String(format: "  (%.1f%%)", (riskMoney / eq) * 100)

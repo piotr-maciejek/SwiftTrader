@@ -35,6 +35,17 @@ struct VisualOrderState: Equatable {
         return reward / risk
     }
 
+    /// Realized money risk at the stop, in the ACCOUNT currency. `amount` is in millions of
+    /// base units (0.01 = 10,000 units), so × 1,000,000 gives quote-currency loss per the
+    /// realized stop distance (chart distance + spread). `quoteToAccountRate` converts that
+    /// quote-currency loss to the account currency — it is 1 only when the quote currency IS
+    /// the account currency. WITHOUT it, a JPY-quoted pair overstates risk by ~the JPY rate
+    /// (≈185×). Mirrors the risk leg of `PositionSizing.calculate`.
+    func riskMoney(spread: Double, quoteToAccountRate: Double) -> Double {
+        let realizedDistance = abs(entryPrice - stopLoss) + max(0, spread)
+        return amount * realizedDistance * 1_000_000 * quoteToAccountRate
+    }
+
     /// Distance of entry from market, in pips (signed: positive = above market).
     var entryOffsetPips: Double {
         (entryPrice - marketPrice) * TradingDayATR.pipFactor(for: instrument)

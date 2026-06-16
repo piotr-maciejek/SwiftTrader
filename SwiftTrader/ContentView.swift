@@ -187,6 +187,17 @@ struct ContentView: View {
                                     metadata: workspace.positionMetadata)
                     }
                 }
+                // Order rejections / validation failures surface as a prominent toast at the top
+                // of the chart — where the eye is when placing an order — not just the easily-missed
+                // line in the bottom panel header.
+                .overlay(alignment: .top) {
+                    if let error = workspace.trading.orderError {
+                        OrderErrorToast(message: error) {
+                            withAnimation(.easeOut(duration: 0.2)) { workspace.trading.orderError = nil }
+                        }
+                    }
+                }
+                .animation(.spring(duration: 0.25), value: workspace.trading.orderError)
 
                 if workspace.showRightPanel {
                     Divider()
@@ -662,6 +673,7 @@ struct ContentView: View {
             },
             accountEquity: workspace.trading.account?.equity,
             visualOrderSpread: workspace.trading.spreads[vm.currentInstrument] ?? 0,
+            visualOrderQuoteRate: workspace.trading.quoteToAccountRate(for: vm.currentInstrument) ?? 1,
             showQuote: true,
             chartSide: vm.currentSide,
             showBidAskLines: vm.showBidAsk,
@@ -1023,4 +1035,41 @@ struct ContentView: View {
         }
     }
 
+}
+
+/// Prominent, auto-dismissing banner for an order rejection / validation failure. Slides in at
+/// the top of the chart and clears itself after ~6s (or on the ✕). Bound to `TradingViewModel.orderError`.
+private struct OrderErrorToast: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+            Text(message)
+                .font(.system(size: 12, weight: .medium))
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: 420)
+        .background(Color.red.opacity(0.95), in: RoundedRectangle(cornerRadius: 8))
+        .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
+        .padding(.top, 12)
+        .transition(.move(edge: .top).combined(with: .opacity))
+        // .task(id:) restarts the auto-dismiss timer whenever the message changes, so a fresh
+        // rejection gets its own full 6s rather than inheriting the previous one's remaining time.
+        .task(id: message) {
+            try? await Task.sleep(for: .seconds(6))
+            if !Task.isCancelled { onDismiss() }
+        }
+    }
 }

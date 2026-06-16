@@ -136,6 +136,19 @@ actor NativeTradingCoordinator: TradingCoordinating {
               let gid = group.orderGroupId, let inst = group.instrument else {
             throw NativeTradingError.notSupported("modifying SL/TP for unknown order \(label)")
         }
+        // Last-resort wrong-side guard for resting pending orders (mirrors the VM guard). A protective
+        // leg on the wrong side of the trigger fills + stops out on the same tick. Validated against the
+        // order's own trigger, so it holds for BUY/SELL × LIMIT/STOP alike. Open positions are exempt.
+        if let opening = openingOrder(group), opening.state == "PENDING",
+           let entry = opening.priceStop?.doubleValue, entry > 0 {
+            let side = opening.side ?? "BUY", isBuy = (opening.side ?? "BUY") == "BUY"
+            if stopLoss > 0, isBuy ? stopLoss >= entry : stopLoss <= entry {
+                throw NativeTradingError.notSupported("stop-loss must be \(isBuy ? "below" : "above") the entry for a \(side) order")
+            }
+            if takeProfit > 0, isBuy ? takeProfit <= entry : takeProfit >= entry {
+                throw NativeTradingError.notSupported("take-profit must be \(isBuy ? "above" : "below") the entry for a \(side) order")
+            }
+        }
         let scale = inst.contains("JPY") ? 3 : 5
         let st = protective(group)
         let slChanged = priceDiffers(stopLoss, st.slPrice, scale: scale)
@@ -183,6 +196,16 @@ actor NativeTradingCoordinator: TradingCoordinating {
               let opening = openingOrder(group), opening.state == "PENDING",
               let orderId = opening.orderId else {
             throw NativeTradingError.notSupported("modifying entry price for unknown pending order \(label)")
+        }
+        // Last-resort guard: the new trigger must keep the resting SL/TP on the correct side
+        // (mirrors the VM guard — a trigger dragged past its own stop fills + stops out at once).
+        let (sl, tp) = stopLossTakeProfit(group)
+        let side = opening.side ?? "BUY", isBuy = (opening.side ?? "BUY") == "BUY"
+        if sl > 0, isBuy ? sl >= newTriggerPrice : sl <= newTriggerPrice {
+            throw NativeTradingError.notSupported("entry must keep the stop-loss \(isBuy ? "below" : "above") it for a \(side) order")
+        }
+        if tp > 0, isBuy ? tp <= newTriggerPrice : tp >= newTriggerPrice {
+            throw NativeTradingError.notSupported("entry must keep the take-profit \(isBuy ? "above" : "below") it for a \(side) order")
         }
         let scale = inst.contains("JPY") ? 3 : 5
         let isLimit = orderType(side: opening.side ?? "BUY", stopDirection: opening.stopDirection).hasSuffix("LIMIT")

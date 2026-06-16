@@ -53,8 +53,15 @@ final class FakeTradingCoordinator: TradingCoordinating, @unchecked Sendable {
 
     func closeOrder(label: String) async throws {}
 
+    var modifyCallCount = 0
     func modifyOrder(label: String, stopLoss: Double, takeProfit: Double) async throws -> Position {
-        try submitResult.get()
+        modifyCallCount += 1
+        return try submitResult.get()
+    }
+
+    var modifyEntryCallCount = 0
+    func modifyPendingEntry(label: String, newTriggerPrice: Double) async throws {
+        modifyEntryCallCount += 1
     }
 
     func streamSnapshots() -> AsyncThrowingStream<TradingSnapshot, Error> {
@@ -380,5 +387,169 @@ struct PendingOrdersStreamTests {
         #expect(vm.pendingOrders.first?.orderType == "BUY_STOP")
 
         vm.stop()
+    }
+}
+
+@Suite("Order price (SL/TP side) validation")
+struct OrderPriceValidationTests {
+    private typealias VM = TradingViewModel
+
+    @Test("Valid BUY: SL below, TP above entry → no error")
+    func validBuy() {
+        #expect(VM.orderPriceError(direction: "BUY", entryPrice: 1.1000,
+                                   stopLoss: 1.0950, takeProfit: 1.1150) == nil)
+    }
+
+    @Test("Valid SELL: SL above, TP below entry → no error")
+    func validSell() {
+        #expect(VM.orderPriceError(direction: "SELL", entryPrice: 1.1000,
+                                   stopLoss: 1.1050, takeProfit: 1.0850) == nil)
+    }
+
+    @Test("BUY with SL above entry (the bug) → error")
+    func buyWrongSideSL() {
+        let err = VM.orderPriceError(direction: "BUY", entryPrice: 1.1000,
+                                     stopLoss: 1.1050, takeProfit: 1.1150)
+        #expect(err != nil)
+        #expect(err?.contains("Stop-loss") == true)
+    }
+
+    @Test("BUY with TP below entry → error")
+    func buyWrongSideTP() {
+        let err = VM.orderPriceError(direction: "BUY", entryPrice: 1.1000,
+                                     stopLoss: 1.0950, takeProfit: 1.0900)
+        #expect(err?.contains("Take-profit") == true)
+    }
+
+    @Test("SELL with SL below entry → error")
+    func sellWrongSideSL() {
+        let err = VM.orderPriceError(direction: "SELL", entryPrice: 1.1000,
+                                     stopLoss: 1.0950, takeProfit: 1.0850)
+        #expect(err?.contains("Stop-loss") == true)
+    }
+
+    @Test("SL/TP of 0 means unset → always allowed")
+    func zeroStopsAllowed() {
+        #expect(VM.orderPriceError(direction: "BUY", entryPrice: 1.1000,
+                                   stopLoss: 0, takeProfit: 0) == nil)
+    }
+
+    @Test("SL exactly at entry is rejected (degenerate, instant stop-out)")
+    func slAtEntryRejected() {
+        #expect(VM.orderPriceError(direction: "BUY", entryPrice: 1.1000,
+                                   stopLoss: 1.1000, takeProfit: 1.1150) != nil)
+    }
+
+    @Test("No entry price (0) → cannot validate, allow through")
+    func noEntryAllows() {
+        #expect(VM.orderPriceError(direction: "BUY", entryPrice: 0,
+                                   stopLoss: 1.1050, takeProfit: 1.0900) == nil)
+    }
+}
+
+/// The modify path (drag a resting order's SL/TP) must run the same wrong-side guard as submit —
+/// Dukascopy does NOT reject a pending order whose protective leg is on the wrong side of the
+/// trigger; it fills and stops out on the same tick. Open positions are exempt (break-even/trailing).
+@Suite("Modify-path wrong-side guard")
+@MainActor
+struct ModifyGuardTests {
+    private func pending(_ dir: String, type: String, entry: Double,
+                         sl: Double = 0, tp: Double = 0) -> PendingOrder {
+        PendingOrder(label: "ST_AUDCAD_1", instrument: "AUDCAD", direction: dir,
+                     amount: 0.01, openPrice: entry, stopLoss: sl, takeProfit: tp,
+                     state: "PENDING", orderType: type, groupId: "G1")
+    }
+
+    @Test("BUY LIMIT modified so SL sits above trigger (the bug) → blocked, coordinator not called")
+    func buyLimitWrongSideSL() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        vm.pendingOrders = [pending("BUY", type: "BUY_LIMIT", entry: 0.98930)]
+        await vm.modifyPosition(label: "ST_AUDCAD_1", stopLoss: 0.98942, takeProfit: 0.99184)
+        #expect(vm.orderError?.contains("Stop-loss") == true)
+        #expect(fake.modifyCallCount == 0)
+    }
+
+    @Test("SELL STOP modified so SL sits below trigger → blocked")
+    func sellStopWrongSideSL() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        vm.pendingOrders = [pending("SELL", type: "SELL_STOP", entry: 1.2000)]
+        await vm.modifyPosition(label: "ST_AUDCAD_1", stopLoss: 1.1950, takeProfit: 1.1900)
+        #expect(vm.orderError?.contains("Stop-loss") == true)
+        #expect(fake.modifyCallCount == 0)
+    }
+
+    @Test("Valid pending modify → passes through to the coordinator")
+    func validModifyProceeds() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        vm.pendingOrders = [pending("BUY", type: "BUY_LIMIT", entry: 0.98930)]
+        await vm.modifyPosition(label: "ST_AUDCAD_1", stopLoss: 0.98800, takeProfit: 0.99184)
+        #expect(vm.orderError == nil)
+        #expect(fake.modifyCallCount == 1)
+    }
+
+    @Test("Matches the order by groupId too (SL/TP edits route via groupId)")
+    func matchesByGroupId() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        vm.pendingOrders = [pending("BUY", type: "BUY_LIMIT", entry: 0.98930)]
+        await vm.modifyPosition(label: "G1", stopLoss: 0.98942, takeProfit: 0.99184)
+        #expect(vm.orderError?.contains("Stop-loss") == true)
+        #expect(fake.modifyCallCount == 0)
+    }
+
+    @Test("Open position (no matching pending) is exempt — a break-even SL above entry passes")
+    func openPositionExempt() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        // No pending order with this label → treated as an open position, guard does not apply.
+        await vm.modifyPosition(label: "FILLED_POS_9", stopLoss: 1.1050, takeProfit: 1.1200)
+        #expect(vm.orderError == nil)
+        #expect(fake.modifyCallCount == 1)
+    }
+
+    // Entry-drag path: moving the trigger past the resting SL/TP is the same wrong-side hazard
+    // reached from the other side (a BUY STOP whose entry slides below its SL).
+
+    @Test("BUY STOP entry dragged below its resting SL → blocked, coordinator not called")
+    func buyStopEntryBelowSL() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        vm.pendingOrders = [pending("BUY", type: "BUY_STOP", entry: 0.99076, sl: 0.99054, tp: 0.99232)]
+        await vm.modifyPendingEntry(label: "ST_AUDCAD_1", trigger: 0.99017) // now below SL
+        #expect(vm.orderError?.contains("Stop-loss") == true)
+        #expect(fake.modifyEntryCallCount == 0)
+    }
+
+    @Test("SELL STOP entry dragged above its resting SL → blocked")
+    func sellStopEntryAboveSL() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        vm.pendingOrders = [pending("SELL", type: "SELL_STOP", entry: 1.2000, sl: 1.2050, tp: 1.1900)]
+        await vm.modifyPendingEntry(label: "ST_AUDCAD_1", trigger: 1.2070) // now above SL
+        #expect(vm.orderError?.contains("Stop-loss") == true)
+        #expect(fake.modifyEntryCallCount == 0)
+    }
+
+    @Test("Entry dragged past the resting TP is also blocked")
+    func entryPastTP() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        vm.pendingOrders = [pending("BUY", type: "BUY_LIMIT", entry: 0.98930, sl: 0.98800, tp: 0.99184)]
+        await vm.modifyPendingEntry(label: "ST_AUDCAD_1", trigger: 0.99200) // now above TP
+        #expect(vm.orderError?.contains("Take-profit") == true)
+        #expect(fake.modifyEntryCallCount == 0)
+    }
+
+    @Test("Valid entry move (stays between SL and TP) → passes through to the coordinator")
+    func validEntryMoveProceeds() async {
+        let fake = FakeTradingCoordinator()
+        let vm = TradingViewModel(coordinator: fake)
+        vm.pendingOrders = [pending("BUY", type: "BUY_STOP", entry: 0.99076, sl: 0.99000, tp: 0.99232)]
+        await vm.modifyPendingEntry(label: "ST_AUDCAD_1", trigger: 0.99050) // still above SL, below TP
+        #expect(vm.orderError == nil)
+        #expect(fake.modifyEntryCallCount == 1)
     }
 }

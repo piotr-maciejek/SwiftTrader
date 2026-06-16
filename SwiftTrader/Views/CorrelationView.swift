@@ -215,6 +215,7 @@ struct CorrelationView: View {
                 },
                 accountEquity: trading.account?.equity,
                 visualOrderSpread: trading.spreads[instrument] ?? 0,
+                visualOrderQuoteRate: trading.quoteToAccountRate(for: instrument) ?? 1,
                 chartSide: vm.currentSide,
                 showBidAskLines: vm.showBidAsk,
                 isSubmittingOrder: trading.isSubmitting,
