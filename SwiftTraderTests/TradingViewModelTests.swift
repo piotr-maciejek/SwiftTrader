@@ -382,3 +382,60 @@ struct PendingOrdersStreamTests {
         vm.stop()
     }
 }
+
+@Suite("Order price (SL/TP side) validation")
+struct OrderPriceValidationTests {
+    private typealias VM = TradingViewModel
+
+    @Test("Valid BUY: SL below, TP above entry → no error")
+    func validBuy() {
+        #expect(VM.orderPriceError(direction: "BUY", entryPrice: 1.1000,
+                                   stopLoss: 1.0950, takeProfit: 1.1150) == nil)
+    }
+
+    @Test("Valid SELL: SL above, TP below entry → no error")
+    func validSell() {
+        #expect(VM.orderPriceError(direction: "SELL", entryPrice: 1.1000,
+                                   stopLoss: 1.1050, takeProfit: 1.0850) == nil)
+    }
+
+    @Test("BUY with SL above entry (the bug) → error")
+    func buyWrongSideSL() {
+        let err = VM.orderPriceError(direction: "BUY", entryPrice: 1.1000,
+                                     stopLoss: 1.1050, takeProfit: 1.1150)
+        #expect(err != nil)
+        #expect(err?.contains("Stop-loss") == true)
+    }
+
+    @Test("BUY with TP below entry → error")
+    func buyWrongSideTP() {
+        let err = VM.orderPriceError(direction: "BUY", entryPrice: 1.1000,
+                                     stopLoss: 1.0950, takeProfit: 1.0900)
+        #expect(err?.contains("Take-profit") == true)
+    }
+
+    @Test("SELL with SL below entry → error")
+    func sellWrongSideSL() {
+        let err = VM.orderPriceError(direction: "SELL", entryPrice: 1.1000,
+                                     stopLoss: 1.0950, takeProfit: 1.0850)
+        #expect(err?.contains("Stop-loss") == true)
+    }
+
+    @Test("SL/TP of 0 means unset → always allowed")
+    func zeroStopsAllowed() {
+        #expect(VM.orderPriceError(direction: "BUY", entryPrice: 1.1000,
+                                   stopLoss: 0, takeProfit: 0) == nil)
+    }
+
+    @Test("SL exactly at entry is rejected (degenerate, instant stop-out)")
+    func slAtEntryRejected() {
+        #expect(VM.orderPriceError(direction: "BUY", entryPrice: 1.1000,
+                                   stopLoss: 1.1000, takeProfit: 1.1150) != nil)
+    }
+
+    @Test("No entry price (0) → cannot validate, allow through")
+    func noEntryAllows() {
+        #expect(VM.orderPriceError(direction: "BUY", entryPrice: 0,
+                                   stopLoss: 1.1050, takeProfit: 1.0900) == nil)
+    }
+}

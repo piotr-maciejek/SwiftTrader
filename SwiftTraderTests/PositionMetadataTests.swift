@@ -325,7 +325,10 @@ struct PositionMetadataTests {
         // First submit: press 1.1000. Second: press 1.2000. FIFO → first capture binds to first new id.
         vm.visualOrders["EURUSD"] = marketOrder()
         await vm.confirmVisualOrder(instrument: "EURUSD", livePrice: 1.1000)
+        // Second press is up at 1.2000 — move its SL/TP to the correct side of that entry too,
+        // else the wrong-side-stop guard (correctly) rejects it before it can bind.
         var second = marketOrder(); second.entryPrice = 1.2000; second.marketPrice = 1.2000
+        second.stopLoss = 1.1990; second.takeProfit = 1.2030
         vm.visualOrders["EURUSD"] = second
         await vm.confirmVisualOrder(instrument: "EURUSD", livePrice: 1.2000)
 

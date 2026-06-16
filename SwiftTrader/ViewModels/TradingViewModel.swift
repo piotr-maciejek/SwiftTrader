@@ -188,6 +188,26 @@ final class TradingViewModel {
         visualOrders[instrument]
     }
 
+    /// Reject an order whose stop-loss / take-profit sits on the wrong side of the entry,
+    /// BEFORE it reaches the broker. Dukascopy does not reject such an order — it fills and
+    /// the wrong-side leg triggers on the same tick, opening and instantly closing the
+    /// position (a real money-losing round-trip that shows up in trade history). Returns a
+    /// user-facing message for the offending leg, or nil when the order is valid. SL/TP of 0
+    /// means "not set" and is always allowed. `DukascopySession.validateStops` enforces the
+    /// same rule as a last-resort net at the wire.
+    nonisolated static func orderPriceError(direction: String, entryPrice: Double,
+                                            stopLoss: Double, takeProfit: Double) -> String? {
+        guard entryPrice > 0 else { return nil }
+        let isBuy = direction == "BUY"
+        if stopLoss > 0, isBuy ? stopLoss >= entryPrice : stopLoss <= entryPrice {
+            return "Stop-loss must be \(isBuy ? "below" : "above") the entry for a \(direction)."
+        }
+        if takeProfit > 0, isBuy ? takeProfit <= entryPrice : takeProfit >= entryPrice {
+            return "Take-profit must be \(isBuy ? "above" : "below") the entry for a \(direction)."
+        }
+        return nil
+    }
+
     func visualOrderWithLivePrice(for instrument: String, currentPrice: Double?, barCount: Int) -> VisualOrderState? {
         guard var order = visualOrders[instrument], let price = currentPrice else {
             return visualOrders[instrument]
@@ -260,6 +280,14 @@ final class TradingViewModel {
         isSubmitting = true
         defer { isSubmitting = false }
         orderError = nil
+        // Block a wrong-side SL/TP before it reaches the broker. `order.entryPrice` is the
+        // live re-sized price for MARKET (above) or the trigger for LIMIT/STOP; keep the box
+        // up so the user can drag the offending leg back and retry.
+        if let priceError = Self.orderPriceError(direction: order.direction, entryPrice: order.entryPrice,
+                                                 stopLoss: order.stopLoss, takeProfit: order.takeProfit) {
+            orderError = priceError
+            return
+        }
         // Snapshot the press-time market price + initial SL/TP for R-multiple & slippage. The press
         // price must be the REAL live tick on the SAME side as the fill, so slippage measures
         // execution drift and not the bid-ask spread: a BUY fills at the ASK, a SELL at the BID. Pull
