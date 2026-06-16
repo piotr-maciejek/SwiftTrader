@@ -371,6 +371,16 @@ final class TradingViewModel {
     }
 
     func modifyPosition(label: String, stopLoss: Double, takeProfit: Double) async {
+        // Wrong-side guard for resting pending orders (BUY/SELL × LIMIT/STOP): a protective leg
+        // on the wrong side of the trigger fills and stops out on the same tick. Validated against
+        // the order's own trigger, so it holds regardless of where the trigger sits vs the market.
+        // Open positions are exempt — an SL beyond the entry is a legitimate break-even/trailing stop.
+        if let pending = pendingOrders.first(where: { $0.label == label || $0.groupId == label }),
+           let priceError = Self.orderPriceError(direction: pending.direction, entryPrice: pending.openPrice,
+                                                 stopLoss: stopLoss, takeProfit: takeProfit) {
+            orderError = priceError
+            return
+        }
         do {
             _ = try await coordinator.modifyOrder(label: label, stopLoss: stopLoss, takeProfit: takeProfit)
         } catch {
@@ -381,6 +391,15 @@ final class TradingViewModel {
     /// Amend a resting pending order's entry/trigger price (drag of its entry line). SL/TP edits go
     /// through `modifyPosition` with the pending order's groupId, which `modifyOrder` already handles.
     func modifyPendingEntry(label: String, trigger: Double) async {
+        // Moving the trigger can shove it past the order's resting SL/TP — the same wrong-side
+        // hazard reached from the entry side (a BUY STOP whose entry slides below its SL fills and
+        // stops out on the same tick). Validate the NEW trigger against the existing SL/TP.
+        if let pending = pendingOrders.first(where: { $0.label == label || $0.groupId == label }),
+           let priceError = Self.orderPriceError(direction: pending.direction, entryPrice: trigger,
+                                                 stopLoss: pending.stopLoss, takeProfit: pending.takeProfit) {
+            orderError = priceError
+            return
+        }
         do {
             try await coordinator.modifyPendingEntry(label: label, newTriggerPrice: trigger)
         } catch {
