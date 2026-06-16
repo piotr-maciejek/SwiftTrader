@@ -385,3 +385,42 @@ struct VisualOrderPanelPlacementTests {
         #expect(r.maxY <= 500 - 4)
     }
 }
+
+@Suite("Visual order risk money (account-currency conversion)")
+struct VisualOrderRiskMoneyTests {
+
+    @Test("Same-currency quote (rate 1): risk is amount × distance × 1e6")
+    func sameCurrencyRisk() {
+        // EURUSD on a USD account: 0.018M units, 50-pip stop (0.0050), no spread.
+        let order = VisualOrderState(direction: "BUY", instrument: "EURUSD", entryPrice: 1.1000,
+                                     marketPrice: 1.1000, amount: 0.018, stopLoss: 1.0950,
+                                     takeProfit: 1.1150, startBarIndex: 1, endBarIndex: 11)
+        let risk = order.riskMoney(spread: 0, quoteToAccountRate: 1)
+        #expect(abs(risk - 0.018 * 0.0050 * 1_000_000) < 1e-6)   // = 90 USD
+    }
+
+    @Test("JPY quote on EUR account: converted by the JPY→EUR rate (the bug)")
+    func jpyQuoteConverted() {
+        // EURJPY, 0.018M units, ~7.1-pip stop (0.071), EUR account. Quote (JPY) risk must be
+        // multiplied by ~1/185 to land in EUR — matching the live diagnostic (≈€7.8, not ≈1440).
+        let order = VisualOrderState(direction: "BUY", instrument: "EURJPY", entryPrice: 185.521,
+                                     marketPrice: 185.521, amount: 0.018, stopLoss: 185.450,
+                                     takeProfit: 185.734, startBarIndex: 1, endBarIndex: 11)
+        let rate = 0.005390   // JPY→EUR
+        let quoteRisk = order.riskMoney(spread: 0.009, quoteToAccountRate: 1)
+        let acctRisk = order.riskMoney(spread: 0.009, quoteToAccountRate: rate)
+        #expect(abs(quoteRisk - acctRisk / rate) < 1e-3)        // conversion is the only difference
+        #expect(acctRisk > 5 && acctRisk < 10)                  // ≈ €7.8, not ≈ 1440
+        #expect(quoteRisk > 1000)                               // the un-converted (buggy) figure
+    }
+
+    @Test("Spread widens the realized risk")
+    func spreadPadsRisk() {
+        let order = VisualOrderState(direction: "SELL", instrument: "EURUSD", entryPrice: 1.1000,
+                                     marketPrice: 1.1000, amount: 0.01, stopLoss: 1.1050,
+                                     takeProfit: 1.0900, startBarIndex: 1, endBarIndex: 11)
+        let noSpread = order.riskMoney(spread: 0, quoteToAccountRate: 1)
+        let withSpread = order.riskMoney(spread: 0.0002, quoteToAccountRate: 1)
+        #expect(withSpread > noSpread)
+    }
+}

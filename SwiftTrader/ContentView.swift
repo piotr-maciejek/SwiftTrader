@@ -673,6 +673,7 @@ struct ContentView: View {
             },
             accountEquity: workspace.trading.account?.equity,
             visualOrderSpread: workspace.trading.spreads[vm.currentInstrument] ?? 0,
+            visualOrderQuoteRate: workspace.trading.quoteToAccountRate(for: vm.currentInstrument) ?? 1,
             showQuote: true,
             chartSide: vm.currentSide,
             showBidAskLines: vm.showBidAsk,
