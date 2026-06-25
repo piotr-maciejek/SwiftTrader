@@ -42,9 +42,11 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     /// authoritative OHLC instead of being derived from our cached 1m bars.
     private let inProgressStore = InProgressStore()
     private let inProgressTtl: TimeInterval = 30
-    /// Min spacing between cold-start re-seed attempts for a forming derived bar (see the
-    /// heal in `rawCandleStream`). A safety throttle only — the heal latches off the moment
-    /// the cached source covers the bucket, so this just bounds the brief pre-load window.
+    /// Min spacing between re-seed attempts for a forming bar (see `rawCandleStream`). The
+    /// re-seed refreshes the bar's authoritative cumulative volume for its whole life and,
+    /// while still cold, heals a derived bar's OHLC `open`. A safety throttle: `seedLiveBucket`
+    /// is tail-capped and raw periods just read the TTL-cached in-progress snapshot, so the
+    /// steady-state cost is a snapshot read every interval — no full re-aggregation.
     private static let liveReseedInterval: TimeInterval = 2
     /// Fills deep history for all pairs in the background, one idle-gated request at a
     /// time. Only present with a live session (a real `rawFetch`); nil for tests.
@@ -264,28 +266,30 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
                             high: max(c.high, bid), low: min(c.low, bid),
                             close: bid, volume: c.volume, partial: true
                         )
-                        // Cold-start heal. A derived bar (Daily/4H/Weekly/grid) seeded before its
-                        // aggregation source had loaded — e.g. launching at the session open, when
-                        // the cached 1H for the live Daily candle only reached Friday — opens on just
-                        // the live partial: wrong open/volume, a phantom gap off the prior close. The
-                        // seed never self-corrects (within a bucket it's only tick-extended), so
-                        // re-seed (throttled) until the cached source covers the bucket, then adopt the
-                        // authoritative open/volume while keeping the widest extremes ticks have shown.
-                        // Latches off once anchored, so steady state costs nothing.
-                        if !fullySeeded, nowDate.timeIntervalSince(lastReseed) >= Self.liveReseedInterval {
+                        // Throttled re-seed, serving two jobs. (1) VOLUME: the tick extend above
+                        // can't accumulate volume (FX ticks carry only a price), so without this the
+                        // forming bar's volume stays frozen at its open value — 0 for a freshly-opened
+                        // raw bucket, since the server's in-progress 1m/10s bucket is all-zero until the
+                        // first tick lands. The re-seed pulls the server's authoritative cumulative
+                        // volume so the live volume bar grows through the bar's whole life. (2) COLD-START
+                        // OHLC HEAL: a derived bar (Daily/4H/Weekly/grid) seeded before its aggregation
+                        // source loaded opens on just the live partial — wrong open, a phantom gap off the
+                        // prior close — and self-corrects here once the cached source covers the bucket.
+                        // Volume adoption runs for the bucket's life; the OHLC `open` adoption latches off
+                        // once anchored (see `mergeReseededForming`). Stays cheap: throttled to
+                        // `liveReseedInterval`, and `seedLiveBucket` is tail-capped (raw periods are a
+                        // TTL-cached snapshot read).
+                        if nowDate.timeIntervalSince(lastReseed) >= Self.liveReseedInterval {
                             lastReseed = nowDate
                             let re = await self.seedLiveBucket(
                                 instrument: instrument, period: period, bucketMs: bucketMs, bid: bid, side: side
                             )
-                            if re.anchored, re.bar.time == bucketMs, re.bar.open > 0 {
-                                extended = SwiftTrader.CandleBar(
-                                    time: bucketMs, open: re.bar.open,
-                                    high: max(extended.high, re.bar.high),
-                                    low: min(extended.low, re.bar.low),
-                                    close: bid, volume: re.bar.volume, partial: true
-                                )
-                                fullySeeded = true
-                            }
+                            let merged = Self.mergeReseededForming(
+                                extended: extended, reseed: re.bar, anchored: re.anchored,
+                                bucketMs: bucketMs, fullySeeded: fullySeeded
+                            )
+                            extended = merged.bar
+                            fullySeeded = merged.fullySeeded
                         }
                         current = extended
                     } else {
@@ -979,6 +983,43 @@ final class NativeMarketDataCoordinator: MarketDataProviding, Sendable {
     static func inProgressSeed(_ partial: SwiftTrader.CandleBar?, bucketMs: Int64) -> SwiftTrader.CandleBar? {
         guard let p = partial, p.time == bucketMs else { return nil }
         return p
+    }
+
+    /// Fold a throttled re-seed into the tick-extended forming bar. The seed's `volume`
+    /// is the server's authoritative cumulative in-progress volume for the bucket, so it
+    /// is ALWAYS adopted — that's what keeps the live volume bar growing through the bar's
+    /// whole life (the in-progress 1m/10s bucket comes back all-zero until the first tick,
+    /// so a freshly-opened raw bar would otherwise stay pinned at volume 0). The
+    /// authoritative `open` and seed extremes are adopted only on the ONE-SHOT cold-start
+    /// heal (while `!fullySeeded`); after that `open` is left alone and only `volume` keeps
+    /// refreshing. `close` and the widest tick-driven `high`/`low` always come from
+    /// `extended`. Returns the merged bar plus the (possibly newly latched) `fullySeeded`.
+    static func mergeReseededForming(
+        extended: SwiftTrader.CandleBar, reseed: SwiftTrader.CandleBar,
+        anchored: Bool, bucketMs: Int64, fullySeeded: Bool
+    ) -> (bar: SwiftTrader.CandleBar, fullySeeded: Bool) {
+        guard anchored, reseed.time == bucketMs, reseed.open > 0 else {
+            return (extended, fullySeeded)
+        }
+        var open = extended.open
+        var high = extended.high
+        var low = extended.low
+        var latched = fullySeeded
+        if !fullySeeded {
+            // Cold-start heal: adopt the authoritative open and widen extremes once.
+            open = reseed.open
+            high = max(extended.high, reseed.high)
+            low = min(extended.low, reseed.low)
+            latched = true
+        }
+        let merged = SwiftTrader.CandleBar(
+            time: bucketMs, open: open, high: high, low: low,
+            close: extended.close,
+            // Cumulative in-progress volume is monotonic within a bucket; `max` guards
+            // against a transient down-flicker from a racing snapshot refresh.
+            volume: max(extended.volume, reseed.volume), partial: true
+        )
+        return (merged, latched)
     }
 
     /// A CLOSED aggregated bucket is "complete" (safe to persist) only when the source has a bar at
