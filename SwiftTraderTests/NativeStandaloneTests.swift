@@ -471,6 +471,86 @@ struct InProgressSeedTests {
     }
 }
 
+@Suite("Live forming-bar volume refresh")
+struct MergeReseededFormingTests {
+    private let bucket: Int64 = 11 * 3_600_000
+
+    private func bar(
+        _ t: Int64, open: Double = 1.0, high: Double = 1.0, low: Double = 1.0,
+        close: Double = 1.0, volume: Double
+    ) -> SwiftTrader.CandleBar {
+        SwiftTrader.CandleBar(time: t, open: open, high: high, low: low, close: close, volume: volume, partial: true)
+    }
+
+    @Test("refreshes volume after the OHLC latch — the frozen-volume bug")
+    func refreshesVolumeWhenAnchored() {
+        let extended = bar(bucket, open: 0.71, high: 0.72, low: 0.70, close: 0.715, volume: 100)
+        let reseed = bar(bucket, open: 0.71, high: 0.72, low: 0.70, close: 0.715, volume: 1234)
+        let (merged, latched) = NativeMarketDataCoordinator.mergeReseededForming(
+            extended: extended, reseed: reseed, anchored: true, bucketMs: bucket, fullySeeded: true)
+        #expect(merged.volume == 1234)        // adopted from the authoritative seed
+        #expect(merged.open == 0.71)          // OHLC untouched once anchored
+        #expect(merged.high == 0.72)
+        #expect(merged.low == 0.70)
+        #expect(merged.close == 0.715)
+        #expect(latched == true)
+    }
+
+    @Test("cold-start heal adopts the authoritative open and widens extremes once")
+    func coldStartHealAdoptsOpen() {
+        // Live bar opened on just the tick (phantom open 0.715); seed has the true open 0.700.
+        let extended = bar(bucket, open: 0.715, high: 0.716, low: 0.715, close: 0.7155, volume: 0)
+        let reseed = bar(bucket, open: 0.700, high: 0.718, low: 0.699, close: 0.7155, volume: 555)
+        let (merged, latched) = NativeMarketDataCoordinator.mergeReseededForming(
+            extended: extended, reseed: reseed, anchored: true, bucketMs: bucket, fullySeeded: false)
+        #expect(merged.open == 0.700)                 // authoritative open adopted
+        #expect(merged.high == 0.718)                 // widened to the seed's high
+        #expect(merged.low == 0.699)                  // widened to the seed's low
+        #expect(merged.close == 0.7155)               // close stays from the tick-extended bar
+        #expect(merged.volume == 555)
+        #expect(latched == true)
+    }
+
+    @Test("a fresh-bucket all-zero-volume seed is accepted and latches")
+    func freshBucketZeroVolume() {
+        let extended = bar(bucket, open: 0.71, high: 0.71, low: 0.71, close: 0.71, volume: 0)
+        let reseed = bar(bucket, open: 0.71, high: 0.71, low: 0.71, close: 0.71, volume: 0)
+        let (merged, latched) = NativeMarketDataCoordinator.mergeReseededForming(
+            extended: extended, reseed: reseed, anchored: true, bucketMs: bucket, fullySeeded: false)
+        #expect(merged.volume == 0)
+        #expect(latched == true)
+    }
+
+    @Test("monotonic volume — a transient down-flicker from a racing snapshot is ignored")
+    func volumeNeverDecreases() {
+        let extended = bar(bucket, open: 0.71, high: 0.72, low: 0.70, close: 0.715, volume: 900)
+        let reseed = bar(bucket, open: 0.71, high: 0.72, low: 0.70, close: 0.715, volume: 800)
+        let (merged, _) = NativeMarketDataCoordinator.mergeReseededForming(
+            extended: extended, reseed: reseed, anchored: true, bucketMs: bucket, fullySeeded: true)
+        #expect(merged.volume == 900)
+    }
+
+    @Test("no adoption when not anchored, time-mismatched, or non-positive open")
+    func rejectsInvalidSeeds() {
+        let extended = bar(bucket, open: 0.71, high: 0.72, low: 0.70, close: 0.715, volume: 100)
+        let good = bar(bucket, open: 0.71, high: 0.72, low: 0.70, close: 0.715, volume: 1234)
+        // Not anchored.
+        let a = NativeMarketDataCoordinator.mergeReseededForming(
+            extended: extended, reseed: good, anchored: false, bucketMs: bucket, fullySeeded: true)
+        #expect(a.bar.volume == 100); #expect(a.fullySeeded == true)
+        // Seed belongs to a different bucket.
+        let stale = bar(10 * 3_600_000, open: 0.71, high: 0.72, low: 0.70, close: 0.715, volume: 1234)
+        let b = NativeMarketDataCoordinator.mergeReseededForming(
+            extended: extended, reseed: stale, anchored: true, bucketMs: bucket, fullySeeded: false)
+        #expect(b.bar.volume == 100); #expect(b.fullySeeded == false)
+        // Non-positive open (placeholder seed).
+        let zeroOpen = bar(bucket, open: 0, high: 0, low: 0, close: 0, volume: 1234)
+        let c = NativeMarketDataCoordinator.mergeReseededForming(
+            extended: extended, reseed: zeroOpen, anchored: true, bucketMs: bucket, fullySeeded: false)
+        #expect(c.bar.volume == 100); #expect(c.fullySeeded == false)
+    }
+}
+
 @Suite("Aggregated bucket completeness (never persist incomplete)")
 struct AggregatedBucketCompleteTests {
     private func ms(_ y: Int, _ mo: Int, _ d: Int, _ h: Int) -> Int64 {
